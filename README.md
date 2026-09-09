@@ -1,155 +1,153 @@
 # Ducke
 
 <p align="center">
-  <strong>Remote Game Repository Downloader & Steam Metadata Hub</strong><br>
-  <em>Designed for Handheld & Desktop PCs — Native Steam Deck / SteamOS 3.8+ Experience</em>
+  <strong>Менеджер удаленных игровых репозиториев и центр метаданных Steam</strong><br>
+  <em>Разработан для портативных и настольных ПК — нативная интеграция со Steam Deck и SteamOS 3.8+</em>
 </p>
 
 <p align="center">
-  <img src="build/appicon.png" alt="Ducke Icon" width="128" height="128" />
+  <img src="build/appicon.png" alt="Иконка Ducke" width="128" height="128" />
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%28SteamOS%29-blue" alt="Platforms" />
-  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go" alt="Go Version" />
-  <img src="https://img.shields.io/badge/Wails-v2-DF1A2A" alt="Wails Version" />
-  <img src="https://img.shields.io/badge/Frontend-Svelte%205%20%2B%20TypeScript%20%2B%20TailwindCSS-FF3E00?logo=svelte" alt="Frontend Stack" />
-  <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
+  <img src="https://img.shields.io/badge/Платформы-Windows%20%7C%20Linux%20%28SteamOS%29-blue" alt="Платформы" />
+  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go" alt="Go" />
+  <img src="https://img.shields.io/badge/Wails-v2-DF1A2A" alt="Wails" />
+  <img src="https://img.shields.io/badge/Фронтенд-Svelte%205%20%2B%20TypeScript%20%2B%20TailwindCSS-FF3E00?logo=svelte" alt="Фронтенд" />
+  <img src="https://img.shields.io/badge/Лицензия-MIT-green" alt="Лицензия" />
 </p>
 
 ---
 
-## Highlights
+## Основные возможности
 
-- **Dual UI Modes**:
-  - **Big Picture Mode**: 10-foot gamepad navigation tailored for Steam Deck, handheld consoles, and couch gaming (1280x800 native layout, sound effects, full D-pad / thumbstick control, SteamOS on-screen keyboard trigger).
-  - **Desktop Mode**: High-density master-detail catalog with fast searching, filtering, and multi-pane management.
-- **High-Performance Downloader**:
-  - Multi-threaded chunk transfers with pause/resume support.
-  - Bandwidth throttling (speed limiter) and concurrent file queuing.
-  - Real-time download metrics (transfer rate, ETA, disk allocation, buffer pool recycling).
-  - Protocol support: **SFTP (SSH)** and **FTP** with directory scanning and resume capability.
-- **Rich Steam & SteamGridDB Metadata Integration**:
-  - Automatic title cleaning and smart fuzzy matching against the Steam catalog.
-  - HD screenshots and interactive video trailer previews (HLS / DASH / MP4).
-  - Review scores, metacritic ratings, system requirements, genres, and release dates.
-  - High-res artwork from SteamGridDB (box art, wide hero banners, logos).
-- **FileZilla Import**:
-  - Seamlessly import server configurations from exported `FileZilla3.xml` files.
-- **SteamOS / Steam Deck Native Support**:
-  - Pre-configured Flatpak packaging with hardware video acceleration (`WebviewGpuPolicyAlways`).
-  - Native Gamescope & Wayland/X11 compatibility.
-  - MicroSD card and external drive detection.
-
----
-
-## Tech Stack
-
-- **Backend**: [Go](https://go.dev/) 1.25, [Wails v2](https://wails.io/), [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) (pure Go SQLite, zero CGO required on Windows).
-- **Frontend**: [Svelte 5](https://svelte.dev/), [TypeScript](https://www.typescriptlang.org/), [Vite](https://vitejs.dev/), [TailwindCSS v4](https://tailwindcss.com/), [Lucide Svelte](https://lucide.dev/).
-- **Protocols**: `golang.org/x/crypto/ssh`, `github.com/pkg/sftp`, `github.com/jlaffaye/ftp`.
+- **Два режима интерфейса**:
+  - **Big Picture (10-Foot Mode)**: Удобное управление с геймпада, оптимизированное для Steam Deck, портативных консолей и экранов ТВ. Поддерживает нативное разрешение 1280x800, звуковые эффекты навигации, управление стиками/крестовиной и автоматический вызов экранной клавиатуры SteamOS по нажатию `(X)`.
+  - **Классический вид (Desktop Mode)**: Двухпанельный каталог с мгновенным поиском, фильтрацией по жанрам и детальной информацией.
+- **Высокопроизводительный загрузчик**:
+  - Многопоточная загрузка фрагментов файлов с возможностью паузы и докачки.
+  - Ограничение скорости (Bandwidth Limiter) и очередь одновременных загрузок.
+  - Мониторинг скорости в реальном времени, расчет оставшегося времени (ETA), учет свободного места на диске и пул переиспользуемых буферов памяти.
+  - Поддержка протоколов **SFTP (SSH)** и **FTP** со сканированием каталогов и структурированием загрузки.
+- **Интеграция со Steam и SteamGridDB**:
+  - Автоматическая очистка названий релизов и интеллектуальный нечеткий поиск (fuzzy matching) по базе Steam.
+  - Загрузка скриншотов в высоком разрешении и встроенный плеер трейлеров (HLS / DASH / MP4).
+  - Отображение оценок Metacritic, отзывов игроков, системных требований, жанров и дат релизов.
+  - Качественные обложки со SteamGridDB (вертикальные постеры, горизонтальные баннеры, прозрачные логотипы).
+- **Импорт из FileZilla**:
+  - Быстрый импорт списка серверов из файла экспорта `FileZilla3.xml`.
+- **Полная поддержка SteamOS и Steam Deck**:
+  - Готовый Flatpak-манифест со встроенным аппаратным ускорением видео (`WebviewGpuPolicyAlways`).
+  - Совместимость с композитором Gamescope, Wayland и X11.
+  - Доступ к картам памяти MicroSD (`/run/media/...`), накопителям и системным папкам.
 
 ---
 
-## Project Structure
+## Стек технологий
+
+- **Бэкенд**: [Go](https://go.dev/) 1.25, [Wails v2](https://wails.io/), [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) (чистый Go SQLite без необходимости CGO на Windows).
+- **Фронтенд**: [Svelte 5](https://svelte.dev/), [TypeScript](https://www.typescriptlang.org/), [Vite](https://vitejs.dev/), [TailwindCSS v4](https://tailwindcss.com/), [Lucide Svelte](https://lucide.dev/).
+- **Сетевые протоколы**: `golang.org/x/crypto/ssh`, `github.com/pkg/sftp`, `github.com/jlaffaye/ftp`.
+
+---
+
+## Структура проекта
 
 ```
 Ducke/
-├── app.go                  # Wails application backend bindings & API bridge
-├── main.go                 # Application entrypoint & window configuration
-├── wails.json              # Wails project manifest
+├── app.go                  # Связующий слой Wails API между Go и Svelte
+├── main.go                 # Точка входа в приложение и параметры окна
+├── wails.json              # Конфигурационный манифест Wails
 ├── pkg/
-│   ├── config/             # App settings, server profiles, FileZilla XML parser
-│   ├── database/           # SQLite schema, games cache, download history
-│   ├── downloader/         # Transfer engine, queue, rate limiter, buffer pool
-│   ├── logger/             # Diagnostics logger
-│   ├── metadata/           # Steam Store API & SteamGridDB fetchers, title sanitizers
-│   └── remote/             # FTP and SFTP client connections and directory walkers
-├── frontend/               # Svelte 5 + TypeScript + Vite frontend
+│   ├── config/             # Настройки приложения, профили серверов, парсер FileZilla XML
+│   ├── database/           # SQLite база данных, кэш игр, история загрузок
+│   ├── downloader/         # Движок передачи файлов, очередь, лимитер скорости, пул буферов
+│   ├── logger/             # Логирование и системная диагностика
+│   ├── metadata/           # Клиенты Steam Store API и SteamGridDB, сопоставление названий
+│   └── remote/             # Клиенты подключения и обхода каталогов FTP/SFTP
+├── frontend/               # Фронтенд на Svelte 5 + TypeScript + Vite
 │   └── src/
-│       ├── lib/components/ # Views: Catalog, Detail, Downloads, Settings, Lightbox
-│       │   └── bigpicture/ # 10-foot Big Picture mode UI components
-│       └── lib/navigation/ # Gamepad navigation engine & sound feedback
-└── build/                  # Packaging & icons (Windows NSIS, Linux Flatpak, macOS)
-    └── linux/              # SteamOS scripts, Flatpak manifest, Desktop entry
+│       ├── lib/components/ # Представления: Каталог, Детали, Загрузки, Настройки
+│       │   └── bigpicture/ # Компоненты 10-футового режима Big Picture
+│       └── lib/navigation/ # Движок управления геймпадом и звуковая обратная связь
+└── build/                  # Сборочные скрипты и манифесты (Windows NSIS, Linux Flatpak, macOS)
+    └── linux/              # Скрипты SteamOS, Flatpak манифест, .desktop файл
 ```
 
 ---
 
-## Getting Started & Development
+## Требования для разработки
 
-### Prerequisites
-
-1. **Go**: Version 1.22+ (recommended 1.24 or 1.25)
-2. **Node.js**: Version 18+ and npm
+1. **Go**: версия 1.22+ (рекомендуется 1.24 или 1.25)
+2. **Node.js**: версия 18+ и пакетный менеджер npm
 3. **Wails CLI**:
    ```bash
    go install github.com/wailsapp/wails/v2/cmd/wails@latest
    ```
 
-### Running in Live Development Mode
+### Запуск в режиме разработки (Live Dev)
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/ducke.git
+# Клонируйте репозиторий
+git clone https://github.com/<ваш-логин>/ducke.git
 cd ducke
 
-# Run with hot reload (Vite + Go live reload)
+# Запуск с горячей перезагрузкой (Vite HMR + пересборка Go)
 wails dev
 ```
 
 ---
 
-## Building
+## Сборка релизных версий
 
-### Windows Binary / Installer
+### Сборка под Windows (EXE)
 
 ```bash
-# Compile optimized Windows executable (AMD64)
+# Сборка оптимизированного исполняемого файла под Windows AMD64
 wails build -platform windows/amd64
 
-# Output located at:
+# Собранный файл будет находиться в:
 # build/bin/Ducke.exe
 ```
 
-### Linux & Steam Deck (Flatpak Bundle)
+### Сборка под Linux и Steam Deck (Flatpak)
 
-To build a standalone Flatpak bundle (`Ducke.flatpak`) and native binary on Windows using WSL (Ubuntu 22.04):
+Для автоматической сборки Flatpak-пакета (`Ducke.flatpak`) и бинарника на Windows через WSL (Ubuntu 22.04):
 
 ```cmd
-# Run the automated build script
+# Запуск автоматического сборочного скрипта
 build_linux.bat
 ```
 
-Or on a Linux system with `flatpak-builder` and `webkit2gtk-4.1` installed:
+Либо напрямую в окружении Linux с установленными `flatpak-builder` и `webkit2gtk-4.1`:
 
 ```bash
 chmod +x build_linux.sh
 ./build_linux.sh
 ```
 
-The resulting files will be generated in `build/bin/`:
-- `Ducke.flatpak`: Ready-to-install bundle for SteamOS / Flathub runtime.
-- `Ducke`: Native Linux AMD64 binary.
-- `install_steamdeck.sh`: One-click installer helper for Steam Deck Desktop Mode.
+Готовые файлы появятся в директории `build/bin/`:
+- `Ducke.flatpak` — автономный установочный пакет для SteamOS / Flathub runtime.
+- `Ducke` — нативный исполняемый файл Linux AMD64.
+- `install_steamdeck.sh` — скрипт установки в один клик для рабочего стола Steam Deck (Desktop Mode).
 
-See [build/linux/README_STEAM_OS.md](build/linux/README_STEAM_OS.md) for detailed SteamOS installation and Steam Game Mode integration instructions.
+Подробная инструкция по установке и добавлению в игровой режим SteamOS доступна в файле [build/linux/README_STEAM_OS.md](build/linux/README_STEAM_OS.md).
 
 ---
 
-## Running Tests
+## Тестирование
 
 ```bash
-# Run all Go unit and integration tests
+# Запуск Go тестов
 go test ./...
 
-# Typecheck frontend
+# Проверка типов фронтенда
 cd frontend
 npm run check
 ```
 
 ---
 
-## License
+## Лицензия
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Проект распространяется под свободной лицензией MIT. Подробности см. в файле [LICENSE](LICENSE).
