@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Ducke
+Comment=Remote Game Repository Downloader & Steam Metadata Hub
+Exec=Ducke
+Icon=com.ducke.Ducke
+Terminal=false
+Type=Application
+Categories=Game;Network;FileTransfer;
+StartupWMClass=Ducke
+PrefersNonDefaultGPU=true
+X-KDE-SubstituteUID=false

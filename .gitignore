@@ -1,0 +1,65 @@
+# ====================================================================
+# Ducke - Git Ignore Configuration
+# ====================================================================
+
+# Wails binaries and build output
+build/bin/*
+!build/bin/.gitkeep
+
+# Executables & libraries
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+*.test
+*.out
+*.prof
+
+# Flatpak & Linux packaging temporary files
+.flatpak-builder/
+build/linux/flatpak/.flatpak-builder/
+_build/
+
+# Node.js & Frontend dependencies/dist
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/package.json.md5
+.npm/
+.eslintcache
+.vite-temp/
+
+# Application runtime database & logs
+*.db
+*.sqlite
+ducke.db
+gamevault.db
+ducke_settings.json
+*.log
+test_*.json
+
+# Environment variables & local secrets
+.env
+.env.*
+*.local
+
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# IDE & Editor settings
+.idea/
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/extensions.json

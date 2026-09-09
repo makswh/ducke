@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.ducke.Ducke</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Ducke</name>
+  <summary>Remote Game Repository Downloader &amp; Steam Metadata Hub</summary>
+  <description>
+    <p>
+      Ducke is a modern, responsive game library manager and remote repository downloader
+      designed for desktop and handheld gaming PCs like the Steam Deck.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.ducke.Ducke.desktop</launchable>
+  <provides>
+    <binary>Ducke</binary>
+  </provides>
+  <categories>
+    <category>Game</category>
+    <category>Network</category>
+    <category>FileTransfer</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+</component>
