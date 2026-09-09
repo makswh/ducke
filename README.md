@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="build/appicon.png" alt="Иконка Ducke" width="128" height="128" />
+  <img src="frontend/src/assets/images/logo-universal.png" alt="Иконка Ducke" width="128" height="128" />
 </p>
 
 <p align="center">
@@ -131,7 +131,7 @@ chmod +x build_linux.sh
 - `Ducke` — нативный исполняемый файл Linux AMD64.
 - `install_steamdeck.sh` — скрипт установки в один клик для рабочего стола Steam Deck (Desktop Mode).
 
-Подробная инструкция по установке и добавлению в игровой режим SteamOS доступна в файле [build/linux/README_STEAM_OS.md](build/linux/README_STEAM_OS.md).
+Подробная инструкция по установке и добавлению в игровой режим SteamOS доступна в файле [docs/STEAM_OS.md](docs/STEAM_OS.md).
 
 ---
 

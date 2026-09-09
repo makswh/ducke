@@ -2,9 +2,11 @@
 # Ducke - Git Ignore Configuration
 # ====================================================================
 
-# Wails binaries and build output
-build/bin/*
-!build/bin/.gitkeep
+# Build & packaging directories
+build/
+
+# Agents configuration
+.agents/
 
 # Executables & libraries
 *.exe
@@ -19,7 +21,6 @@ build/bin/*
 
 # Flatpak & Linux packaging temporary files
 .flatpak-builder/
-build/linux/flatpak/.flatpak-builder/
 _build/
 
 # Node.js & Frontend dependencies/dist
@@ -61,5 +62,5 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 *~
-.vscode/*
-!.vscode/extensions.json
+.vscode/
+**/.vscode/
