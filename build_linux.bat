@@ -19,14 +19,14 @@ if %ERRORLEVEL% neq 0 (
 )
 
 cd /d "%SCRIPT_DIR%"
-echo.
 echo [2/3] Resolving WSL environment...
-for /f "usebackq tokens=*" %%i in (`wsl.exe -d Ubuntu-22.04 wslpath -u "%SCRIPT_DIR%"`) do set "WSL_PROJECT_DIR=%%i"
+set "FORWARD_DIR=%SCRIPT_DIR:\=/%"
+for /f "usebackq tokens=*" %%i in (`wsl.exe -d Ubuntu-22.04 wslpath -u "!FORWARD_DIR!"`) do set "WSL_PROJECT_DIR=%%i"
 
-if "%WSL_PROJECT_DIR%"=="" (
+if not defined WSL_PROJECT_DIR (
     echo.
     echo [-] Error: Failed to resolve WSL path for "%SCRIPT_DIR%".
-    echo     Please verify that WSL (Ubuntu-22.04) is installed and operational.
+    echo     Please verify that WSL is installed and operational.
     exit /b 1
 )
 
