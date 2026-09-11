@@ -39,6 +39,10 @@ type DownloadProgressEvent struct {
 	TotalFiles       int            `json:"totalFiles"`
 	LocalPath        string         `json:"localPath"`
 	ErrorMessage     string         `json:"errorMessage,omitempty"`
+	IsTorrent        bool           `json:"isTorrent"`
+	MagnetURI        string         `json:"magnetUri,omitempty"`
+	TorrentSeeds     int            `json:"torrentSeeds"`
+	TorrentPeers     int            `json:"torrentPeers"`
 }
 
 type DownloadTask struct {
@@ -53,6 +57,12 @@ type DownloadTask struct {
 	DownloadedBytes atomic.Int64
 	Status          DownloadStatus
 	ErrorMessage    string
+
+	// Torrent fields
+	IsTorrent    bool
+	MagnetURI    string
+	TorrentSeeds int
+	TorrentPeers int
 
 	// Runtime metrics
 	speedBytesPerSec atomic.Int64
@@ -124,5 +134,10 @@ func (t *DownloadTask) ToEvent() DownloadProgressEvent {
 		TotalFiles:       t.totalFiles,
 		LocalPath:        t.LocalPath,
 		ErrorMessage:     t.ErrorMessage,
+		IsTorrent:        t.IsTorrent,
+		MagnetURI:        t.MagnetURI,
+		TorrentSeeds:     t.TorrentSeeds,
+		TorrentPeers:     t.TorrentPeers,
 	}
 }
+

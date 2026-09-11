@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,14 +18,15 @@ import (
 
 // DownloadManager coordinates tasks, concurrency, rate limiting, and progress telemetry
 type DownloadManager struct {
-	db         *database.Database
-	cfgManager *config.ConfigManager
-	tasks      map[string]*DownloadTask
-	tasksMu    sync.RWMutex
-	queue      *QueueController
-	onEvent    func(event DownloadProgressEvent)
-	ticker     *time.Ticker
-	stopTicker chan struct{}
+	db            *database.Database
+	cfgManager    *config.ConfigManager
+	tasks         map[string]*DownloadTask
+	tasksMu       sync.RWMutex
+	queue         *QueueController
+	onEvent       func(event DownloadProgressEvent)
+	torrentEngine *TorrentEngine
+	ticker        *time.Ticker
+	stopTicker    chan struct{}
 }
 
 // NewDownloadManager creates a manager, restores incomplete tasks from SQLite, and starts telemetry
@@ -33,13 +35,20 @@ func NewDownloadManager(
 	cfgManager *config.ConfigManager,
 	onEvent func(event DownloadProgressEvent),
 ) *DownloadManager {
+	settings := cfgManager.GetSettings()
+	te, err := NewTorrentEngine(settings.DownloadPath, settings.MaxSpeedKBps)
+	if err != nil {
+		log.Printf("[Downloader] Warning: failed to init torrent engine: %v", err)
+	}
+
 	dm := &DownloadManager{
-		db:         db,
-		cfgManager: cfgManager,
-		tasks:      make(map[string]*DownloadTask),
-		queue:      NewQueueController(1), // Default: 1 active game downloading at a time (Steam-style)
-		onEvent:    onEvent,
-		stopTicker: make(chan struct{}),
+		db:            db,
+		cfgManager:    cfgManager,
+		tasks:         make(map[string]*DownloadTask),
+		queue:         NewQueueController(1), // Default: 1 active game downloading at a time (Steam-style)
+		onEvent:       onEvent,
+		torrentEngine: te,
+		stopTicker:    make(chan struct{}),
 	}
 
 	// Restore incomplete tasks from database on launch
@@ -69,6 +78,8 @@ func NewDownloadManager(
 					IsDirectory:    isDir,
 					TotalBytes:     rec.TotalBytes,
 					Status:         StatusPaused,
+					IsTorrent:      rec.IsTorrent,
+					MagnetURI:      rec.MagnetURI,
 					lastSampleTime: time.Now(),
 				}
 				task.DownloadedBytes.Store(rec.DownloadedBytes)
@@ -121,6 +132,25 @@ func (dm *DownloadManager) calculateSpeedAndEmit() {
 		task.mu.RUnlock()
 
 		if isActive {
+			if task.IsTorrent && dm.torrentEngine != nil {
+				if t, ok := dm.torrentEngine.GetTorrent(task.ID); ok && t != nil {
+					stats := t.Stats()
+					task.mu.Lock()
+					task.TorrentSeeds = stats.ConnectedSeeders
+					task.TorrentPeers = stats.ActivePeers
+					if task.TorrentPeers == 0 && stats.TotalPeers > 0 {
+						task.TorrentPeers = stats.TotalPeers
+					}
+					if task.Status == StatusDownloading {
+						bytes := t.BytesCompleted()
+						task.DownloadedBytes.Store(bytes)
+						if t.Length() > 0 && task.TotalBytes != t.Length() {
+							task.TotalBytes = t.Length()
+						}
+					}
+					task.mu.Unlock()
+				}
+			}
 			UpdateTaskMetrics(task, now)
 			eventsToEmit = append(eventsToEmit, task.ToEvent())
 		}
@@ -214,6 +244,80 @@ func (dm *DownloadManager) StartDownload(gameID int64, destinationPath string) (
 	return downloadID, nil
 }
 
+// StartTorrentDownload enqueues a torrent download task
+func (dm *DownloadManager) StartTorrentDownload(game database.GameEntity, destinationPath string) (string, error) {
+	magnetURI := game.MagnetURI
+	if magnetURI == "" && strings.HasPrefix(game.RemotePath, "magnet:") {
+		magnetURI = game.RemotePath
+	}
+	if magnetURI == "" {
+		return "", fmt.Errorf("torrent game has no magnet URI")
+	}
+
+	settings := dm.cfgManager.GetSettings()
+	if destinationPath == "" {
+		destinationPath = settings.DownloadPath
+	}
+
+	if fi, err := os.Stat(destinationPath); err == nil && !fi.IsDir() {
+		destinationPath = config.GetDefaultDownloadPath()
+	}
+
+	// Disk space check
+	free, _, err := GetDiskSpace(destinationPath)
+	if err == nil && game.SizeBytes > 0 && free > 0 && free < game.SizeBytes {
+		return "", fmt.Errorf("недостаточно места на диске: требуется %s, доступно %s", FormatBytes(game.SizeBytes), FormatBytes(free))
+	}
+
+	downloadID := uuid.New().String()
+	targetLocalPath := filepath.Join(destinationPath, game.CleanTitle)
+
+	bg := game.BackgroundImage
+	if bg == "" {
+		bg = game.HeaderImage
+	}
+	if bg == "" {
+		bg = game.CapsuleImage
+	}
+
+	task := &DownloadTask{
+		ID:             downloadID,
+		GameID:         game.ID,
+		GameTitle:      game.CleanTitle,
+		CoverImage:     bg,
+		RemotePath:     magnetURI,
+		LocalPath:      targetLocalPath,
+		TotalBytes:     game.SizeBytes,
+		Status:         StatusQueued,
+		IsTorrent:      true,
+		MagnetURI:      magnetURI,
+		lastSampleTime: time.Now(),
+	}
+
+	dm.tasksMu.Lock()
+	dm.tasks[downloadID] = task
+	dm.tasksMu.Unlock()
+
+	_ = dm.db.SaveDownloadRecord(database.DownloadRecord{
+		ID:              downloadID,
+		GameID:          game.ID,
+		GameTitle:       game.CleanTitle,
+		RemotePath:      magnetURI,
+		LocalPath:       targetLocalPath,
+		TotalBytes:      game.SizeBytes,
+		DownloadedBytes: 0,
+		Status:          string(StatusQueued),
+		IsTorrent:       true,
+		MagnetURI:       magnetURI,
+	})
+
+	log.Printf("[Downloader] Torrent task enqueued: \"%s\" [ID: %s]", game.CleanTitle, downloadID)
+	dm.emitTaskEvent(task)
+	dm.processQueue()
+
+	return downloadID, nil
+}
+
 // processQueue checks for available download slots and dispatches the next queued game
 func (dm *DownloadManager) processQueue() {
 	dm.tasksMu.Lock()
@@ -235,10 +339,187 @@ func (dm *DownloadManager) processQueue() {
 	}
 
 	if queuedTask != nil && dm.queue.CanStartNext(activeCount) {
-		settings := dm.cfgManager.GetSettings()
-		if settings.ActiveServer != nil {
-			log.Printf("[Downloader] Queue manager: starting next game \"%s\"", queuedTask.GameTitle)
-			go dm.executeDownload(queuedTask, *settings.ActiveServer)
+		if queuedTask.IsTorrent {
+			log.Printf("[Downloader] Queue manager: starting next torrent \"%s\"", queuedTask.GameTitle)
+			go dm.executeTorrentDownload(queuedTask)
+		} else {
+			settings := dm.cfgManager.GetSettings()
+			if settings.ActiveServer != nil {
+				log.Printf("[Downloader] Queue manager: starting next game \"%s\"", queuedTask.GameTitle)
+				go dm.executeDownload(queuedTask, *settings.ActiveServer)
+			}
+		}
+	}
+}
+
+// executeTorrentDownload handles torrent lifecycle and piece downloads
+func (dm *DownloadManager) executeTorrentDownload(task *DownloadTask) {
+	log.Printf("[Downloader] [%s] Initializing BitTorrent download (Magnet: %s)...", task.GameTitle, task.MagnetURI)
+
+	task.mu.Lock()
+	task.Status = StatusScanning
+	task.ErrorMessage = ""
+	ctx, cancel := context.WithCancel(context.Background())
+	task.cancelCtx = ctx
+	task.cancelFunc = cancel
+	task.mu.Unlock()
+
+	dm.emitTaskEvent(task)
+
+	defer func() {
+		task.mu.RLock()
+		status := task.Status
+		errMsg := task.ErrorMessage
+		task.mu.RUnlock()
+
+		_ = dm.db.SaveDownloadRecord(database.DownloadRecord{
+			ID:              task.ID,
+			GameID:          task.GameID,
+			GameTitle:       task.GameTitle,
+			RemotePath:      task.RemotePath,
+			LocalPath:       task.LocalPath,
+			TotalBytes:      task.TotalBytes,
+			DownloadedBytes: task.DownloadedBytes.Load(),
+			Status:          string(status),
+			ErrorMessage:    errMsg,
+			IsTorrent:       true,
+			MagnetURI:       task.MagnetURI,
+		})
+
+		dm.emitTaskEvent(task)
+		dm.processQueue() // Auto-start next queued game
+	}()
+
+	if dm.torrentEngine == nil {
+		task.mu.Lock()
+		task.Status = StatusFailed
+		task.ErrorMessage = "BitTorrent engine not initialized"
+		task.mu.Unlock()
+		return
+	}
+
+	destDir := filepath.Dir(task.LocalPath)
+	t, err := dm.torrentEngine.AddMagnet(task.ID, task.MagnetURI, destDir)
+	if err != nil {
+		task.mu.Lock()
+		task.Status = StatusFailed
+		task.ErrorMessage = fmt.Sprintf("failed to add torrent: %v", err)
+		task.mu.Unlock()
+		return
+	}
+
+	// 1. Resolve metadata (Scanning phase)
+	scanTicker := time.NewTicker(2 * time.Second)
+	defer scanTicker.Stop()
+
+scanLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.GotInfo():
+			log.Printf("[Downloader] [%s] Torrent metadata resolved: %s (Length: %s)",
+				task.GameTitle, t.Name(), FormatBytes(t.Length()))
+			break scanLoop
+		case <-scanTicker.C:
+			stats := t.Stats()
+			task.mu.Lock()
+			task.TorrentSeeds = stats.ConnectedSeeders
+			task.TorrentPeers = stats.ActivePeers
+			if task.TorrentPeers == 0 && stats.TotalPeers > 0 {
+				task.TorrentPeers = stats.TotalPeers
+			}
+			task.mu.Unlock()
+			dm.emitTaskEvent(task)
+			log.Printf("[Downloader] [%s] Resolving torrent metadata... (Peers: %d, Seeders: %d)",
+				task.GameTitle, task.TorrentPeers, task.TorrentSeeds)
+		}
+	}
+
+	actualTorrentPath := filepath.Join(destDir, t.Name())
+	task.mu.Lock()
+	if task.Status != StatusScanning && task.Status != StatusQueued {
+		task.mu.Unlock()
+		return
+	}
+	task.Status = StatusDownloading
+	task.LocalPath = actualTorrentPath
+	if t.Length() > 0 {
+		task.TotalBytes = t.Length()
+	}
+	task.mu.Unlock()
+
+	_ = dm.db.SaveDownloadRecord(database.DownloadRecord{
+		ID:              task.ID,
+		GameID:          task.GameID,
+		GameTitle:       task.GameTitle,
+		RemotePath:      task.RemotePath,
+		LocalPath:       actualTorrentPath,
+		TotalBytes:      task.TotalBytes,
+		DownloadedBytes: task.DownloadedBytes.Load(),
+		Status:          string(StatusDownloading),
+		IsTorrent:       true,
+		MagnetURI:       task.MagnetURI,
+	})
+
+	dm.emitTaskEvent(task)
+
+	// 2. Verify existing on-disk pieces against piece-completion DB.
+	//    This re-hashes data already downloaded in a prior session and marks those
+	//    pieces complete so DownloadAll() only fetches what is genuinely missing.
+	log.Printf("[Downloader] [%s] Verifying existing data before download...", task.GameTitle)
+	if err := t.VerifyDataContext(ctx); err != nil {
+		// Non-fatal: verification cancelled (e.g. user paused) or not supported.
+		// Just proceed – the library will re-download any unconfirmed pieces.
+		if ctx.Err() != nil {
+			return
+		}
+		log.Printf("[Downloader] [%s] Piece verification warning: %v (continuing)", task.GameTitle, err)
+	}
+	// Update UI with bytes already confirmed complete after verification
+	if verified := t.BytesCompleted(); verified > 0 {
+		task.DownloadedBytes.Store(verified)
+		dm.emitTaskEvent(task)
+		log.Printf("[Downloader] [%s] Verification complete: %s already on disk", task.GameTitle, FormatBytes(verified))
+	}
+
+	// 3. Start piece downloads (only missing pieces will be fetched)
+	t.DownloadAll()
+
+	// 4. Monitor progress & completion
+	completeFlag := t.Complete()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("[Downloader] [%s] Torrent download context stopped with status %s", task.GameTitle, task.Status)
+			return
+		case <-completeFlag.On():
+			task.mu.Lock()
+			task.Status = StatusCompleted
+			task.LocalPath = actualTorrentPath
+			task.DownloadedBytes.Store(task.TotalBytes)
+			task.speedBytesPerSec.Store(0)
+			task.smoothedSpeed = 0
+			task.mu.Unlock()
+			log.Printf("[Downloader] [%s] Torrent download completed successfully! Total: %s",
+				task.GameTitle, FormatBytes(task.TotalBytes))
+			return
+		case <-ticker.C:
+			if completeFlag.Bool() || (t.BytesCompleted() >= t.Length() && t.Length() > 0) {
+				task.mu.Lock()
+				task.Status = StatusCompleted
+				task.LocalPath = actualTorrentPath
+				task.DownloadedBytes.Store(task.TotalBytes)
+				task.speedBytesPerSec.Store(0)
+				task.smoothedSpeed = 0
+				task.mu.Unlock()
+				log.Printf("[Downloader] [%s] Torrent download completed successfully! Total: %s",
+					task.GameTitle, FormatBytes(task.TotalBytes))
+				return
+			}
 		}
 	}
 }
@@ -334,6 +615,9 @@ func (dm *DownloadManager) PauseDownload(downloadID string) error {
 		if task.cancelFunc != nil {
 			task.cancelFunc()
 		}
+		if task.IsTorrent && dm.torrentEngine != nil {
+			dm.torrentEngine.PauseTorrent(downloadID)
+		}
 	}
 	task.mu.Unlock()
 
@@ -349,6 +633,8 @@ func (dm *DownloadManager) PauseDownload(downloadID string) error {
 		TotalBytes:      task.TotalBytes,
 		DownloadedBytes: task.DownloadedBytes.Load(),
 		Status:          string(StatusPaused),
+		IsTorrent:       task.IsTorrent,
+		MagnetURI:       task.MagnetURI,
 	})
 
 	dm.emitTaskEvent(task)
@@ -388,6 +674,8 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 					IsDirectory:    isDir,
 					TotalBytes:     rec.TotalBytes,
 					Status:         StatusQueued,
+					IsTorrent:      rec.IsTorrent,
+					MagnetURI:      rec.MagnetURI,
 					lastSampleTime: time.Now(),
 				}
 				task.DownloadedBytes.Store(rec.DownloadedBytes)
@@ -442,6 +730,9 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 			if other.cancelFunc != nil {
 				other.cancelFunc()
 			}
+			if other.IsTorrent && dm.torrentEngine != nil {
+				dm.torrentEngine.PauseTorrent(other.ID)
+			}
 		}
 		other.mu.Unlock()
 
@@ -456,6 +747,8 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 			TotalBytes:      other.TotalBytes,
 			DownloadedBytes: other.DownloadedBytes.Load(),
 			Status:          string(StatusPaused),
+			IsTorrent:       other.IsTorrent,
+			MagnetURI:       other.MagnetURI,
 		})
 		dm.emitTaskEvent(other)
 	}
@@ -468,16 +761,23 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 
 	dm.emitTaskEvent(task)
 
-	settings := dm.cfgManager.GetSettings()
-	if settings.ActiveServer != nil {
-		go dm.executeDownload(task, *settings.ActiveServer)
+	if task.IsTorrent {
+		if dm.torrentEngine != nil {
+			dm.torrentEngine.ResumeTorrent(task.ID)
+		}
+		go dm.executeTorrentDownload(task)
 	} else {
-		task.mu.Lock()
-		task.Status = StatusFailed
-		task.ErrorMessage = "No active FTP/SFTP server configured"
-		task.mu.Unlock()
-		log.Printf("[Downloader] ERROR: [%s] Cannot resume: no active FTP/SFTP server configured", task.GameTitle)
-		dm.emitTaskEvent(task)
+		settings := dm.cfgManager.GetSettings()
+		if settings.ActiveServer != nil {
+			go dm.executeDownload(task, *settings.ActiveServer)
+		} else {
+			task.mu.Lock()
+			task.Status = StatusFailed
+			task.ErrorMessage = "No active FTP/SFTP server configured"
+			task.mu.Unlock()
+			log.Printf("[Downloader] ERROR: [%s] Cannot resume: no active FTP/SFTP server configured", task.GameTitle)
+			dm.emitTaskEvent(task)
+		}
 	}
 
 	return nil
@@ -500,6 +800,9 @@ func (dm *DownloadManager) CancelDownload(downloadID string) error {
 	if task.cancelFunc != nil {
 		task.cancelFunc()
 	}
+	if task.IsTorrent && dm.torrentEngine != nil {
+		dm.torrentEngine.PurgeState(downloadID)
+	}
 	task.mu.Unlock()
 
 	log.Printf("[Downloader] [%s] Download cancelled by user", task.GameTitle)
@@ -513,6 +816,8 @@ func (dm *DownloadManager) CancelDownload(downloadID string) error {
 		TotalBytes:      task.TotalBytes,
 		DownloadedBytes: task.DownloadedBytes.Load(),
 		Status:          string(StatusCancelled),
+		IsTorrent:       task.IsTorrent,
+		MagnetURI:       task.MagnetURI,
 	})
 
 	dm.emitTaskEvent(task)
@@ -610,6 +915,9 @@ func (dm *DownloadManager) DeleteTask(downloadID string, removeFiles bool) error
 		if task.cancelFunc != nil {
 			task.cancelFunc()
 		}
+		if task.IsTorrent && dm.torrentEngine != nil {
+			dm.torrentEngine.PurgeState(downloadID)
+		}
 		delete(dm.tasks, downloadID)
 	}
 	dm.tasksMu.Unlock()
@@ -646,7 +954,20 @@ func (dm *DownloadManager) UpdateSpeedLimit(kbps int) {
 		log.Printf("[Downloader] Speed limit updated: %s", FormatSpeed(int64(kbps)*1024))
 	}
 
+	if dm.torrentEngine != nil {
+		dm.torrentEngine.SetSpeedLimit(kbps)
+	}
+
 	for _, task := range dm.tasks {
 		task.SetSpeedLimit(kbps)
 	}
 }
+
+// Shutdown stops telemetry and cleanly closes the torrent engine
+func (dm *DownloadManager) Shutdown() {
+	close(dm.stopTicker)
+	if dm.torrentEngine != nil {
+		_ = dm.torrentEngine.Close()
+	}
+}
+

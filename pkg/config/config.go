@@ -47,17 +47,28 @@ type ServerConfig struct {
 	IsActive  bool   `json:"isActive"`
 }
 
+// TorrentSourceConfig represents a remote Hydra-style torrent source list
+type TorrentSourceConfig struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	Enabled    bool   `json:"enabled"`
+	ItemCount  int    `json:"itemCount"`
+	LastSynced int64  `json:"lastSynced"`
+}
+
 // AppSettings contains global user preferences
 type AppSettings struct {
-	DownloadPath       string         `json:"downloadPath"`
-	MaxConcurrentFiles int            `json:"maxConcurrentFiles"`
-	MaxSpeedKBps       int            `json:"maxSpeedKBps"` // 0 = unlimited
-	Theme              string         `json:"theme"`        // "dark" or "light"
-	SteamDeckMode      bool           `json:"steamDeckMode"`
-	SteamApiKey        string         `json:"steamApiKey"` // Optional Steam Web API key
-	EnableLogs         bool           `json:"enableLogs"`  // Toggle system diagnostics logging
-	ActiveServer       *ServerConfig  `json:"activeServer,omitempty"`
-	SavedServers       []ServerConfig `json:"savedServers"`
+	DownloadPath       string                `json:"downloadPath"`
+	MaxConcurrentFiles int                   `json:"maxConcurrentFiles"`
+	MaxSpeedKBps       int                   `json:"maxSpeedKBps"` // 0 = unlimited
+	Theme              string                `json:"theme"`        // "dark" or "light"
+	SteamDeckMode      bool                  `json:"steamDeckMode"`
+	SteamApiKey        string                `json:"steamApiKey"` // Optional Steam Web API key
+	EnableLogs         bool                  `json:"enableLogs"`  // Toggle system diagnostics logging
+	ActiveServer       *ServerConfig         `json:"activeServer,omitempty"`
+	SavedServers       []ServerConfig        `json:"savedServers"`
+	TorrentSources     []TorrentSourceConfig `json:"torrentSources"`
 }
 
 // Sanitize cleans and normalizes all settings, ensuring valid defaults
@@ -94,17 +105,21 @@ func (s *AppSettings) Sanitize() {
 		s.Theme = "dark"
 	}
 
-	// Sanitize saved servers
+	// Sanitize saved servers (filter out empty hosts)
+	validServers := make([]ServerConfig, 0, len(s.SavedServers))
 	for i := range s.SavedServers {
-		srv := &s.SavedServers[i]
+		srv := s.SavedServers[i]
+		srv.Host = strings.TrimSpace(srv.Host)
+		if srv.Host == "" {
+			continue
+		}
 		if srv.ID == "" {
-			srv.ID = fmt.Sprintf("srv_%d", i+1)
+			srv.ID = fmt.Sprintf("srv_%d", len(validServers)+1)
 		}
 		srv.Name = strings.TrimSpace(srv.Name)
 		if srv.Name == "" {
 			srv.Name = srv.Host
 		}
-		srv.Host = strings.TrimSpace(srv.Host)
 		srv.User = strings.TrimSpace(srv.User)
 		srv.RemoteDir = cleanRemotePath(srv.RemoteDir)
 		srv.Protocol = strings.ToLower(strings.TrimSpace(srv.Protocol))
@@ -118,43 +133,57 @@ func (s *AppSettings) Sanitize() {
 				srv.Port = 2022
 			}
 		}
+		validServers = append(validServers, srv)
 	}
+	s.SavedServers = validServers
 
 	// Keep ActiveServer and SavedServers in sync
 	if s.ActiveServer != nil {
-		s.ActiveServer.Name = strings.TrimSpace(s.ActiveServer.Name)
 		s.ActiveServer.Host = strings.TrimSpace(s.ActiveServer.Host)
-		s.ActiveServer.User = strings.TrimSpace(s.ActiveServer.User)
-		s.ActiveServer.RemoteDir = cleanRemotePath(s.ActiveServer.RemoteDir)
-		s.ActiveServer.Protocol = strings.ToLower(strings.TrimSpace(s.ActiveServer.Protocol))
-		if s.ActiveServer.Protocol != "ftp" && s.ActiveServer.Protocol != "sftp" {
-			s.ActiveServer.Protocol = "sftp"
-		}
-		if s.ActiveServer.Port <= 0 {
-			if s.ActiveServer.Protocol == "ftp" {
-				s.ActiveServer.Port = 21
+		if s.ActiveServer.Host == "" {
+			if len(s.SavedServers) > 0 {
+				act := s.SavedServers[0]
+				s.ActiveServer = &act
 			} else {
-				s.ActiveServer.Port = 2022
+				s.ActiveServer = nil
 			}
-		}
-		if s.ActiveServer.ID == "" {
-			s.ActiveServer.ID = "srv_1"
-		}
-		s.ActiveServer.IsActive = true
+		} else {
+			s.ActiveServer.Name = strings.TrimSpace(s.ActiveServer.Name)
+			if s.ActiveServer.Name == "" {
+				s.ActiveServer.Name = s.ActiveServer.Host
+			}
+			s.ActiveServer.User = strings.TrimSpace(s.ActiveServer.User)
+			s.ActiveServer.RemoteDir = cleanRemotePath(s.ActiveServer.RemoteDir)
+			s.ActiveServer.Protocol = strings.ToLower(strings.TrimSpace(s.ActiveServer.Protocol))
+			if s.ActiveServer.Protocol != "ftp" && s.ActiveServer.Protocol != "sftp" {
+				s.ActiveServer.Protocol = "sftp"
+			}
+			if s.ActiveServer.Port <= 0 {
+				if s.ActiveServer.Protocol == "ftp" {
+					s.ActiveServer.Port = 21
+				} else {
+					s.ActiveServer.Port = 2022
+				}
+			}
+			if s.ActiveServer.ID == "" {
+				s.ActiveServer.ID = "srv_1"
+			}
+			s.ActiveServer.IsActive = true
 
-		// Find in SavedServers or add
-		found := false
-		for i := range s.SavedServers {
-			if s.SavedServers[i].ID == s.ActiveServer.ID {
-				s.SavedServers[i] = *s.ActiveServer
-				s.SavedServers[i].IsActive = true
-				found = true
-			} else {
-				s.SavedServers[i].IsActive = false
+			// Find in SavedServers or add
+			found := false
+			for i := range s.SavedServers {
+				if s.SavedServers[i].ID == s.ActiveServer.ID {
+					s.SavedServers[i] = *s.ActiveServer
+					s.SavedServers[i].IsActive = true
+					found = true
+				} else {
+					s.SavedServers[i].IsActive = false
+				}
 			}
-		}
-		if !found {
-			s.SavedServers = append(s.SavedServers, *s.ActiveServer)
+			if !found {
+				s.SavedServers = append(s.SavedServers, *s.ActiveServer)
+			}
 		}
 	} else if len(s.SavedServers) > 0 {
 		// Pick active or first
@@ -170,6 +199,22 @@ func (s *AppSettings) Sanitize() {
 		}
 		act := s.SavedServers[activeIdx]
 		s.ActiveServer = &act
+	}
+
+	// Sanitize torrent sources
+	if s.TorrentSources == nil {
+		s.TorrentSources = make([]TorrentSourceConfig, 0)
+	}
+	for i := range s.TorrentSources {
+		src := &s.TorrentSources[i]
+		if src.ID == "" {
+			src.ID = fmt.Sprintf("tsrc_%d", i+1)
+		}
+		src.Name = strings.TrimSpace(src.Name)
+		src.URL = strings.TrimSpace(src.URL)
+		if src.Name == "" && src.URL != "" {
+			src.Name = src.URL
+		}
 	}
 }
 
@@ -235,6 +280,10 @@ func (cm *ConfigManager) GetSettings() AppSettings {
 func (cm *ConfigManager) SaveSettings(settings AppSettings) error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	// Prevent accidental wipeout of torrent sources if caller passed an empty slice but sources exist
+	if len(settings.TorrentSources) == 0 && len(cm.settings.TorrentSources) > 0 {
+		settings.TorrentSources = cm.settings.TorrentSources
+	}
 	settings.Sanitize()
 	cm.settings = settings
 	return cm.save()

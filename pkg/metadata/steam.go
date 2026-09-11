@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode"
 
 	"gamevault/pkg/database"
 	"gamevault/pkg/remote"
@@ -77,31 +80,99 @@ type SteamCandidate struct {
 	Score     float64 `json:"score"`
 }
 
+// FlexibleRequirements safely decodes Steam requirements which can be an object, an empty array "[]", or null
+type FlexibleRequirements struct {
+	Minimum     string `json:"minimum"`
+	Recommended string `json:"recommended"`
+}
+
+func (f *FlexibleRequirements) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("[]")) {
+		f.Minimum = ""
+		f.Recommended = ""
+		return nil
+	}
+	type Alias FlexibleRequirements
+	var aux Alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		f.Minimum = ""
+		f.Recommended = ""
+		return nil
+	}
+	*f = FlexibleRequirements(aux)
+	return nil
+}
+
+// FlexibleMetacritic safely decodes Metacritic which can be an object, an empty array "[]", or null
+type FlexibleMetacritic struct {
+	Score int    `json:"score"`
+	URL   string `json:"url"`
+}
+
+func (f *FlexibleMetacritic) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("[]")) {
+		f.Score = 0
+		f.URL = ""
+		return nil
+	}
+	type Alias FlexibleMetacritic
+	var aux Alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		f.Score = 0
+		f.URL = ""
+		return nil
+	}
+	*f = FlexibleMetacritic(aux)
+	return nil
+}
+
+// FlexibleMovieMedia safely decodes movie media which can be an object or empty array "[]"
+type FlexibleMovieMedia struct {
+	SD  string `json:"480"`
+	Max string `json:"max"`
+}
+
+func (f *FlexibleMovieMedia) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("[]")) {
+		f.SD = ""
+		f.Max = ""
+		return nil
+	}
+	type Alias FlexibleMovieMedia
+	var aux Alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		f.SD = ""
+		f.Max = ""
+		return nil
+	}
+	*f = FlexibleMovieMedia(aux)
+	return nil
+}
+
 // SteamAppDetailsData matches Steam's appdetails API schema
 type SteamAppDetailsData struct {
-	Type                string      `json:"type"`
-	Name                string      `json:"name"`
-	SteamAppID          int         `json:"steam_appid"`
-	RequiredAge         interface{} `json:"required_age"`
-	IsFree              bool        `json:"is_free"`
-	DetailedDescription string      `json:"detailed_description"`
-	ShortDescription    string      `json:"short_description"`
-	HeaderImage         string      `json:"header_image"`
-	CapsuleImage        string      `json:"capsule_image"`
-	BackgroundImage     string      `json:"background"`
-	BackgroundRaw       string      `json:"background_raw"`
-	Website             string      `json:"website"`
-	PCRequirements      struct {
-		Minimum     string `json:"minimum"`
-		Recommended string `json:"recommended"`
-	} `json:"pc_requirements"`
-	Developers []string `json:"developers"`
-	Publishers []string `json:"publishers"`
-	Metacritic struct {
-		Score int    `json:"score"`
-		URL   string `json:"url"`
-	} `json:"metacritic"`
-	Genres []struct {
+	Type                string               `json:"type"`
+	Name                string               `json:"name"`
+	SteamAppID          int                  `json:"steam_appid"`
+	RequiredAge         interface{}          `json:"required_age"`
+	IsFree              bool                 `json:"is_free"`
+	DetailedDescription string               `json:"detailed_description"`
+	ShortDescription    string               `json:"short_description"`
+	HeaderImage         string               `json:"header_image"`
+	CapsuleImage        string               `json:"capsule_image"`
+	BackgroundImage     string               `json:"background"`
+	BackgroundRaw       string               `json:"background_raw"`
+	Website             string               `json:"website"`
+	PCRequirements      FlexibleRequirements `json:"pc_requirements"`
+	MacRequirements     FlexibleRequirements `json:"mac_requirements"`
+	LinuxRequirements   FlexibleRequirements `json:"linux_requirements"`
+	Developers          []string             `json:"developers"`
+	Publishers          []string             `json:"publishers"`
+	Metacritic          FlexibleMetacritic   `json:"metacritic"`
+	Genres              []struct {
 		ID          string `json:"id"`
 		Description string `json:"description"`
 	} `json:"genres"`
@@ -111,21 +182,15 @@ type SteamAppDetailsData struct {
 		PathFull      string `json:"path_full"`
 	} `json:"screenshots"`
 	Movies []struct {
-		ID        int    `json:"id"`
-		Name      string `json:"name"`
-		Thumbnail string `json:"thumbnail"`
-		HLSH264   string `json:"hls_h264"`
-		DashH264  string `json:"dash_h264"`
-		DashAV1   string `json:"dash_av1"`
-		Webm      struct {
-			SD  string `json:"480"`
-			Max string `json:"max"`
-		} `json:"webm"`
-		MP4 struct {
-			SD  string `json:"480"`
-			Max string `json:"max"`
-		} `json:"mp4"`
-		Highlight bool `json:"highlight"`
+		ID        int                `json:"id"`
+		Name      string             `json:"name"`
+		Thumbnail string             `json:"thumbnail"`
+		HLSH264   string             `json:"hls_h264"`
+		DashH264  string             `json:"dash_h264"`
+		DashAV1   string             `json:"dash_av1"`
+		Webm      FlexibleMovieMedia `json:"webm"`
+		MP4       FlexibleMovieMedia `json:"mp4"`
+		Highlight bool               `json:"highlight"`
 	} `json:"movies"`
 	ReleaseDate struct {
 		ComingSoon bool   `json:"coming_soon"`
@@ -139,22 +204,81 @@ type SteamAppDetailsResponse map[string]struct {
 	Data    SteamAppDetailsData `json:"data"`
 }
 
+// MetadataProgress contains information about active background Steam metadata sync
+type MetadataProgress struct {
+	IsSyncing   bool   `json:"isSyncing"`
+	Current     int    `json:"current"`
+	Total       int    `json:"total"`
+	CurrentGame string `json:"currentGame"`
+}
+
+// TokenBucket implements a thread-safe token bucket rate limiter for concurrent HTTP workers
+type TokenBucket struct {
+	tokens     float64
+	capacity   float64
+	refillRate float64 // tokens per second
+	lastRefill time.Time
+	mu         sync.Mutex
+}
+
+func NewTokenBucket(capacity float64, refillRate float64) *TokenBucket {
+	return &TokenBucket{
+		tokens:     capacity,
+		capacity:   capacity,
+		refillRate: refillRate,
+		lastRefill: time.Now(),
+	}
+}
+
+func (tb *TokenBucket) Take() {
+	for {
+		tb.mu.Lock()
+		now := time.Now()
+		elapsed := now.Sub(tb.lastRefill).Seconds()
+		tb.tokens = math.Min(tb.capacity, tb.tokens+elapsed*tb.refillRate)
+		tb.lastRefill = now
+
+		if tb.tokens >= 1.0 {
+			tb.tokens -= 1.0
+			tb.mu.Unlock()
+			return
+		}
+
+		needed := 1.0 - tb.tokens
+		sleepDur := time.Duration(needed/tb.refillRate*float64(time.Second)) + time.Millisecond
+		tb.mu.Unlock()
+
+		if sleepDur > 0 {
+			time.Sleep(sleepDur)
+		}
+	}
+}
+
+type searchCacheEntry struct {
+	appID int
+	name  string
+}
+
 type SteamService struct {
 	db          *database.Database
 	httpClient  *http.Client
-	rateLimiter *time.Ticker
+	rateLimiter *TokenBucket
 	sgdb        *SteamGridDBService
 	workerCtx   context.Context
 	cancelFunc  context.CancelFunc
 	mu          sync.Mutex
 	isEnriching bool
+	progress    MetadataProgress
+	onProgress  func(progress MetadataProgress)
+	searchCache sync.Map // canonicalTitle string -> searchCacheEntry
+	cdnCache    sync.Map // url string -> bool
 }
 
 func NewSteamService(db *database.Database) *SteamService {
 	tr := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 20,
-		IdleConnTimeout:     60 * time.Second,
+		MaxIdleConns:        150,
+		MaxIdleConnsPerHost: 30,
+		IdleConnTimeout:     90 * time.Second,
 		DisableKeepAlives:   false,
 	}
 	return &SteamService{
@@ -163,15 +287,24 @@ func NewSteamService(db *database.Database) *SteamService {
 			Timeout:   8 * time.Second,
 			Transport: tr,
 		},
-		// Fast responsive rate limit: 1 request every 150ms
-		rateLimiter: time.NewTicker(150 * time.Millisecond),
+		// Smooth token bucket: burst of 5, refilled at 14 tokens/sec (~71ms/req)
+		rateLimiter: NewTokenBucket(5.0, 14.0),
 		sgdb:        NewSteamGridDBService(""),
 	}
 }
 
+func hasCyrillic(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Cyrillic, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // querySteamSuggest queries Steam's modern store search endpoint which indexes all games including unreleased/upcoming/AAA
 func (s *SteamService) querySteamSuggest(searchTitle, query, lang string) ([]SteamCandidate, error) {
-	<-s.rateLimiter.C
+	s.rateLimiter.Take()
 
 	if lang == "" {
 		lang = "english"
@@ -252,7 +385,7 @@ func (s *SteamService) querySteamSuggest(searchTitle, query, lang string) ([]Ste
 
 // queryLegacyStoreSearch queries Steam's legacy storesearch API endpoint as secondary source
 func (s *SteamService) queryLegacyStoreSearch(searchTitle, query string) ([]SteamCandidate, error) {
-	<-s.rateLimiter.C
+	s.rateLimiter.Take()
 
 	endpoint := fmt.Sprintf(
 		"https://store.steampowered.com/api/storesearch/?term=%s&cc=US&l=english",
@@ -302,7 +435,7 @@ func (s *SteamService) queryLegacyStoreSearch(searchTitle, query string) ([]Stea
 
 // queryCommunitySearch queries Steam Community's SearchApps endpoint as a third-tier search fallback
 func (s *SteamService) queryCommunitySearch(searchTitle, query string) ([]SteamCandidate, error) {
-	<-s.rateLimiter.C
+	s.rateLimiter.Take()
 
 	endpoint := fmt.Sprintf(
 		"https://steamcommunity.com/actions/SearchApps/%s",
@@ -358,6 +491,95 @@ func (s *SteamService) queryCommunitySearch(searchTitle, query string) ([]SteamC
 	return candidates, nil
 }
 
+// FetchGameIcon retrieves the authentic game icon from Steam Community Search or SteamGridDB.
+// Strictly returns only genuine icons; never falls back to banners, capsules, covers, or logos.
+func (s *SteamService) FetchGameIcon(appID int, gameTitle string) string {
+	cleanTitle := remote.SanitizeForSteamSearch(gameTitle)
+	if cleanTitle == "" {
+		cleanTitle = strings.TrimSpace(gameTitle)
+	}
+
+	// 1. Try Steam Community SearchApps endpoint
+	if cleanTitle != "" {
+		s.rateLimiter.Take()
+		endpoint := fmt.Sprintf(
+			"https://steamcommunity.com/actions/SearchApps/%s",
+			url.PathEscape(cleanTitle),
+		)
+
+		req, err := http.NewRequest("GET", endpoint, nil)
+		if err == nil {
+			req.Header.Set("User-Agent", steamUserAgent)
+			req.Header.Set("Cookie", steamAgeCookie)
+
+			if resp, err := s.httpClient.Do(req); err == nil {
+				if resp.StatusCode == http.StatusOK {
+					if body, err := io.ReadAll(resp.Body); err == nil {
+						var items []SteamCommunitySearchItem
+						if err := json.Unmarshal(body, &items); err == nil {
+							targetStr := fmt.Sprintf("%d", appID)
+							// Exact AppID match
+							for _, it := range items {
+								if appID > 0 && it.AppID == targetStr {
+									if it.Icon != "" {
+										resp.Body.Close()
+										return it.Icon
+									}
+								}
+							}
+							// Title similarity match if appID <= 0 or not matched above
+							for _, it := range items {
+								sim := CalculateTitleSimilarity(cleanTitle, it.Name)
+								if sim >= 0.75 && it.Icon != "" {
+									resp.Body.Close()
+									return it.Icon
+								}
+							}
+						}
+					}
+				}
+				resp.Body.Close()
+			}
+		}
+	}
+
+	// 2. If appID > 0, extract directly from official Steam Community app page
+	if appID > 0 {
+		appURL := fmt.Sprintf("https://steamcommunity.com/app/%d", appID)
+		req, err := http.NewRequest("GET", appURL, nil)
+		if err == nil {
+			req.Header.Set("User-Agent", steamUserAgent)
+			req.Header.Set("Cookie", steamAgeCookie)
+			if resp, err := s.httpClient.Do(req); err == nil {
+				if resp.StatusCode == http.StatusOK {
+					body, err := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					if err == nil {
+						pattern := fmt.Sprintf(`(?i)https://[^"'\s]+(?:community_assets/images/apps|steamcommunity/public/images/apps)/%d/[a-f0-9]+(?:\.jpg|\.ico|\.png)`, appID)
+						re := regexp.MustCompile(pattern)
+						if match := re.FindString(string(body)); match != "" {
+							return match
+						}
+					}
+				} else {
+					resp.Body.Close()
+				}
+			}
+		}
+	}
+
+	// 3. Try SteamGridDB for authentic game icon
+	if s.sgdb != nil && cleanTitle != "" {
+		if sgdbAssets, err := s.sgdb.FindAssetsForGame(cleanTitle); err == nil && sgdbAssets != nil {
+			if sgdbAssets.IconURL != "" {
+				return sgdbAssets.IconURL
+			}
+		}
+	}
+
+	return ""
+}
+
 // SearchSteamCandidates searches Steam Store across both modern suggest and legacy APIs and ranks results by similarity
 func (s *SteamService) SearchSteamCandidates(searchTitle string) ([]SteamCandidate, error) {
 	if strings.TrimSpace(searchTitle) == "" {
@@ -386,19 +608,21 @@ QueryLoop:
 			}
 		}
 
-		// 2. Multilingual query: Steam Russian Suggest API (for Russian title releases)
-		suggestRussian, err := s.querySteamSuggest(searchTitle, query, "russian")
-		if err == nil {
-			for _, c := range suggestRussian {
-				if existing, exists := candidateMap[c.AppID]; !exists || c.Score > existing.Score {
-					candidateMap[c.AppID] = c
+		// 2. Multilingual query: Steam Russian Suggest API (only for titles containing Cyrillic characters)
+		if hasCyrillic(searchTitle) || hasCyrillic(query) {
+			suggestRussian, err := s.querySteamSuggest(searchTitle, query, "russian")
+			if err == nil {
+				for _, c := range suggestRussian {
+					if existing, exists := candidateMap[c.AppID]; !exists || c.Score > existing.Score {
+						candidateMap[c.AppID] = c
+					}
 				}
 			}
-		}
 
-		for _, c := range candidateMap {
-			if c.Score >= 0.80 {
-				break QueryLoop
+			for _, c := range candidateMap {
+				if c.Score >= 0.80 {
+					break QueryLoop
+				}
 			}
 		}
 
@@ -468,20 +692,32 @@ QueryLoop:
 
 // SearchGame searches Steam Store for a game title and returns matching AppID and Name if confidence >= 0.70
 func (s *SteamService) SearchGame(searchTitle string) (int, string, error) {
+	canonical := remote.CleanCanonicalKey(searchTitle)
+	if canonical == "" {
+		canonical = searchTitle
+	}
+	if val, ok := s.searchCache.Load(canonical); ok {
+		entry := val.(searchCacheEntry)
+		return entry.appID, entry.name, nil
+	}
+
 	candidates, err := s.SearchSteamCandidates(searchTitle)
 	if err != nil {
 		return 0, "", err
 	}
 
 	if len(candidates) == 0 {
+		s.searchCache.Store(canonical, searchCacheEntry{appID: 0, name: ""})
 		return 0, "", nil
 	}
 
 	best := candidates[0]
 	if best.Score >= 0.70 {
+		s.searchCache.Store(canonical, searchCacheEntry{appID: best.AppID, name: best.Name})
 		return best.AppID, best.Name, nil
 	}
 
+	s.searchCache.Store(canonical, searchCacheEntry{appID: 0, name: ""})
 	log.Printf("[Steam] Best candidate for %q was %q with score %.2f (rejected: below 0.70 threshold)", searchTitle, best.Name, best.Score)
 	return 0, "", nil
 }
@@ -493,18 +729,29 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 	// First check database cache
 	if s.db != nil {
 		if cached, err := s.db.GetSteamMetadataFromCache(appID); err == nil && cached != nil {
-			// If cached metadata lacks Steam review score, fetch it on demand
-			if cached.ReviewScoreDesc == "" && cached.TotalReviews == 0 {
-				desc, pct, tot, pos := s.FetchSteamReviewSummary(appID)
-				if tot > 0 {
-					cached.ReviewScoreDesc = desc
-					cached.ReviewPercent = pct
-					cached.TotalReviews = tot
-					cached.TotalPositive = pos
-					_ = s.db.SaveSteamMetadata(*cached)
+			hasRichContent := (cached.ShortDescription != "" || cached.DetailedDescription != "") || (len(cached.Screenshots) > 0 || len(cached.Genres) > 0)
+			if hasRichContent {
+				// If cached metadata lacks Steam review score, fetch it on demand
+				if cached.ReviewScoreDesc == "" && cached.TotalReviews == 0 {
+					desc, pct, tot, pos := s.FetchSteamReviewSummary(appID)
+					if tot > 0 {
+						cached.ReviewScoreDesc = desc
+						cached.ReviewPercent = pct
+						cached.TotalReviews = tot
+						cached.TotalPositive = pos
+						_ = s.db.SaveSteamMetadata(*cached)
+					}
 				}
+				// If cached metadata lacks icon, fetch it on demand
+				if cached.IconURL == "" {
+					cached.IconURL = s.FetchGameIcon(appID, cached.Title)
+					if cached.IconURL != "" {
+						_ = s.db.UpdateSteamMetadataIcon(appID, cached.IconURL)
+					}
+				}
+				return cached, nil
 			}
-			return cached, nil
+			// Cached entry lacks rich store metadata (incomplete stub). Fall through to fetch full details!
 		}
 	}
 
@@ -512,7 +759,7 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 
 	// Try store API across fallback regions (US -> KZ -> DE) with Russian localization
 	for _, cc := range fallbackRegions {
-		<-s.rateLimiter.C // Respect rate limit
+		s.rateLimiter.Take() // Respect rate limit
 
 		endpoint := fmt.Sprintf("https://store.steampowered.com/api/appdetails?appids=%d&cc=%s&l=russian", appID, cc)
 
@@ -533,6 +780,9 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
 			lastErr = fmt.Errorf("steam appdetails returned HTTP %d for cc=%s", resp.StatusCode, cc)
+			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
+				break
+			}
 			continue
 		}
 
@@ -653,6 +903,9 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 		// Fetch authentic Steam user reviews
 		reviewDesc, reviewPercent, totalReviews, totalPositive := s.FetchSteamReviewSummary(appID)
 
+		// Fetch authentic game icon (Steam Community Search or SteamGridDB)
+		iconURL := s.FetchGameIcon(appID, data.Name)
+
 		meta := database.SteamMetadata{
 			AppID:               appID,
 			Title:               data.Name,
@@ -661,6 +914,7 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 			HeaderImage:         headerImg,
 			CapsuleImage:        capsuleImg,
 			BackgroundImage:     bgImage,
+			IconURL:             iconURL,
 			Screenshots:         screenshots,
 			Movies:              movies,
 			Genres:              genres,
@@ -693,8 +947,16 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 		return fallbackMeta, nil
 	}
 
+	// Attempt Steam Package / SubID API (for bundles/trilogies like 1323391 or 66683)
+	if packageMeta := s.fetchPackageMetadata(appID); packageMeta != nil {
+		if s.db != nil {
+			_ = s.db.SaveSteamMetadata(*packageMeta)
+		}
+		return packageMeta, nil
+	}
+
 	if lastErr != nil {
-		return nil, lastErr
+		return nil, fmt.Errorf("steam app details not found or unlisted for appid %d across regions (US, KZ, DE): %w", appID, lastErr)
 	}
 	return nil, fmt.Errorf("steam app details not found or unlisted for appid %d", appID)
 }
@@ -712,9 +974,9 @@ func (s *SteamService) fetchFallbackMetadata(appID int) *database.SteamMetadata 
 	}
 
 	title := s.fetchCommunityGameTitle(appID)
-	if title == "" {
-		title = fmt.Sprintf("Steam App %d", appID)
-	}
+	// Do NOT set "Steam App <id>" as a title! If title cannot be determined from Steam,
+	// keep it empty so the game's actual cleanTitle is preserved and not overridden.
+	iconURL := s.FetchGameIcon(appID, title)
 
 	return &database.SteamMetadata{
 		AppID:           appID,
@@ -722,6 +984,7 @@ func (s *SteamService) fetchFallbackMetadata(appID int) *database.SteamMetadata 
 		HeaderImage:     headerImage,
 		CapsuleImage:    capsuleImage,
 		BackgroundImage: backgroundImage,
+		IconURL:         iconURL,
 		Screenshots:     []string{},
 		Movies:          []database.SteamMovie{},
 		Genres:          []string{},
@@ -767,20 +1030,142 @@ func (s *SteamService) fetchCommunityGameTitle(appID int) string {
 	}
 
 	// Fallback to <title>
-	titleMatch := communityTitleRegex.FindStringSubmatch(content)
-	if len(titleMatch) >= 2 {
-		title := strings.TrimSpace(html.UnescapeString(titleMatch[1]))
-		title = strings.TrimPrefix(title, "Steam Community :: ")
-		title = strings.TrimPrefix(title, "Сообщество Steam :: ")
-		return strings.TrimSpace(title)
+	if titleMatch := regexp.MustCompile(`(?i)<title>([^<]+)</title>`).FindStringSubmatch(content); len(titleMatch) >= 2 {
+		t := strings.TrimSpace(html.UnescapeString(titleMatch[1]))
+		if idx := strings.Index(t, "::"); idx != -1 {
+			t = strings.TrimSpace(t[idx+2:])
+		}
+		if t != "" && !strings.EqualFold(t, "Steam Community") && !strings.EqualFold(t, "Сообщество Steam") {
+			return t
+		}
 	}
 
 	return ""
 }
 
+type SteamPackageDetailsResponse map[string]struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Name        string `json:"name"`
+		PageContent string `json:"page_content"`
+		PageImage   string `json:"page_image"`
+		HeaderImage string `json:"header_image"`
+		SmallLogo   string `json:"small_logo"`
+		Apps        []struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"apps"`
+	} `json:"data"`
+}
+
+// fetchPackageMetadata queries Steam store packagedetails API for Steam Package/SubIDs (e.g. bundles or trilogies)
+func (s *SteamService) fetchPackageMetadata(packageID int) *database.SteamMetadata {
+	s.rateLimiter.Take()
+
+	endpoint := fmt.Sprintf("https://store.steampowered.com/api/packagedetails?packageids=%d&cc=US&l=russian", packageID)
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", steamUserAgent)
+	req.Header.Set("Cookie", steamAgeCookie)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	var pkgResp SteamPackageDetailsResponse
+	if err := json.Unmarshal(body, &pkgResp); err != nil {
+		return nil
+	}
+
+	pkgKey := fmt.Sprintf("%d", packageID)
+	entry, exists := pkgResp[pkgKey]
+	if !exists || !entry.Success {
+		return nil
+	}
+
+	data := entry.Data
+	title := strings.TrimSpace(data.Name)
+	if title == "" {
+		title = fmt.Sprintf("Steam Package %d", packageID)
+	}
+
+	headerImg := strings.TrimSpace(data.HeaderImage)
+	if headerImg == "" {
+		headerImg = strings.TrimSpace(data.PageImage)
+	}
+	capsuleImg := strings.TrimSpace(data.SmallLogo)
+	if capsuleImg == "" {
+		capsuleImg = headerImg
+	}
+	bgImg := strings.TrimSpace(data.PageImage)
+	if bgImg == "" {
+		bgImg = headerImg
+	}
+
+	headerImg = strings.ReplaceAll(headerImg, "http://", "https://")
+	capsuleImg = strings.ReplaceAll(capsuleImg, "http://", "https://")
+	bgImg = strings.ReplaceAll(bgImg, "http://", "https://")
+
+	meta := database.SteamMetadata{
+		AppID:               packageID,
+		Title:               title,
+		ShortDescription:    data.Name,
+		DetailedDescription: data.PageContent,
+		HeaderImage:         headerImg,
+		CapsuleImage:        capsuleImg,
+		BackgroundImage:     bgImg,
+		Screenshots:         []string{},
+		Movies:              []database.SteamMovie{},
+		Genres:              []string{"Bundle"},
+		Developers:          []string{},
+		Publishers:          []string{},
+		CachedAt:            time.Now().Unix(),
+	}
+
+	// If the package contains child apps, borrow screenshots and media from primary app
+	if len(data.Apps) > 0 {
+		primaryAppID := data.Apps[0].ID
+		if primaryAppID > 0 {
+			if primaryMeta, err := s.FetchAppDetails(primaryAppID); err == nil && primaryMeta != nil {
+				if len(primaryMeta.Screenshots) > 0 {
+					meta.Screenshots = primaryMeta.Screenshots
+				}
+				if len(primaryMeta.Movies) > 0 {
+					meta.Movies = primaryMeta.Movies
+				}
+				if len(primaryMeta.Genres) > 0 {
+					meta.Genres = primaryMeta.Genres
+				}
+				if len(primaryMeta.Developers) > 0 {
+					meta.Developers = primaryMeta.Developers
+				}
+				if len(primaryMeta.Publishers) > 0 {
+					meta.Publishers = primaryMeta.Publishers
+				}
+			}
+		}
+	}
+
+	log.Printf("[Steam] Successfully resolved package/subid %d (\"%s\") with %d apps", packageID, title, len(data.Apps))
+	return &meta
+}
+
 // FetchSteamReviewSummary queries Steam's official appreviews API for community score & review count
 func (s *SteamService) FetchSteamReviewSummary(appID int) (string, int, int, int) {
-	<-s.rateLimiter.C
+	s.rateLimiter.Take()
 
 	endpoint := fmt.Sprintf("https://store.steampowered.com/appreviews/%d?json=1&language=all&purchase_type=all&l=russian", appID)
 	req, err := http.NewRequest("GET", endpoint, nil)
@@ -824,6 +1209,13 @@ func (s *SteamService) FetchSteamReviewSummary(appID int) (string, int, int, int
 
 // verifyCDNAsset performs a lightweight check to confirm asset presence on Steam CDN
 func (s *SteamService) verifyCDNAsset(assetURL string) bool {
+	if assetURL == "" {
+		return false
+	}
+	if val, ok := s.cdnCache.Load(assetURL); ok {
+		return val.(bool)
+	}
+
 	// Try fast HEAD first
 	req, err := http.NewRequest("HEAD", assetURL, nil)
 	if err == nil {
@@ -832,6 +1224,7 @@ func (s *SteamService) verifyCDNAsset(assetURL string) bool {
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
+				s.cdnCache.Store(assetURL, true)
 				return true
 			}
 		}
@@ -840,6 +1233,7 @@ func (s *SteamService) verifyCDNAsset(assetURL string) bool {
 	// Fallback to GET with Range: bytes=0-0 (supported by all Steam CDNs, fetches only 1 byte)
 	reqRange, err := http.NewRequest("GET", assetURL, nil)
 	if err != nil {
+		s.cdnCache.Store(assetURL, false)
 		return false
 	}
 	reqRange.Header.Set("User-Agent", steamUserAgent)
@@ -847,11 +1241,14 @@ func (s *SteamService) verifyCDNAsset(assetURL string) bool {
 
 	respRange, err := s.httpClient.Do(reqRange)
 	if err != nil {
+		s.cdnCache.Store(assetURL, false)
 		return false
 	}
 	defer respRange.Body.Close()
 
-	return respRange.StatusCode == http.StatusOK || respRange.StatusCode == http.StatusPartialContent
+	valid := respRange.StatusCode == http.StatusOK || respRange.StatusCode == http.StatusPartialContent
+	s.cdnCache.Store(assetURL, valid)
+	return valid
 }
 
 // EnrichGame provides on-demand instant enrichment for a single game
@@ -921,6 +1318,7 @@ func (s *SteamService) EnrichGame(gameID int64) (*database.GameEntity, error) {
 					CapsuleImage:    sgdbAssets.CoverURL,
 					BackgroundImage: sgdbAssets.BackgroundURL,
 					HeaderImage:     sgdbAssets.HeaderURL,
+					IconURL:         sgdbAssets.IconURL,
 					ReleaseDate:     sgdbAssets.ReleaseDate,
 					CachedAt:        time.Now().Unix(),
 				}
@@ -937,9 +1335,92 @@ func (s *SteamService) EnrichGame(gameID int64) (*database.GameEntity, error) {
 	return s.db.GetGameByID(gameID)
 }
 
-// StartBackgroundEnrichment runs an async worker that enriches unsynced games progressively
-func (s *SteamService) StartBackgroundEnrichment(onGameUpdated func(gameID int64, appID int)) {
+// GetProgress returns the current background metadata synchronization state
+func (s *SteamService) GetProgress() MetadataProgress {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.progress
+}
+
+func (s *SteamService) updateProgress(p MetadataProgress) {
+	s.mu.Lock()
+	s.progress = p
+	cb := s.onProgress
+	s.mu.Unlock()
+	if cb != nil {
+		cb(p)
+	}
+}
+
+// enrichSingleGame enriches a single game with Steam/SteamGridDB metadata and persists it
+func (s *SteamService) enrichSingleGame(game database.GameEntity, searchTerm string, onGameUpdated func(gameID int64, appID int)) {
+	targetAppID := game.SteamAppID
+
+	if targetAppID == 0 {
+		sanitized := remote.SanitizeForSteamSearch(searchTerm)
+		query := searchTerm
+		if sanitized != "" {
+			query = sanitized
+		}
+
+		appID, _, err := s.SearchGame(query)
+		if err == nil {
+			targetAppID = appID
+		}
+	}
+
+	if targetAppID > 0 {
+		details, err := s.FetchAppDetails(targetAppID)
+		if err != nil {
+			log.Printf("[Steam] AppDetails error for %d: %v", targetAppID, err)
+			_ = s.db.MarkGameSynced(game.ID)
+			// Save minimal stub so GetUnsyncedGames won't hammer Steam for this unlisted/failing appid
+			_ = s.db.SaveSteamMetadata(database.SteamMetadata{
+				AppID:    targetAppID,
+				Title:    game.CleanTitle,
+				CachedAt: time.Now().Unix(),
+			})
+		} else if details != nil {
+			_ = s.db.SetGameAppID(game.ID, targetAppID)
+			if onGameUpdated != nil {
+				onGameUpdated(game.ID, targetAppID)
+			}
+		}
+	} else {
+		// Fallback to SteamGridDB for non-Steam games (e.g. Need for Speed Carbon)
+		foundSGDB := false
+		if s.sgdb != nil {
+			if sgdbAssets, err := s.sgdb.FindAssetsForGame(searchTerm); err == nil && sgdbAssets != nil {
+				sgdbAppID := -sgdbAssets.GameID
+				meta := database.SteamMetadata{
+					AppID:           sgdbAppID,
+					Title:           sgdbAssets.GameTitle,
+					CapsuleImage:    sgdbAssets.CoverURL,
+					BackgroundImage: sgdbAssets.BackgroundURL,
+					HeaderImage:     sgdbAssets.HeaderURL,
+					ReleaseDate:     sgdbAssets.ReleaseDate,
+					CachedAt:        time.Now().Unix(),
+				}
+				_ = s.db.SaveSteamMetadata(meta)
+				_ = s.db.SetGameAppID(game.ID, sgdbAppID)
+				foundSGDB = true
+				if onGameUpdated != nil {
+					onGameUpdated(game.ID, sgdbAppID)
+				}
+			}
+		}
+		if !foundSGDB {
+			_ = s.db.MarkGameSynced(game.ID)
+		}
+	}
+}
+
+// StartBackgroundEnrichment runs an async worker pool that enriches unsynced games concurrently and progressively
+func (s *SteamService) StartBackgroundEnrichment(onGameUpdated func(gameID int64, appID int), onProgress ...func(progress MetadataProgress)) {
+	s.mu.Lock()
+	if len(onProgress) > 0 {
+		s.onProgress = onProgress[0]
+	}
 	if s.isEnriching {
 		s.mu.Unlock()
 		return
@@ -948,12 +1429,18 @@ func (s *SteamService) StartBackgroundEnrichment(onGameUpdated func(gameID int64
 	s.workerCtx, s.cancelFunc = context.WithCancel(context.Background())
 	s.mu.Unlock()
 
+	// Fill in missing icons for already synced games in background
+	go s.populateMissingIcons(onGameUpdated)
+
 	go func() {
 		defer func() {
 			s.mu.Lock()
 			s.isEnriching = false
 			s.mu.Unlock()
+			s.updateProgress(MetadataProgress{IsSyncing: false, Current: 0, Total: 0, CurrentGame: ""})
 		}()
+
+		const numWorkers = 4
 
 		for {
 			select {
@@ -964,99 +1451,65 @@ func (s *SteamService) StartBackgroundEnrichment(onGameUpdated func(gameID int64
 
 			unsynced, err := s.db.GetUnsyncedGames()
 			if err != nil || len(unsynced) == 0 {
-				time.Sleep(5 * time.Second)
-				continue
-			}
-
-			for _, game := range unsynced {
+				s.updateProgress(MetadataProgress{IsSyncing: false, Current: 0, Total: 0, CurrentGame: ""})
 				select {
 				case <-s.workerCtx.Done():
 					return
-				default:
-				}
-
-				targetAppID := game.SteamAppID
-				searchTerm := game.SearchTitle
-				if searchTerm == "" {
-					searchTerm = game.CleanTitle
-				}
-
-				if targetAppID == 0 {
-					sanitized := remote.SanitizeForSteamSearch(searchTerm)
-					query := searchTerm
-					if sanitized != "" {
-						query = sanitized
-					}
-
-					appID, _, err := s.SearchGame(query)
-					if err == nil {
-						targetAppID = appID
-					}
-				}
-
-				if targetAppID > 0 {
-					meta, err := s.FetchAppDetails(targetAppID)
-					if err != nil {
-						log.Printf("[Steam] AppDetails error for %d: %v", targetAppID, err)
-					}
-					if meta != nil && (meta.CapsuleImage == "" || IsHorizontalAsset(meta.CapsuleImage) || meta.BackgroundImage == "" || strings.Contains(meta.BackgroundImage, "page_bg_generated")) {
-						if s.sgdb != nil {
-							sgdbTitle := searchTerm
-							if meta.Title != "" {
-								sgdbTitle = meta.Title
-							}
-							if sgdbAssets, err := s.sgdb.FindAssetsForGame(sgdbTitle); err == nil && sgdbAssets != nil {
-								updated := false
-								if (meta.CapsuleImage == "" || IsHorizontalAsset(meta.CapsuleImage)) && sgdbAssets.CoverURL != "" {
-									meta.CapsuleImage = sgdbAssets.CoverURL
-									updated = true
-								}
-								if (meta.BackgroundImage == "" || strings.Contains(meta.BackgroundImage, "page_bg_generated")) && sgdbAssets.BackgroundURL != "" {
-									meta.BackgroundImage = sgdbAssets.BackgroundURL
-									updated = true
-								}
-								if meta.HeaderImage == "" && sgdbAssets.HeaderURL != "" {
-									meta.HeaderImage = sgdbAssets.HeaderURL
-									updated = true
-								}
-								if updated {
-									_ = s.db.SaveSteamMetadata(*meta)
-								}
-							}
-						}
-					}
-					_ = s.db.SetGameAppID(game.ID, targetAppID)
-					if onGameUpdated != nil {
-						onGameUpdated(game.ID, targetAppID)
-					}
-				} else {
-					// Fallback to SteamGridDB for non-Steam games (e.g. Need for Speed Carbon)
-					foundSGDB := false
-					if s.sgdb != nil {
-						if sgdbAssets, err := s.sgdb.FindAssetsForGame(searchTerm); err == nil && sgdbAssets != nil {
-							sgdbAppID := -sgdbAssets.GameID
-							meta := database.SteamMetadata{
-								AppID:           sgdbAppID,
-								Title:           sgdbAssets.GameTitle,
-								CapsuleImage:    sgdbAssets.CoverURL,
-								BackgroundImage: sgdbAssets.BackgroundURL,
-								HeaderImage:     sgdbAssets.HeaderURL,
-								ReleaseDate:     sgdbAssets.ReleaseDate,
-								CachedAt:        time.Now().Unix(),
-							}
-							_ = s.db.SaveSteamMetadata(meta)
-							_ = s.db.SetGameAppID(game.ID, sgdbAppID)
-							foundSGDB = true
-							if onGameUpdated != nil {
-								onGameUpdated(game.ID, sgdbAppID)
-							}
-						}
-					}
-					if !foundSGDB {
-						_ = s.db.MarkGameSynced(game.ID)
-					}
+				case <-time.After(5 * time.Second):
+					continue
 				}
 			}
+
+			total := len(unsynced)
+			var current atomic.Int64
+			s.updateProgress(MetadataProgress{IsSyncing: true, Current: 0, Total: total, CurrentGame: ""})
+
+			gameChan := make(chan database.GameEntity, total)
+			for _, g := range unsynced {
+				gameChan <- g
+			}
+			close(gameChan)
+
+			var wg sync.WaitGroup
+			for w := 0; w < numWorkers; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for game := range gameChan {
+						select {
+						case <-s.workerCtx.Done():
+							return
+						default:
+						}
+
+						searchTerm := game.SearchTitle
+						if searchTerm == "" {
+							searchTerm = game.CleanTitle
+						}
+
+						// Check if game was already enriched by on-demand user action or another sibling in pool
+						if cur, err := s.db.GetGameByID(game.ID); err == nil && cur.SteamSynced {
+							hasRich := cur.SteamTitle != "" && (cur.ShortDescription != "" || cur.DetailedDescription != "" || len(cur.Screenshots) > 0)
+							if hasRich {
+								c := int(current.Add(1))
+								s.updateProgress(MetadataProgress{IsSyncing: true, Current: c, Total: total, CurrentGame: searchTerm})
+								continue
+							}
+						}
+
+						s.updateProgress(MetadataProgress{IsSyncing: true, Current: int(current.Load()), Total: total, CurrentGame: searchTerm})
+
+						s.enrichSingleGame(game, searchTerm, onGameUpdated)
+
+						c := int(current.Add(1))
+						s.updateProgress(MetadataProgress{IsSyncing: true, Current: c, Total: total, CurrentGame: searchTerm})
+					}
+				}()
+			}
+
+			wg.Wait()
+
+			s.updateProgress(MetadataProgress{IsSyncing: false, Current: total, Total: total, CurrentGame: ""})
 		}
 	}()
 }
@@ -1064,11 +1517,67 @@ func (s *SteamService) StartBackgroundEnrichment(onGameUpdated func(gameID int64
 // StopBackgroundEnrichment stops the background worker
 func (s *SteamService) StopBackgroundEnrichment() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.cancelFunc != nil {
 		s.cancelFunc()
 	}
+	s.isEnriching = false
+	s.mu.Unlock()
+	s.updateProgress(MetadataProgress{IsSyncing: false, Current: 0, Total: 0, CurrentGame: ""})
+}
+
+// populateMissingIcons iterates over games with missing icon_url and fetches authentic icons in parallel
+func (s *SteamService) populateMissingIcons(onGameUpdated func(gameID int64, appID int)) {
+	time.Sleep(300 * time.Millisecond) // brief moment for initial DB queries to settle
+	if s.db == nil {
+		return
+	}
+
+	missing, err := s.db.GetGamesMissingIcons()
+	if err != nil || len(missing) == 0 {
+		return
+	}
+
+	log.Printf("[Steam] Fast Icon Enrichment: fetching icons for %d games concurrently...", len(missing))
+
+	const concurrency = 8
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+
+	for _, item := range missing {
+		if s.workerCtx != nil {
+			select {
+			case <-s.workerCtx.Done():
+				return
+			default:
+			}
+		}
+
+		wg.Add(1)
+		go func(it database.MissingIconItem) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			title := it.Title
+			if it.AppID > 0 {
+				if ct := s.fetchCommunityGameTitle(it.AppID); ct != "" {
+					title = ct
+					_ = s.db.UpdateSteamMetadataTitle(it.AppID, ct)
+				}
+			}
+
+			icon := s.FetchGameIcon(it.AppID, title)
+			if icon != "" {
+				_ = s.db.UpdateSteamMetadataIcon(it.AppID, icon)
+			}
+			if onGameUpdated != nil {
+				onGameUpdated(it.GameID, it.AppID)
+			}
+		}(item)
+	}
+
+	wg.Wait()
+	log.Printf("[Steam] Fast Icon Enrichment completed for %d games", len(missing))
 }
 
 // IsHorizontalAsset returns true if an image URL is known to be a horizontal banner or capsule

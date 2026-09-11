@@ -26,10 +26,19 @@ var (
 	platformSuffixRegex = regexp.MustCompile(`(?i)\s*[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]$`)
 
 	// Regex for version tags: v1.0, v.1.2.3, v2 0, Build 12345, Patch 4, etc.
-	versionRegex = regexp.MustCompile(`(?i)\b(v\s*\d+([._\s]\d+)*|build\s*\d+|patch\s*\d+|update\s*\d+)\b`)
+	versionRegex = regexp.MustCompile(`(?i)\b(v\s*\d+([._\s]\d+)*[a-z]?|build\s*\d+|patch\s*\d+|update\s*\d*|hotfix)\b`)
+
+	// Regex for addons, DLCs, supporter packs, soundtracks
+	addonRegex = regexp.MustCompile(`(?i)(\+\s*\d*\s*dlcs?|\b\d+\s*dlcs?\b|\bdlcs?\b|\bsupporter\s+pack\b|\bexpansion(\s+pack)?\b|\bseason\s+pass\b|\bsoundtrack\b|\bost\b|\bbonus(\s+content)?\b)`)
+
+	// Regex for OS fixes
+	fixRegex = regexp.MustCompile(`(?i)((\+\s*)?(windows|win)\s*\d*\s*fix|\bfix\b)`)
+
+	// Regex for release dates
+	dateRegex = regexp.MustCompile(`(?i)\b(\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4})\b`)
 
 	// Common edition tags to strip for steam search
-	editionRegex = regexp.MustCompile(`(?i)\b(deluxe(\s+edition)?|ultimate(\s+edition)?|goty(\s+edition)?|game\s+of\s+the\s+year(\s+edition)?|collector('s)?\s+edition|remastered|enhanced\s+edition|gold\s+edition|director('s)?\s+cut|complete\s+edition|definitive\s+edition|special\s+edition|bundle|repack|portable|multi\d*)\b`)
+	editionRegex = regexp.MustCompile(`(?i)\b(deluxe(\s+edition)?|ultimate(\s+edition)?|goty(\s+edition)?|game\s+of\s+the\s+year(\s+edition)?|collector('s)?\s+edition|remastered|enhanced\s+edition|gold\s+edition|director('s)?\s+cut|complete\s+edition|definitive\s+edition|special\s+edition|anniversary(\s+edition)?|bundle|scooby\s+bundle|repack|portable|multi\d*|selective\s+download|digital|bonus)\b`)
 
 	// Trailing dates or brackets: (2023), [FitGirl Repack], etc.
 	bracketRegex = regexp.MustCompile(`\[.*?\]|\(.*?\)|[\{\}]`)
@@ -183,12 +192,17 @@ func SanitizeForSteamSearch(title string) string {
 	cleaned = sizeTagRegex.ReplaceAllString(cleaned, " ")
 	cleaned = brokenSizeRegex.ReplaceAllString(cleaned, " ")
 	cleaned = langTagRegex.ReplaceAllString(cleaned, " ")
+	cleaned = dateRegex.ReplaceAllString(cleaned, " ")
+	cleaned = fixRegex.ReplaceAllString(cleaned, " ")
+	cleaned = addonRegex.ReplaceAllString(cleaned, " ")
 	cleaned = versionRegex.ReplaceAllString(cleaned, " ")
 	cleaned = editionRegex.ReplaceAllString(cleaned, " ")
 	cleaned = strings.ReplaceAll(cleaned, "-", " ")
 	cleaned = strings.ReplaceAll(cleaned, ":", " ")
 	cleaned = strings.ReplaceAll(cleaned, "'", "")
 	cleaned = strings.ReplaceAll(cleaned, "\"", "")
+	cleaned = strings.ReplaceAll(cleaned, "+", " ")
+	cleaned = strings.ReplaceAll(cleaned, "/", " ")
 	cleaned = strings.Join(strings.Fields(cleaned), " ")
 
 	if cleaned == "" {
@@ -197,8 +211,8 @@ func SanitizeForSteamSearch(title string) string {
 	return cleaned
 }
 
-func calculateBytes(valStr, unit string) int64 {
-	val, err := strconv.ParseFloat(valStr, 64)
+func CalculateBytes(valStr, unit string) int64 {
+	val, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(valStr), ",", "."), 64)
 	if err != nil {
 		return 0
 	}
@@ -219,3 +233,28 @@ func calculateBytes(valStr, unit string) int64 {
 		return int64(val * 1024 * 1024 * 1024) // Default to GB
 	}
 }
+
+func calculateBytes(valStr, unit string) int64 {
+	return CalculateBytes(valStr, unit)
+}
+
+var fileSizeParseRegex = regexp.MustCompile(`(?i)^\s*(\d+(?:[.,]\d+)*)\s*([A-Za-zА-Яа-я]+)`)
+
+// ParseFileSize parses human-readable strings like "9.1 GB", "75.3 GB", "500MB" into bytes
+func ParseFileSize(fileSizeStr string) int64 {
+	s := strings.TrimSpace(fileSizeStr)
+	if s == "" {
+		return 0
+	}
+	m := fileSizeParseRegex.FindStringSubmatch(s)
+	if len(m) >= 3 {
+		return CalculateBytes(m[1], m[2])
+	}
+	// Fallback to sizeExtractorRegex
+	m2 := sizeExtractorRegex.FindStringSubmatch(s)
+	if len(m2) >= 3 {
+		return CalculateBytes(m2[1], m2[2])
+	}
+	return 0
+}
+

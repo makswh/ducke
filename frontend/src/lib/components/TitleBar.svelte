@@ -63,9 +63,7 @@
 >
   <!-- Left: App Branding & Status -->
   <div class="flex items-center gap-2.5 px-3.5 pointer-events-none">
-    <div class="w-5 h-5 rounded-md bg-white/[0.06] border border-white/10 flex items-center justify-center text-white font-mono font-bold text-[10px] leading-none">
-      D
-    </div>
+    <img src="/appicon.png" alt="Ducke" class="w-5 h-5 rounded-md object-cover border border-white/10" />
     <span class="text-[11px] font-bold tracking-[0.16em] text-[#cbd5e1] uppercase font-mono">DUCKE</span>
   </div>
 

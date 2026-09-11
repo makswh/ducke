@@ -26,6 +26,7 @@ export interface GameEntity {
   headerImage?: string;
   capsuleImage?: string;
   backgroundImage?: string;
+  iconUrl?: string;
   screenshots?: string[];
   movies?: SteamMovie[];
   genres?: string[];
@@ -38,6 +39,35 @@ export interface GameEntity {
   reviewScoreDesc?: string;
   reviewPercent?: number;
   totalReviews?: number;
+  sourceType?: string; // "ftp" or "torrent"
+  torrentSource?: string;
+  magnetUri?: string;
+  uploadDate?: string;
+  variants?: GameVariant[];
+}
+
+export interface GameVariant {
+  id: number;
+  rawName: string;
+  cleanTitle: string;
+  sizeBytes: number;
+  sizeDisplay: string;
+  sourceType: string;
+  torrentSource?: string;
+  remotePath: string;
+  magnetUri?: string;
+  uploadDate?: string;
+  isDirectory: boolean;
+  steamAppId?: number;
+}
+
+export interface TorrentSourceConfig {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  itemCount: number;
+  lastSynced: number;
 }
 
 export type MediaItem =
@@ -69,6 +99,10 @@ export interface DownloadProgressEvent {
   totalFiles: number;
   localPath: string;
   errorMessage?: string;
+  isTorrent?: boolean;
+  magnetUri?: string;
+  torrentSeeds?: number;
+  torrentPeers?: number;
 }
 
 export interface GamePageDetails {
@@ -82,3 +116,4 @@ export interface GamePageDetails {
   coverUrl?: string;
   backgroundUrl?: string;
 }
+

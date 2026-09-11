@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import {
     Pause,
     Play,
@@ -71,14 +71,20 @@
     onGoToCatalog = () => {}
   } = $props();
 
+  let isMounted = true;
   let resolvedCovers = $state<Record<string, string>>({});
   let resolvedLogos = $state<Record<string, string>>({});
   let imageLoadFailed = $state<Record<string, boolean>>({});
 
+  onDestroy(() => {
+    isMounted = false;
+  });
+
   async function resolveMissingLogo(title: string, gameId?: number) {
-    if (!title) return;
+    if (!title || !isMounted) return;
     const key = title.trim().toLowerCase();
-    if (resolvedLogos[key]) return;
+    if (resolvedLogos[key] !== undefined) return;
+    resolvedLogos[key] = '';
 
     try {
       const app = (window as any)?.go?.main?.App;
@@ -89,8 +95,9 @@
         const appId = g?.steamAppId || 0;
         const gId = g?.id || gameId || 0;
 
-        const url = await app.ResolveGameLogo(gId, title, appId);
-        if (url) {
+        const searchTitle = title.replace(/\[.*?\]|\(.*?\)/g, '').trim() || title;
+        const url = await app.ResolveGameLogo(gId, searchTitle, appId);
+        if (url && isMounted) {
           resolvedLogos[key] = url;
         }
       }
@@ -102,8 +109,8 @@
   function getGameLogo(dl: DownloadItem): string {
     if (!dl) return '';
     const key = (dl.gameTitle || '').trim().toLowerCase();
-    if (resolvedLogos[key] && !imageLoadFailed[resolvedLogos[key]]) {
-      return resolvedLogos[key];
+    if (resolvedLogos[key] !== undefined) {
+      return resolvedLogos[key] && !imageLoadFailed[resolvedLogos[key]] ? resolvedLogos[key] : '';
     }
     const g = (games || []).find(
       (x) => x && ((dl.gameId && x.id === dl.gameId) || (x.cleanTitle && x.cleanTitle.toLowerCase() === key))
@@ -119,9 +126,10 @@
   }
 
   async function resolveMissingCover(title: string, gameId?: number) {
-    if (!title) return;
+    if (!title || !isMounted) return;
     const key = title.trim().toLowerCase();
-    if (resolvedCovers[key]) return;
+    if (resolvedCovers[key] !== undefined) return;
+    resolvedCovers[key] = '';
 
     try {
       const app = (window as any)?.go?.main?.App;
@@ -133,18 +141,19 @@
         const appId = g?.steamAppId || 0;
         const gId = g?.id || gameId || 0;
 
+        const searchTitle = title.replace(/\[.*?\]|\(.*?\)/g, '').trim() || title;
         if (typeof app.ResolveGameBanner === 'function') {
-          url = await app.ResolveGameBanner(gId, title, appId);
+          url = await app.ResolveGameBanner(gId, searchTitle, appId);
         } else if (typeof app.ResolveGameCover === 'function') {
-          url = await app.ResolveGameCover(gId, title, appId);
+          url = await app.ResolveGameCover(gId, searchTitle, appId);
         }
 
-        if (url) {
+        if (url && isMounted) {
           resolvedCovers[key] = url;
         }
       }
-    } catch (e) {
-      console.warn('Could not resolve cover for', title, e);
+    } catch {
+      // Normal fallback when cover is not available; resolvedCovers[key] remains '' to prevent repeat attempts
     }
   }
 
@@ -168,8 +177,8 @@
         if (!imageLoadFailed[pageBg]) return pageBg;
       }
     }
-    if (resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]]) {
-      return resolvedCovers[key];
+    if (resolvedCovers[key] !== undefined) {
+      return resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]] ? resolvedCovers[key] : '';
     }
     if (dl.coverImage && !imageLoadFailed[dl.coverImage]) {
       return dl.coverImage;
@@ -202,8 +211,8 @@
     if (dl.coverImage && !imageLoadFailed[dl.coverImage]) {
       return dl.coverImage;
     }
-    if (resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]]) {
-      return resolvedCovers[key];
+    if (resolvedCovers[key] !== undefined) {
+      return resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]] ? resolvedCovers[key] : '';
     }
     resolveMissingCover(dl.gameTitle, dl.gameId);
     return '';
@@ -230,8 +239,8 @@
         if (!imageLoadFailed[header]) return header;
       }
     }
-    if (resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]]) {
-      return resolvedCovers[key];
+    if (resolvedCovers[key] !== undefined) {
+      return resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]] ? resolvedCovers[key] : '';
     }
     if (dl.coverImage && !imageLoadFailed[dl.coverImage]) {
       return dl.coverImage;
@@ -261,8 +270,8 @@
         if (!imageLoadFailed[header]) return header;
       }
     }
-    if (resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]]) {
-      return resolvedCovers[key];
+    if (resolvedCovers[key] !== undefined) {
+      return resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]] ? resolvedCovers[key] : '';
     }
     resolveMissingCover(record.gameTitle, record.gameId);
     return '';
@@ -441,7 +450,7 @@
       const app = (window as any)?.go?.main?.App;
       if (app && app.GetDiskSpaceInfo) {
         const info = await app.GetDiskSpaceInfo(downloadPath);
-        if (info && info.freeBytes > 0) {
+        if (isMounted && info && info.freeBytes > 0) {
           diskSpace = info;
         }
       }
@@ -493,15 +502,20 @@
   }
 
   onMount(() => {
+    isMounted = true;
     loadDiskSpace();
-    const diskTimer = setInterval(loadDiskSpace, 5000);
+    const diskTimer = setInterval(() => {
+      if (isMounted) loadDiskSpace();
+    }, 5000);
     const speedTimer = setInterval(() => {
+      if (!isMounted) return;
       const curNet = totalSpeedBytes;
       const curDisk = (currentDownload && currentDownload.status === 'downloading') ? Math.round(curNet * 0.95) : 0;
       speedHistory = [...speedHistory.slice(1), curNet];
       diskHistory = [...diskHistory.slice(1), curDisk];
     }, 1000);
     return () => {
+      isMounted = false;
       clearInterval(diskTimer);
       clearInterval(speedTimer);
     };
@@ -524,9 +538,6 @@
         class="w-full h-full object-cover object-top brightness-60 contrast-105 opacity-70 transition-opacity duration-500"
         onerror={() => {
           imageLoadFailed[activeBackgroundUrl] = true;
-          if (currentDownload) {
-            resolveMissingCover(currentDownload.gameTitle, currentDownload.gameId);
-          }
         }}
       />
       <!-- Dark Scrim Gradients matching Ducke #07080a base -->

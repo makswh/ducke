@@ -51,6 +51,31 @@ func TestFetchAppDetails_RegionLockedGame(t *testing.T) {
 	}
 }
 
+func TestFetchPackageDetails_BundleAndTrilogy(t *testing.T) {
+	service := NewSteamService(nil)
+
+	// S.T.A.L.K.E.R. Legends of the Zone Trilogy (Package ID 1323391)
+	meta, err := service.FetchAppDetails(1323391)
+	if err != nil {
+		t.Fatalf("expected successful metadata fetch for package 1323391, got err: %v", err)
+	}
+	if meta == nil || !strings.Contains(strings.ToLower(meta.Title), "s.t.a.l.k.e.r") {
+		t.Errorf("expected S.T.A.L.K.E.R. package metadata, got %+v", meta)
+	}
+	if meta.HeaderImage == "" {
+		t.Errorf("expected non-empty HeaderImage for package 1323391")
+	}
+
+	// Gas Guzzlers Extreme Gold Pack (Package ID 66683)
+	meta2, err := service.FetchAppDetails(66683)
+	if err != nil {
+		t.Fatalf("expected successful metadata fetch for package 66683, got err: %v", err)
+	}
+	if meta2 == nil || !strings.Contains(strings.ToLower(meta2.Title), "gas guzzlers") {
+		t.Errorf("expected Gas Guzzlers package metadata, got %+v", meta2)
+	}
+}
+
 func TestFetchAppDetails_StoreUnlistedGame(t *testing.T) {
 	service := NewSteamService(nil)
 

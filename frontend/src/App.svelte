@@ -6,6 +6,7 @@
   import MasterDetailCatalog from './lib/components/MasterDetailCatalog.svelte';
   import DownloadsView from './lib/components/DownloadsView.svelte';
   import SettingsView from './lib/components/SettingsView.svelte';
+  import FavoritesView from './lib/components/FavoritesView.svelte';
   import GamepadHUD from './lib/components/GamepadHUD.svelte';
   import { gamepad } from './lib/navigation/gamepad';
 
@@ -25,14 +26,22 @@
     TestConnection,
     SelectDirectory,
     OpenLocalFolder,
-    TriggerSteamOSKeyboard
+    TriggerSteamOSKeyboard,
+    GetTorrentCatalog,
+    GetTorrentSources,
+    AddTorrentSource,
+    RemoveTorrentSource,
+    ToggleTorrentSource,
+    SyncTorrentSources,
+    StartTorrentDownload,
+    GetFavorites
   } from '../wailsjs/go/main/App';
 
   import { EventsOn, EventsOff, Quit, WindowFullscreen, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
 
   // Application State (Svelte 5 Runes)
   let displayMode = $state<'desktop' | 'bigpicture'>('desktop');
-  let activeTab = $state<'catalog' | 'downloads' | 'settings'>('catalog');
+  let activeTab = $state<'catalog' | 'torrents' | 'favorites' | 'downloads' | 'settings'>('catalog');
 
   function switchToBigPicture() {
     displayMode = 'bigpicture';
@@ -53,12 +62,71 @@
   }
   let searchQuery = $state<string>('');
   let games = $state<any[]>([]);
+  let torrentGames = $state<any[]>([]);
   let activeDownloads = $state<any[]>([]);
   let downloadHistory = $state<any[]>([]);
   let settings = $state<any | null>(null);
   let isRefreshing = $state<boolean>(false);
+  let isCatalogLoading = $state<boolean>(true);
+  let isTorrentsLoading = $state<boolean>(true);
+  let catalogStatusText = $state<string>('');
   let isGamepadConnected = $state<boolean>(false);
   let toastMessage = $state<string>('');
+  let metadataProgress = $state<{
+    isSyncing: boolean;
+    current: number;
+    total: number;
+    currentGame?: string;
+  }>({
+    isSyncing: false,
+    current: 0,
+    total: 0,
+    currentGame: ''
+  });
+
+  let hasFtpServers = $derived.by(() => {
+    if (!settings) return false;
+    const hasSaved = Array.isArray(settings.savedServers) && settings.savedServers.some((s: any) => s && s.host && s.host.trim() !== '');
+    const hasActive = !!(settings.activeServer && settings.activeServer.host && settings.activeServer.host.trim() !== '');
+    return hasSaved || hasActive;
+  });
+
+  let hasTorrentSources = $derived.by(() => {
+    if (!settings) return false;
+    return Array.isArray(settings.torrentSources) && settings.torrentSources.some((s: any) => s && s.enabled);
+  });
+
+  let activeDownloadProgress = $derived.by(() => {
+    const list = activeDownloads || [];
+    const downloading = list.find((d) => d && (d.status === 'downloading' || d.status === 'scanning'));
+    if (downloading) {
+      return {
+        isDownloading: true,
+        percent: Math.round(downloading.progressPercent || 0),
+        title: downloading.gameTitle || '',
+        speed: downloading.speedDisplay || ''
+      };
+    }
+    const queued = list.find((d) => d && d.status === 'queued');
+    if (queued) {
+      return {
+        isDownloading: true,
+        percent: Math.round(queued.progressPercent || 0),
+        title: queued.gameTitle || '',
+        speed: 'В очереди...'
+      };
+    }
+    return { isDownloading: false, percent: 0, title: '', speed: '' };
+  });
+
+  $effect(() => {
+    if (!hasFtpServers && activeTab === 'catalog') {
+      activeTab = hasTorrentSources ? 'torrents' : 'settings';
+    }
+    if (!hasTorrentSources && activeTab === 'torrents') {
+      activeTab = hasFtpServers ? 'catalog' : 'settings';
+    }
+  });
 
   function showToast(msg: string) {
     toastMessage = msg;
@@ -67,24 +135,87 @@
     }, 3000);
   }
 
-  async function loadInitialData() {
+  async function handleLoadTorrentCatalog(forceRefresh: boolean = false) {
+    isTorrentsLoading = true;
     try {
-      settings = await GetSettings().catch(() => null);
-      const [fetchedGames, fetchedDownloads, fetchedHistory] = await Promise.all([
-        GetCatalog(false).catch(() => []),
+      const res = await GetTorrentCatalog(forceRefresh);
+      torrentGames = Array.isArray(res) ? res : [];
+    } catch (e: any) {
+      console.error('Failed to load torrent catalog:', e);
+    } finally {
+      isTorrentsLoading = false;
+    }
+  }
+
+  async function loadInitialData() {
+    isCatalogLoading = true;
+    isTorrentsLoading = true;
+    try {
+      // 1. Fetch settings, downloads, and torrent sources immediately
+      const [fetchedSettings, fetchedDownloads, fetchedHistory, fetchedSources] = await Promise.all([
+        GetSettings().catch(() => null),
         GetDownloads().catch(() => []),
-        GetDownloadHistory().catch(() => [])
+        GetDownloadHistory().catch(() => []),
+        GetTorrentSources().catch(() => [])
       ]);
 
-      games = Array.isArray(fetchedGames) ? fetchedGames : [];
+      if (fetchedSettings) {
+        if ((!fetchedSettings.torrentSources || fetchedSettings.torrentSources.length === 0) && Array.isArray(fetchedSources) && fetchedSources.length > 0) {
+          fetchedSettings.torrentSources = fetchedSources;
+        }
+        settings = fetchedSettings;
+      }
       activeDownloads = Array.isArray(fetchedDownloads) ? fetchedDownloads : [];
       downloadHistory = Array.isArray(fetchedHistory) ? fetchedHistory : [];
 
       if (settings && settings.steamDeckMode) {
         switchToBigPicture();
       }
+
+      // Automatically select initial active tab based on configured sources
+      const ftpAvailable = (settings?.savedServers || []).some((s: any) => s && s.host && s.host.trim() !== '') ||
+        !!(settings?.activeServer && settings.activeServer.host && settings.activeServer.host.trim() !== '');
+      const torrentAvailable = (settings?.torrentSources || []).some((s: any) => s && s.enabled);
+
+      if (!ftpAvailable && torrentAvailable) {
+        activeTab = 'torrents';
+      } else if (!ftpAvailable && !torrentAvailable) {
+        activeTab = 'settings';
+      } else {
+        activeTab = 'catalog';
+      }
+
+      // 2. Fetch game catalog and torrent catalog concurrently and independently
+      if (ftpAvailable) {
+        GetCatalog(false)
+          .then((res) => {
+            games = Array.isArray(res) ? res : [];
+          })
+          .catch((err) => {
+            console.error('Failed to load initial catalog:', err);
+          })
+          .finally(() => {
+            isCatalogLoading = false;
+          });
+      } else {
+        isCatalogLoading = false;
+        games = [];
+      }
+
+      GetTorrentCatalog(false)
+        .then((res) => {
+          torrentGames = Array.isArray(res) ? res : [];
+        })
+        .catch((err) => {
+          console.error('Failed to load torrent catalog:', err);
+        })
+        .finally(() => {
+          isTorrentsLoading = false;
+        });
     } catch (e: any) {
       console.error('Failed to load initial state:', e);
+      isCatalogLoading = false;
+      isTorrentsLoading = false;
     }
   }
 
@@ -92,13 +223,24 @@
     if (isRefreshing) return;
     isRefreshing = true;
     try {
-      const res = await GetCatalog(true);
-      games = Array.isArray(res) ? res : [];
-      showToast('Каталог обновлен');
+      if (activeTab === 'torrents') {
+        isTorrentsLoading = true;
+        await SyncTorrentSources();
+        const res = await GetTorrentCatalog(true);
+        torrentGames = Array.isArray(res) ? res : [];
+        showToast('Каталог торрентов обновлен');
+      } else {
+        isCatalogLoading = true;
+        const res = await GetCatalog(true);
+        games = Array.isArray(res) ? res : [];
+        showToast('Каталог обновлен');
+      }
     } catch (e: any) {
       showToast('Ошибка обновления: ' + (e?.message || e));
     } finally {
       isRefreshing = false;
+      isCatalogLoading = false;
+      isTorrentsLoading = false;
     }
   }
 
@@ -318,16 +460,68 @@
       }
     });
 
+    // Listen to real-time torrent catalog updates
+    EventsOn('torrents:updated', async () => {
+      try {
+        const freshSettings = await GetSettings();
+        if (freshSettings) settings = freshSettings;
+      } catch (e) {
+        console.error('Failed to reload settings on torrents:updated:', e);
+      }
+      handleLoadTorrentCatalog(false);
+    });
+
     // Listen to progressive Steam enrichment events
     EventsOn('game:enriched', (enrichedGame: any) => {
       if (!enrichedGame) return;
-      games = (games || []).map((g) => (g && g.id === enrichedGame.id ? enrichedGame : g));
+      const match = (g: any) => {
+        if (!g) return g;
+        if (g.id === enrichedGame.id) return enrichedGame;
+        if (enrichedGame.steamAppId && enrichedGame.steamAppId !== 0 && g.steamAppId === enrichedGame.steamAppId) {
+          return {
+            ...g,
+            steamTitle: enrichedGame.steamTitle || g.steamTitle,
+            iconUrl: enrichedGame.iconUrl || g.iconUrl,
+            shortDescription: enrichedGame.shortDescription || g.shortDescription,
+            detailedDescription: enrichedGame.detailedDescription || g.detailedDescription,
+            headerImage: enrichedGame.headerImage || g.headerImage,
+            capsuleImage: enrichedGame.capsuleImage || g.capsuleImage,
+            backgroundImage: enrichedGame.backgroundImage || g.backgroundImage,
+            screenshots: (enrichedGame.screenshots && enrichedGame.screenshots.length > 0) ? enrichedGame.screenshots : g.screenshots,
+            movies: (enrichedGame.movies && enrichedGame.movies.length > 0) ? enrichedGame.movies : g.movies,
+            genres: (enrichedGame.genres && enrichedGame.genres.length > 0) ? enrichedGame.genres : g.genres,
+            developers: (enrichedGame.developers && enrichedGame.developers.length > 0) ? enrichedGame.developers : g.developers,
+            publishers: (enrichedGame.publishers && enrichedGame.publishers.length > 0) ? enrichedGame.publishers : g.publishers,
+            releaseDate: enrichedGame.releaseDate || g.releaseDate,
+            controllerSupport: enrichedGame.controllerSupport || g.controllerSupport,
+            pcRequirements: enrichedGame.pcRequirements || g.pcRequirements,
+            metacriticScore: enrichedGame.metacriticScore || g.metacriticScore,
+            reviewScoreDesc: enrichedGame.reviewScoreDesc || g.reviewScoreDesc,
+            reviewPercent: enrichedGame.reviewPercent || g.reviewPercent,
+            totalReviews: enrichedGame.totalReviews || g.totalReviews,
+          };
+        }
+        return g;
+      };
+      games = (games || []).map(match);
+      torrentGames = (torrentGames || []).map(match);
+    });
+
+    // Listen to background Steam metadata enrichment progress
+    EventsOn('metadata:progress', (progress: any) => {
+      if (!progress) return;
+      metadataProgress = {
+        isSyncing: !!progress.isSyncing,
+        current: progress.current || 0,
+        total: progress.total || 0,
+        currentGame: progress.currentGame || ''
+      };
     });
 
     // Listen to real-time Steam review summary updates
     EventsOn('game:reviews-updated', (event: any) => {
       if (!event) return;
-      games = (games || []).map((g) => {
+      const updateReview = (g: any) => {
         if (g && (g.id === event.gameId || (event.steamAppId > 0 && g.steamAppId === event.steamAppId))) {
           return {
             ...g,
@@ -337,14 +531,44 @@
           };
         }
         return g;
-      });
+      };
+      games = (games || []).map(updateReview);
+      torrentGames = (torrentGames || []).map(updateReview);
+    });
+
+    // Listen to remote catalog scan status
+    EventsOn('catalog:status', (data: any) => {
+      if (!data) return;
+      if (data.status === 'connecting' || data.status === 'scanning') {
+        catalogStatusText = data.message || '';
+      } else {
+        catalogStatusText = '';
+      }
+    });
+
+    // Listen to fast real-time icon updates
+    EventsOn('game:icon-updated', (event: any) => {
+      if (!event || (!event.appId && !event.gameId) || !event.iconUrl) return;
+      const updateIcon = (g: any) => {
+        if (g && ((event.appId > 0 && g.steamAppId === event.appId) || g.id === event.gameId)) {
+          return { ...g, iconUrl: event.iconUrl };
+        }
+        return g;
+      };
+      games = (games || []).map(updateIcon);
+      torrentGames = (torrentGames || []).map(updateIcon);
     });
 
     // Setup Gamepad Navigation
     gamepad.onTabChange = (dir) => {
-      const tabs: ('catalog' | 'downloads' | 'settings')[] = ['catalog', 'downloads', 'settings'];
+      const tabs: ('catalog' | 'torrents' | 'favorites' | 'downloads' | 'settings')[] = [];
+      if (hasFtpServers) tabs.push('catalog');
+      if (hasTorrentSources) tabs.push('torrents');
+      tabs.push('favorites', 'downloads', 'settings');
       const curIdx = tabs.indexOf(activeTab);
-      if (dir === 'NEXT') {
+      if (curIdx === -1) {
+        activeTab = tabs[0] || 'settings';
+      } else if (dir === 'NEXT') {
         activeTab = tabs[(curIdx + 1) % tabs.length];
       } else {
         activeTab = tabs[(curIdx - 1 + tabs.length) % tabs.length];
@@ -355,13 +579,18 @@
     };
 
     gamepad.onSearch = () => {
-      activeTab = 'catalog';
+      if (hasFtpServers) {
+        activeTab = 'catalog';
+      } else if (hasTorrentSources) {
+        activeTab = 'torrents';
+      }
       TriggerSteamOSKeyboard();
     };
 
     gamepad.onBack = () => {
-      if (activeTab !== 'catalog') {
-        activeTab = 'catalog';
+      const defaultTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings');
+      if (activeTab !== defaultTab) {
+        activeTab = defaultTab;
         setTimeout(() => {
           gamepad.focusFirstInZone('grid') || gamepad.focusFirstInZone('list');
         }, 100);
@@ -379,6 +608,10 @@
     gamepad.stop();
     EventsOff('download:progress');
     EventsOff('game:enriched');
+    EventsOff('metadata:progress');
+    EventsOff('torrents:updated');
+    EventsOff('catalog:status');
+    EventsOff('game:icon-updated');
   });
 </script>
 
@@ -386,10 +619,15 @@
   <BigPictureShell
     bind:activeTab
     {games}
+    {torrentGames}
+    {hasFtpServers}
+    {hasTorrentSources}
     {activeDownloads}
     {downloadHistory}
     {settings}
     {isGamepadConnected}
+    {isCatalogLoading}
+    {isTorrentsLoading}
     onStartDownload={handleStartDownload}
     onPauseDownload={handlePauseDownload}
     onResumeDownload={handleResumeDownload}
@@ -420,12 +658,17 @@
       <!-- Left Thin Navigation Rail (64px) -->
       <NavRail
         bind:activeTab
+        {hasFtpServers}
+        {hasTorrentSources}
         activeDownloadsCount={(activeDownloads || []).filter((d) => d && (d.status === 'downloading' || d.status === 'queued')).length}
+        downloadProgress={activeDownloadProgress}
         {isGamepadConnected}
         isConnected={!!settings?.activeServer?.host}
         serverName={settings?.activeServer?.name || ''}
         onRefresh={handleRefreshCatalog}
         {isRefreshing}
+        {metadataProgress}
+        isCatalogLoading={isCatalogLoading || isTorrentsLoading}
         onToggleBigPicture={switchToBigPicture}
       />
 
@@ -434,10 +677,29 @@
       {#if activeTab === 'catalog'}
         <MasterDetailCatalog
           {games}
+          isLoading={isCatalogLoading}
+          loadingStatusText={catalogStatusText}
           bind:searchQuery
           downloadPath={settings?.downloadPath || 'C:\\Ducke'}
           onStartDownload={handleStartDownload}
           onSelectFolder={SelectDirectory}
+        />
+      {:else if activeTab === 'torrents'}
+        <MasterDetailCatalog
+          games={torrentGames}
+          isLoading={isTorrentsLoading}
+          loadingStatusText="Загрузка каталога торрентов..."
+          bind:searchQuery
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onStartDownload={handleStartDownload}
+          onSelectFolder={SelectDirectory}
+        />
+      {:else if activeTab === 'favorites'}
+        <FavoritesView
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onStartDownload={handleStartDownload}
+          onSelectFolder={SelectDirectory}
+          onOpenCatalog={() => (activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings'))}
         />
       {:else if activeTab === 'downloads'}
         <DownloadsView
@@ -455,7 +717,7 @@
           onDeleteRecord={handleDeleteRecord}
           onOpenFolder={handleOpenFolder}
           onLaunchGame={handleLaunchGame}
-          onGoToCatalog={() => (activeTab = 'catalog')}
+          onGoToCatalog={() => (activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings'))}
           onGoToSettings={() => (activeTab = 'settings')}
           onUpdateSpeedLimit={async (kbps: number) => {
             try {

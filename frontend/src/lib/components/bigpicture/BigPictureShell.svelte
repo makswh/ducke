@@ -2,19 +2,25 @@
   import BigPictureHeader from './BigPictureHeader.svelte';
   import BigPictureLibrary from './BigPictureLibrary.svelte';
   import BigPictureGameDetail from './BigPictureGameDetail.svelte';
+  import BigPictureFavorites from './BigPictureFavorites.svelte';
   import BigPictureDownloads from './BigPictureDownloads.svelte';
   import BigPictureSettings from './BigPictureSettings.svelte';
   import { sound } from '../../navigation/audio';
 
-  type TabType = 'catalog' | 'downloads' | 'settings';
+  type TabType = 'catalog' | 'torrents' | 'favorites' | 'downloads' | 'settings';
 
   let {
     activeTab = $bindable<TabType>('catalog'),
     games = [] as any[],
+    torrentGames = [] as any[],
+    hasFtpServers = false,
+    hasTorrentSources = false,
     activeDownloads = [] as any[],
     downloadHistory = [] as any[],
     settings = null as any,
     isGamepadConnected = false,
+    isCatalogLoading = false,
+    isTorrentsLoading = false,
     onStartDownload = (gameId: number, targetPath: string) => {},
     onPauseDownload = (id: string) => {},
     onResumeDownload = (id: string) => {},
@@ -65,8 +71,9 @@
         e.preventDefault();
         return;
       }
-      if (activeTab !== 'catalog') {
-        activeTab = 'catalog';
+      const defaultTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings');
+      if (activeTab !== defaultTab && activeTab !== 'torrents' && activeTab !== 'favorites') {
+        activeTab = defaultTab;
         e.preventDefault();
         setTimeout(() => {
           gamepad.focusFirstInZone('grid');
@@ -76,8 +83,9 @@
     };
 
     const handleToggleMenu = () => {
+      const defaultTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings');
       if (activeTab === 'settings') {
-        activeTab = 'catalog';
+        activeTab = defaultTab;
       } else {
         selectedGame = null;
         isSearchOpen = false;
@@ -89,8 +97,8 @@
     };
 
     const handleToggleSearch = () => {
-      if (activeTab !== 'catalog') {
-        activeTab = 'catalog';
+      if ((!hasFtpServers || activeTab !== 'catalog') && activeTab !== 'torrents') {
+        activeTab = hasFtpServers ? 'catalog' : 'torrents';
       }
       selectedGame = null;
       isSearchOpen = !isSearchOpen;
@@ -113,6 +121,8 @@
   <!-- SteamOS Top Header -->
   <BigPictureHeader
     {activeTab}
+    {hasFtpServers}
+    {hasTorrentSources}
     onTabChange={(t) => {
       activeTab = t;
       selectedGame = null;
@@ -120,7 +130,9 @@
     activeDownloadsCount={(activeDownloads || []).filter((d) => d && (d.status === 'downloading' || d.status === 'queued')).length}
     {isGamepadConnected}
     onToggleSearch={() => {
-      activeTab = 'catalog';
+      if ((!hasFtpServers || activeTab !== 'catalog') && activeTab !== 'torrents') {
+        activeTab = hasFtpServers ? 'catalog' : 'torrents';
+      }
       selectedGame = null;
       isSearchOpen = !isSearchOpen;
     }}
@@ -134,11 +146,54 @@
       <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
         <BigPictureLibrary
           {games}
+          isLoading={isCatalogLoading}
           {activeDownloads}
           bind:searchQuery
           onSelectGame={handleSelectGame}
           {isSearchOpen}
           onCloseSearch={() => (isSearchOpen = false)}
+        />
+      </div>
+      {#if selectedGame}
+        <BigPictureGameDetail
+          game={selectedGame}
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onBack={handleBackToLibrary}
+          {onStartDownload}
+          {onSelectFolder}
+          {activeDownloads}
+        />
+      {/if}
+    {:else if activeTab === 'torrents'}
+      <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
+        <BigPictureLibrary
+          games={torrentGames}
+          isLoading={isTorrentsLoading}
+          {activeDownloads}
+          bind:searchQuery
+          onSelectGame={handleSelectGame}
+          {isSearchOpen}
+          onCloseSearch={() => (isSearchOpen = false)}
+        />
+      </div>
+      {#if selectedGame}
+        <BigPictureGameDetail
+          game={selectedGame}
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onBack={handleBackToLibrary}
+          {onStartDownload}
+          {onSelectFolder}
+          {activeDownloads}
+        />
+      {/if}
+    {:else if activeTab === 'favorites'}
+      <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
+        <BigPictureFavorites
+          onSelectGame={handleSelectGame}
+          onExploreCatalog={() => {
+            activeTab = hasFtpServers ? 'catalog' : 'torrents';
+            selectedGame = null;
+          }}
         />
       </div>
       {#if selectedGame}
@@ -166,7 +221,7 @@
         {onDeleteRecord}
         {onOpenFolder}
         onGoToCatalog={() => {
-          activeTab = 'catalog';
+          activeTab = hasFtpServers ? 'catalog' : 'torrents';
           selectedGame = null;
         }}
       />
@@ -185,4 +240,38 @@
       />
     {/if}
   </div>
+
+  <!-- SteamOS Gamepad Footer HUD -->
+  <footer class="h-10 px-8 flex items-center justify-between bg-[#050608] border-t border-white/[0.06] text-[#8e95a2] text-xs font-medium z-30 select-none flex-shrink-0">
+    <div class="flex items-center gap-6">
+      <div class="flex items-center gap-1.5">
+        <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
+        <span>Выбрать</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
+        <span>Назад</span>
+      </div>
+      {#if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
+          <span>Поиск</span>
+        </div>
+      {/if}
+      <div class="flex items-center gap-1.5">
+        <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+        <span>Вкладки</span>
+      </div>
+    </div>
+    
+    <div class="flex items-center gap-4 text-[11px] text-[#64748b]">
+      <span>Ducke Console</span>
+      {#if isGamepadConnected}
+        <span class="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          Геймпад подключен
+        </span>
+      {/if}
+    </div>
+  </footer>
 </div>

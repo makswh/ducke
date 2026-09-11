@@ -12,12 +12,15 @@
     Check
   } from 'lucide-svelte';
   import type { GameEntity } from '../types/game';
+  import { deduplicateGames } from '../utils/gameDeduplication';
   import GameDetailView from './GameDetailView.svelte';
 
   let {
     games = [] as GameEntity[],
     searchQuery = $bindable<string>(''),
     downloadPath = '',
+    isLoading = false,
+    loadingStatusText = '',
     onStartDownload = (gameId: number, targetPath: string) => {},
     onSelectFolder = async (): Promise<string> => ''
   } = $props();
@@ -26,7 +29,7 @@
   let selectedGenre = $state<string>('all');
   let genreSearchQuery = $state<string>('');
   let isGenreMenuOpen = $state<boolean>(false);
-  let selectedSort = $state<'date_desc' | 'name' | 'size_desc' | 'size_asc'>('date_desc');
+  let selectedSort = $state<'date_desc' | 'name' | 'size_desc' | 'size_asc' | 'rating_desc' | 'popular_desc'>('date_desc');
   let selectedGameId = $state<number | null>(null);
   let imageLoadFailed = $state<Record<string, boolean>>({});
 
@@ -67,26 +70,17 @@
 
   // Deduplicate and filter games
   let filteredGames = $derived.by(() => {
-    const list = games || [];
-    const seen = new Set<string>();
-    const uniqueList: GameEntity[] = [];
+    const list = deduplicateGames(games || []);
 
-    for (const g of list) {
-      if (!g) continue;
-      const key = (g.remotePath || g.cleanTitle || String(g.id)).trim().toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      uniqueList.push(g);
-    }
-
-    let result = uniqueList.filter((g) => {
+    let result = list.filter((g) => {
       if (searchQuery && searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const titleMatch = (g.cleanTitle || '').toLowerCase().includes(q);
         const steamTitleMatch = (g.steamTitle || '').toLowerCase().includes(q);
         const genreMatch = (g.genres || []).some((genre) => genre.toLowerCase().includes(q));
         const pubMatch = (g.publishers || []).some((pub) => pub.toLowerCase().includes(q));
-        if (!titleMatch && !steamTitleMatch && !genreMatch && !pubMatch) return false;
+        const variantMatch = (g.variants || []).some((v) => (v.rawName || '').toLowerCase().includes(q) || (v.torrentSource || '').toLowerCase().includes(q));
+        if (!titleMatch && !steamTitleMatch && !genreMatch && !pubMatch && !variantMatch) return false;
       }
 
       if (selectedGenre !== 'all') {
@@ -122,6 +116,18 @@
       result.sort((a, b) => (a.sizeBytes || 0) - (b.sizeBytes || 0));
     } else if (selectedSort === 'name') {
       result.sort((a, b) => (a.cleanTitle || '').localeCompare(b.cleanTitle || ''));
+    } else if (selectedSort === 'rating_desc') {
+      result.sort((a, b) => {
+        const diff = (b.reviewPercent || 0) - (a.reviewPercent || 0);
+        if (diff !== 0) return diff;
+        return (b.totalReviews || 0) - (a.totalReviews || 0);
+      });
+    } else if (selectedSort === 'popular_desc') {
+      result.sort((a, b) => {
+        const scoreA = Math.log10((a.totalReviews || 0) + 1) * ((a.reviewPercent || 0) / 100);
+        const scoreB = Math.log10((b.totalReviews || 0) + 1) * ((b.reviewPercent || 0) / 100);
+        return scoreB - scoreA;
+      });
     } else {
       result.sort((a, b) => (b.id || 0) - (a.id || 0));
     }
@@ -141,10 +147,16 @@
     return filteredGames.find((g) => g.id === selectedGameId) || (filteredGames.length > 0 ? filteredGames[0] : null);
   });
 
+  function isPlaceholderTitle(title: string | undefined | null): boolean {
+    if (!title) return true;
+    const t = title.trim();
+    return t === '' || /^Steam App \d+$/i.test(t);
+  }
+
   function getDisplayTitle(game: GameEntity | null): string {
     if (!game) return '';
-    const raw = (game.steamTitle && game.steamTitle.trim() !== '')
-      ? game.steamTitle
+    const raw = (!isPlaceholderTitle(game.steamTitle))
+      ? game.steamTitle!
       : (game.cleanTitle && game.cleanTitle.trim() !== '' ? game.cleanTitle : (game.rawName || ''));
     return raw
       .replace(/^[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]\s*/gi, '')
@@ -441,6 +453,8 @@
           class="h-8 bg-[#07080a] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2 rounded-lg border border-white/[0.08] focus:outline-none focus:border-white/20 cursor-pointer flex-shrink-0 transition-colors"
         >
           <option value="date_desc">Новые</option>
+          <option value="popular_desc">По популярности</option>
+          <option value="rating_desc">По оценке Steam</option>
           <option value="name">А — Я</option>
           <option value="size_desc">Большие</option>
           <option value="size_asc">Лёгкие</option>
@@ -486,7 +500,24 @@
       onscroll={handleScroll}
       class="flex-1 overflow-y-auto p-2 select-none"
     >
-      {#if filteredGames.length === 0}
+      {#if isLoading && filteredGames.length === 0}
+        <!-- Loading Skeleton State -->
+        <div class="px-2.5 py-2 mb-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-xs text-sky-300 flex items-center gap-2">
+          <div class="w-3.5 h-3.5 rounded-full border-2 border-sky-400 border-t-transparent animate-spin flex-shrink-0"></div>
+          <span class="truncate font-medium">{loadingStatusText || 'Загрузка библиотеки игр...'}</span>
+        </div>
+        <div class="flex flex-col gap-1 w-full">
+          {#each Array(8) as _}
+            <div class="h-[58px] rounded-xl bg-white/[0.03] border border-white/[0.04] p-2.5 px-3 flex flex-col justify-between animate-pulse">
+              <div class="h-3 bg-white/10 rounded w-3/4"></div>
+              <div class="flex justify-between items-center">
+                <div class="h-2 bg-white/5 rounded w-16"></div>
+                <div class="h-2 bg-white/5 rounded w-12"></div>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {:else if filteredGames.length === 0}
         <div class="p-8 text-center text-xs text-[#6b7280] space-y-2">
           <Layers class="w-6 h-6 mx-auto text-[#4b5563]" />
           <p>Игр не найдено</p>
@@ -507,7 +538,7 @@
                 data-nav-item
                 role="button"
                 tabindex="0"
-                class="group relative h-[58px] overflow-hidden rounded-xl cursor-pointer transition-colors duration-150 border {isSelected ? 'border-sky-500/50 bg-[#131722]' : 'border-white/[0.04] bg-[#0c0e14]/90 hover:bg-[#11141c] hover:border-white/10'}"
+                class="group relative h-[58px] overflow-hidden rounded-xl cursor-pointer transition-colors duration-150 border-2 {isSelected ? 'border-sky-500 bg-[#131722]' : 'border-white/[0.04] bg-[#0c0e14]/90 hover:bg-[#11141c] hover:border-white/10'}"
                 onclick={() => {
                   selectedGameId = game.id;
                 }}
@@ -517,11 +548,6 @@
                   }
                 }}
               >
-                <!-- Left accent bar for selected item -->
-                {#if isSelected}
-                  <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-sky-400 rounded-l-xl z-20"></div>
-                {/if}
-
                 <!-- Background Cover -->
                 {#if artUrl && !imageLoadFailed[artUrl]}
                   <div
@@ -533,9 +559,21 @@
 
                 <!-- Card Content -->
                 <div class="relative z-10 p-2.5 px-3 h-full flex flex-col justify-between">
-                  <h3 class="text-xs font-semibold leading-snug truncate {isSelected ? 'text-white' : 'text-[#d1d5db] group-hover:text-white'}">
-                    {getDisplayTitle(game)}
-                  </h3>
+                  <div class="flex items-center gap-2 min-w-0">
+                    {#if game.iconUrl && !imageLoadFailed[game.iconUrl]}
+                      <img
+                        src={game.iconUrl}
+                        alt=""
+                        class="w-5 h-5 rounded flex-shrink-0 object-contain"
+                        onerror={() => {
+                          imageLoadFailed[game.iconUrl] = true;
+                        }}
+                      />
+                    {/if}
+                    <h3 class="text-xs font-semibold leading-snug truncate {isSelected ? 'text-white' : 'text-[#d1d5db] group-hover:text-white'}">
+                      {getDisplayTitle(game)}
+                    </h3>
+                  </div>
 
                   <div class="flex items-center justify-between text-[10px]">
                     <span class="text-[#8e95a2] truncate font-mono">
@@ -559,6 +597,8 @@
   <!-- 2. MAIN DETAIL VIEW -->
   <GameDetailView
     game={selectedGame}
+    {isLoading}
+    {loadingStatusText}
     {downloadPath}
     {onStartDownload}
     {onSelectFolder}

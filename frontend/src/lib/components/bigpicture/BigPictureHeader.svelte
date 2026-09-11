@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import {
     Gamepad2,
@@ -11,11 +11,13 @@
   } from 'lucide-svelte';
   import { sound } from '../../navigation/audio';
 
-  type TabType = 'catalog' | 'downloads' | 'settings';
+  type TabType = 'catalog' | 'torrents' | 'favorites' | 'downloads' | 'settings';
 
   let {
     activeTab = 'catalog' as TabType,
     onTabChange = (tab: TabType) => {},
+    hasFtpServers = false,
+    hasTorrentSources = false,
     activeDownloadsCount = 0,
     isGamepadConnected = false,
     onToggleSearch = () => {},
@@ -71,19 +73,47 @@
     <!-- LB Badge -->
     <span class="px-2 py-0.5 rounded bg-white/[0.06] border border-white/[0.1] text-[10px] font-bold text-[#8e95a2] hidden md:inline">LB</span>
 
-    <!-- Tab 1: Library -->
+    <!-- Tab 1: Library (only shown if FTP servers are configured) -->
+    {#if hasFtpServers}
+      <button
+        data-nav-item
+        class="px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer {activeTab === 'catalog' ? 'bg-white/15 text-white shadow-md' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05]'}"
+        onclick={() => {
+          sound.playTab();
+          onTabChange('catalog');
+        }}
+      >
+        Библиотека
+      </button>
+    {/if}
+
+    <!-- Torrents Tab (Conditional) -->
+    {#if hasTorrentSources}
+      <button
+        data-nav-item
+        class="px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer {activeTab === 'torrents' ? 'bg-white/15 text-white shadow-md' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05]'}"
+        onclick={() => {
+          sound.playTab();
+          onTabChange('torrents');
+        }}
+      >
+        Торренты
+      </button>
+    {/if}
+
+    <!-- Tab: Favorites -->
     <button
       data-nav-item
-      class="px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer {activeTab === 'catalog' ? 'bg-white/15 text-white shadow-md' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05]'}"
+      class="px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer {activeTab === 'favorites' ? 'bg-white/15 text-white shadow-md' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05]'}"
       onclick={() => {
         sound.playTab();
-        onTabChange('catalog');
+        onTabChange('favorites');
       }}
     >
-      Библиотека
+      Избранное
     </button>
 
-    <!-- Tab 2: Downloads -->
+    <!-- Tab: Downloads -->
     <button
       data-nav-item
       class="px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'downloads' ? 'bg-white/15 text-white shadow-md' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05]'}"

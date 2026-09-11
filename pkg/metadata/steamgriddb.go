@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"gamevault/pkg/remote"
@@ -105,16 +106,19 @@ type SteamGridDBAssets struct {
 
 // SteamGridDBService handles searching and fetching assets from SteamGridDB
 type SteamGridDBService struct {
-	httpClient *http.Client
-	apiKey     string
+	httpClient  *http.Client
+	apiKey      string
+	assetCache  sync.Map // cleanTitle string -> *SteamGridDBAssets
+	searchCache sync.Map // cleanTitle string -> *SteamGridDBSearchItem
 }
 
 // NewSteamGridDBService creates a new SteamGridDB service
 func NewSteamGridDBService(apiKey string) *SteamGridDBService {
 	tr := &http.Transport{
-		MaxIdleConns:        50,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     60 * time.Second,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
 	}
 	return &SteamGridDBService{
 		httpClient: &http.Client{
@@ -133,6 +137,14 @@ func (s *SteamGridDBService) SearchGame(title string) (*SteamGridDBSearchItem, e
 	}
 	if clean == "" {
 		return nil, fmt.Errorf("empty search title")
+	}
+
+	if val, ok := s.searchCache.Load(clean); ok {
+		item := val.(*SteamGridDBSearchItem)
+		if item == nil {
+			return nil, fmt.Errorf("no games found on steamgriddb for %q", title)
+		}
+		return item, nil
 	}
 
 	endpoint := fmt.Sprintf("%s/api/public/search/autocomplete?term=%s", sgdbBaseURL, url.QueryEscape(clean))
@@ -191,11 +203,13 @@ func (s *SteamGridDBService) SearchGame(title string) (*SteamGridDBSearchItem, e
 		f1 := strings.Fields(strings.ToLower(title))
 		f2 := strings.Fields(strings.ToLower(best.item.Name))
 		if len(f1) > 0 && len(f2) > 0 && f1[0] == f2[0] {
+			s.searchCache.Store(clean, &best.item)
 			return &best.item, nil
 		}
 		return nil, fmt.Errorf("similarity too low (%.2f) for %q vs %q", best.score, title, best.item.Name)
 	}
 
+	s.searchCache.Store(clean, &best.item)
 	return &best.item, nil
 }
 
@@ -312,10 +326,30 @@ func (s *SteamGridDBService) FetchGameAssets(gameID int) (*SteamGridDBAssets, er
 
 // FindAssetsForGame searches for a game by title and retrieves its assets
 func (s *SteamGridDBService) FindAssetsForGame(title string) (*SteamGridDBAssets, error) {
+	clean := remote.SanitizeForSteamSearch(title)
+	if clean == "" {
+		clean = strings.TrimSpace(title)
+	}
+	if clean == "" {
+		return nil, fmt.Errorf("empty title")
+	}
+
+	if val, ok := s.assetCache.Load(clean); ok {
+		assets := val.(*SteamGridDBAssets)
+		if assets == nil {
+			return nil, fmt.Errorf("no assets found on steamgriddb for %q", title)
+		}
+		return assets, nil
+	}
+
 	item, err := s.SearchGame(title)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.FetchGameAssets(item.ID)
+	assets, err := s.FetchGameAssets(item.ID)
+	if err == nil && assets != nil {
+		s.assetCache.Store(clean, assets)
+	}
+	return assets, err
 }

@@ -31,6 +31,18 @@ func TestUserLogCases(t *testing.T) {
 		{"L A Noir", "L.A. Noire", 0.85},
 		{"God of War Ragnarok", "God of War Ragnarök", 0.95},
 		{"Monsters are Coming! Rock & Road", "Monsters are Coming!", 0.75},
+		{"Edge of Sanity v 1 1 1 [Папка игры] (2024)", "Edge of Sanity", 0.95},
+		{"Elden Ring [RePack] (2022)", "ELDEN RING", 0.95},
+		{"Cyberpunk 2077 v 2.1 [GOG] (2020)", "Cyberpunk 2077", 0.95},
+		{"GTA Vice City DE", "Grand Theft Auto: Vice City - The Definitive Edition", 0.90},
+		{"BeingADIK S1&2", "Being a DIK - Season 1 & 2", 0.90},
+		{"BeingADIK S3", "Being a DIK - Season 3", 0.90},
+		{"Сибирь 3 / Syberia 3 PC | by xatab", "Syberia 3", 0.90},
+		{"Сибирь 3 Syberia 3 PC | by xatab", "Syberia 3", 0.90},
+		{"Сирия Русская буря Syrian Warfare PC | от xatab", "Syrian Warfare", 0.90},
+		{"Легенды Эйзенвальда Legends of Eisenwald PC | от xatab", "Legends of Eisenwald", 0.90},
+		{"Ведьмак Трилогия The Witcher Trilogy PC | от xatab", "The Witcher Trilogy", 0.90},
+		{"Герои меча и магии 7 Might and Magic Heroes VII PC | от xatab", "Might & Magic Heroes VII", 0.85},
 	}
 
 	for _, tc := range testCases {

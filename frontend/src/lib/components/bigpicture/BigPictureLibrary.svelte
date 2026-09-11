@@ -6,14 +6,19 @@
     Check,
     Gamepad2,
     HardDrive,
-    X
+    X,
+    ArrowUpDown,
+    Layers,
+    ChevronDown
   } from 'lucide-svelte';
   import { sound } from '../../navigation/audio';
   import { gamepad } from '../../navigation/gamepad';
+  import { deduplicateGames } from '../../utils/gameDeduplication';
 
   let {
     games = [] as any[],
     activeDownloads = [] as any[],
+    isLoading = false,
     searchQuery = $bindable(''),
     onSelectGame = (game: any) => {},
     isSearchOpen = false,
@@ -23,6 +28,32 @@
   type FilterType = 'all' | 'downloading' | 'has_steam';
   let activeFilter = $state<FilterType>('all');
   let searchInputEl = $state<HTMLInputElement | null>(null);
+
+  // Sorting & Genre State
+  type SortType = 'date_desc' | 'rating_desc' | 'popular_desc' | 'name' | 'size_desc';
+  let selectedSort = $state<SortType>('date_desc');
+  let selectedGenre = $state<string>('all');
+  let isSortDropdownOpen = $state<boolean>(false);
+
+  // Derive top genres from loaded games
+  let availableGenres = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const g of games || []) {
+      const genresList = g.genres || g.steamGenres;
+      if (genresList && Array.isArray(genresList)) {
+        for (const raw of genresList) {
+          const genre = typeof raw === 'string' ? raw.trim() : '';
+          if (genre && genre.length > 1) {
+            counts.set(genre, (counts.get(genre) || 0) + 1);
+          }
+        }
+      }
+    }
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  });
 
   // Virtualization State
   let scrollContainer = $state<HTMLDivElement | null>(null);
@@ -35,7 +66,7 @@
   const OVERSCAN_ROWS = 3; // 3 rows buffer above and below for smooth gamepad and analog stick scrolling
 
   let filteredGames = $derived.by(() => {
-    let list = games || [];
+    let list = deduplicateGames(games || []);
 
     // Filter by category
     if (activeFilter === 'downloading') {
@@ -45,18 +76,49 @@
       list = list.filter((g) => (g.steamAppId && g.steamAppId !== 0) || g.capsuleImage || g.steamSynced);
     }
 
+    // Filter by genre
+    if (selectedGenre !== 'all') {
+      list = list.filter((g) => {
+        const glist = g.genres || g.steamGenres || [];
+        return glist.some((gen: string) => typeof gen === 'string' && gen.toLowerCase() === selectedGenre.toLowerCase());
+      });
+    }
+
     // Filter by search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       list = list.filter((g) => {
         const title = (g.cleanTitle || g.displayTitle || g.folderName || '').toLowerCase();
         const steamTitle = (g.steamTitle || '').toLowerCase();
-        return title.includes(q) || steamTitle.includes(q);
+        const variantMatch = (g.variants || []).some((v: any) => (v.rawName || '').toLowerCase().includes(q) || (v.torrentSource || '').toLowerCase().includes(q));
+        return title.includes(q) || steamTitle.includes(q) || variantMatch;
       });
     }
 
-    // Default sort by date added to server (newest first)
-    return list.slice().sort((a, b) => (b.id || 0) - (a.id || 0));
+    // Sort
+    const sorted = list.slice();
+    if (selectedSort === 'rating_desc') {
+      sorted.sort((a, b) => {
+        const diff = (b.reviewPercent || 0) - (a.reviewPercent || 0);
+        if (diff !== 0) return diff;
+        return (b.totalReviews || 0) - (a.totalReviews || 0);
+      });
+    } else if (selectedSort === 'popular_desc') {
+      sorted.sort((a, b) => {
+        const scoreA = Math.log10((a.totalReviews || 0) + 1) * ((a.reviewPercent || 0) / 100);
+        const scoreB = Math.log10((b.totalReviews || 0) + 1) * ((b.reviewPercent || 0) / 100);
+        return scoreB - scoreA;
+      });
+    } else if (selectedSort === 'name') {
+      sorted.sort((a, b) => (a.cleanTitle || a.displayTitle || a.folderName || '').localeCompare(b.cleanTitle || b.displayTitle || b.folderName || ''));
+    } else if (selectedSort === 'size_desc') {
+      sorted.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0));
+    } else {
+      // Default: date_desc (newest added first)
+      sorted.sort((a, b) => (b.id || 0) - (a.id || 0));
+    }
+
+    return sorted;
   });
 
   // Calculate dynamic column count based on container width matching Tailwind breakpoints
@@ -102,15 +164,26 @@
 
   let offsetY = $derived(startRow * rowTotalHeight);
 
+  function getSortLabel(sort: SortType): string {
+    switch (sort) {
+      case 'date_desc': return 'По дате';
+      case 'rating_desc': return 'Оценка Steam';
+      case 'popular_desc': return 'Популярность';
+      case 'name': return 'По названию';
+      case 'size_desc': return 'По размеру';
+      default: return 'По дате';
+    }
+  }
+
   function handleScroll() {
     if (scrollContainer) {
       scrollTop = scrollContainer.scrollTop;
     }
   }
 
-  // Reset scroll when filter or search changes
+  // Reset scroll when filter, genre, sort, or search changes
   $effect(() => {
-    const _ = [activeFilter, searchQuery];
+    const _ = [activeFilter, searchQuery, selectedGenre, selectedSort];
     if (scrollContainer) {
       scrollContainer.scrollTop = 0;
       scrollTop = 0;
@@ -250,8 +323,8 @@
 
 <div data-nav-zone="grid" class="flex-1 flex flex-col h-full overflow-hidden bg-[#07080a] text-white select-none relative">
   
-  <!-- Top Ribbon: Filters & Game Count -->
-  <div class="px-8 pt-6 pb-4 flex items-center justify-between flex-shrink-0 z-10 border-b border-white/[0.04]">
+  <!-- Top Ribbon: Filters, Sort & Game Count -->
+  <div class="px-8 pt-6 pb-3 flex items-center justify-between flex-shrink-0 z-10 border-b border-white/[0.04]">
     <div class="flex items-center gap-2">
       <button
         data-nav-item
@@ -292,21 +365,100 @@
       </button>
     </div>
 
-    <!-- Active Search Indicator -->
-    {#if searchQuery}
-      <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
-        <span>Поиск: "{searchQuery}"</span>
+    <!-- Right Controls: Sort Dropdown & Search Query Badge -->
+    <div class="flex items-center gap-3 relative">
+      {#if searchQuery}
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
+          <span>Поиск: "{searchQuery}"</span>
+          <button
+            class="hover:text-white cursor-pointer"
+            onclick={() => {
+              searchQuery = '';
+            }}
+          >
+            <X class="w-3.5 h-3.5" />
+          </button>
+        </div>
+      {/if}
+
+      <!-- Console Sort Selector -->
+      <div class="relative">
         <button
-          class="hover:text-white cursor-pointer"
+          data-nav-item
+          class="px-3.5 py-2 rounded-xl bg-white/[0.05] hover:bg-white/10 text-xs font-semibold text-[#8e95a2] hover:text-white flex items-center gap-2 transition-colors cursor-pointer border border-white/5"
           onclick={() => {
-            searchQuery = '';
+            sound.playFocus();
+            isSortDropdownOpen = !isSortDropdownOpen;
           }}
         >
-          <X class="w-3.5 h-3.5" />
+          <ArrowUpDown class="w-3.5 h-3.5 text-sky-400" />
+          <span>{getSortLabel(selectedSort)}</span>
+          <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isSortDropdownOpen ? 'rotate-180' : ''}" />
         </button>
+
+        {#if isSortDropdownOpen}
+          <div
+            class="absolute right-0 top-full mt-2 z-50 w-48 rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1 space-y-0.5 backdrop-blur-md"
+          >
+            {#each [
+              { id: 'date_desc', label: 'По дате' },
+              { id: 'rating_desc', label: 'Оценка Steam' },
+              { id: 'popular_desc', label: 'Популярность' },
+              { id: 'name', label: 'По названию' },
+              { id: 'size_desc', label: 'По размеру' }
+            ] as opt}
+              <button
+                data-nav-item
+                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer {selectedSort === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                onclick={() => {
+                  sound.playSelect();
+                  selectedSort = opt.id as SortType;
+                  isSortDropdownOpen = false;
+                }}
+              >
+                <span>{opt.label}</span>
+                {#if selectedSort === opt.id}
+                  <Check class="w-3.5 h-3.5 text-sky-400" />
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
-    {/if}
+    </div>
   </div>
+
+  <!-- Quick Genre Ribbon -->
+  {#if availableGenres.length > 0}
+    <div class="px-8 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-white/[0.04] bg-[#050608]/40 flex-shrink-0">
+      <span class="text-[11px] font-bold text-[#64748b] uppercase tracking-wider mr-1 flex items-center gap-1 flex-shrink-0">
+        <Layers class="w-3.5 h-3.5" />
+        Жанр:
+      </span>
+      <button
+        data-nav-item
+        class="px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre === 'all' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        onclick={() => {
+          sound.playFocus();
+          selectedGenre = 'all';
+        }}
+      >
+        Все ({games.length})
+      </button>
+      {#each availableGenres as item}
+        <button
+          data-nav-item
+          class="px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre.toLowerCase() === item.name.toLowerCase() ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          onclick={() => {
+            sound.playFocus();
+            selectedGenre = item.name;
+          }}
+        >
+          {item.name} ({item.count})
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   <!-- Search Modal Overlay (when X is pressed) -->
   {#if isSearchOpen}
@@ -343,7 +495,13 @@
     onscroll={handleScroll}
     class="flex-1 overflow-y-auto p-8 pt-6 relative focus:outline-none"
   >
-    {#if filteredGames.length === 0}
+    {#if isLoading && filteredGames.length === 0}
+      <div class="h-64 flex flex-col items-center justify-center text-center space-y-3 text-[#8e95a2]">
+        <div class="w-10 h-10 rounded-full border-2 border-sky-400 border-t-transparent animate-spin"></div>
+        <p class="text-sm font-semibold text-white">Загрузка библиотеки...</p>
+        <p class="text-xs text-[#64748b]">Получение списка игр с сервера</p>
+      </div>
+    {:else if filteredGames.length === 0}
       <div class="h-64 flex flex-col items-center justify-center text-center space-y-2 text-[#8e95a2]">
         <p class="text-sm font-semibold">Игры не найдены</p>
         {#if searchQuery}
@@ -410,6 +568,13 @@
                   <div class="absolute top-2.5 right-2.5 px-2 py-1 rounded-lg bg-sky-500 text-black text-[10px] font-black tracking-wider flex items-center gap-1 shadow-lg z-20">
                     <Download class="w-3 h-3 animate-bounce" />
                     <span>СКАЧИВАЕТСЯ</span>
+                  </div>
+                {/if}
+
+                <!-- Steam rating badge bottom left -->
+                {#if game.reviewPercent && game.reviewPercent > 0}
+                  <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
+                    <span>★ {game.reviewPercent}%</span>
                   </div>
                 {/if}
 

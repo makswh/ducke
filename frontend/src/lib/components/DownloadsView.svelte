@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import {
     Pause,
     Play,
@@ -37,6 +37,10 @@
     totalFiles?: number;
     localPath: string;
     errorMessage?: string;
+    isTorrent?: boolean;
+    magnetUri?: string;
+    torrentSeeds?: number;
+    torrentPeers?: number;
   }
 
   interface DownloadRecord {
@@ -49,6 +53,8 @@
     downloadedBytes: number;
     status: string;
     errorMessage: string;
+    isTorrent?: boolean;
+    magnetUri?: string;
     createdAt: number;
     updatedAt: number;
   }
@@ -79,14 +85,20 @@
     onUpdateSpeedLimit = (kbps: number) => {}
   } = $props();
 
+  let isMounted = true;
   let resolvedCovers = $state<Record<string, string>>({});
   let resolvedLogos = $state<Record<string, string>>({});
   let imageLoadFailed = $state<Record<string, boolean>>({});
 
+  onDestroy(() => {
+    isMounted = false;
+  });
+
   async function resolveMissingLogo(title: string, gameId?: number) {
-    if (!title) return;
+    if (!title || !isMounted) return;
     const key = title.trim().toLowerCase();
-    if (resolvedLogos[key]) return;
+    if (resolvedLogos[key] !== undefined) return;
+    resolvedLogos[key] = '';
 
     try {
       const app = (window as any)?.go?.main?.App;
@@ -97,8 +109,9 @@
         const appId = g?.steamAppId || 0;
         const gId = g?.id || gameId || 0;
 
-        const url = await app.ResolveGameLogo(gId, title, appId);
-        if (url) {
+        const searchTitle = title.replace(/\[.*?\]|\(.*?\)/g, '').trim() || title;
+        const url = await app.ResolveGameLogo(gId, searchTitle, appId);
+        if (url && isMounted) {
           resolvedLogos[key] = url;
         }
       }
@@ -110,8 +123,8 @@
   function getGameLogo(dl: DownloadItem): string {
     if (!dl) return '';
     const key = (dl.gameTitle || '').trim().toLowerCase();
-    if (resolvedLogos[key] && !imageLoadFailed[resolvedLogos[key]]) {
-      return resolvedLogos[key];
+    if (resolvedLogos[key] !== undefined) {
+      return resolvedLogos[key] && !imageLoadFailed[resolvedLogos[key]] ? resolvedLogos[key] : '';
     }
     const g = (games || []).find(
       (x) => x && ((dl.gameId && x.id === dl.gameId) || (x.cleanTitle && x.cleanTitle.toLowerCase() === key))
@@ -127,9 +140,10 @@
   }
 
   async function resolveMissingCover(title: string, gameId?: number) {
-    if (!title) return;
+    if (!title || !isMounted) return;
     const key = title.trim().toLowerCase();
-    if (resolvedCovers[key]) return;
+    if (resolvedCovers[key] !== undefined) return;
+    resolvedCovers[key] = '';
 
     try {
       const app = (window as any)?.go?.main?.App;
@@ -141,18 +155,19 @@
         const appId = g?.steamAppId || 0;
         const gId = g?.id || gameId || 0;
 
+        const searchTitle = title.replace(/\[.*?\]|\(.*?\)/g, '').trim() || title;
         if (typeof app.ResolveGameBanner === 'function') {
-          url = await app.ResolveGameBanner(gId, title, appId);
+          url = await app.ResolveGameBanner(gId, searchTitle, appId);
         } else if (typeof app.ResolveGameCover === 'function') {
-          url = await app.ResolveGameCover(gId, title, appId);
+          url = await app.ResolveGameCover(gId, searchTitle, appId);
         }
 
-        if (url) {
+        if (url && isMounted) {
           resolvedCovers[key] = url;
         }
       }
-    } catch (e) {
-      console.warn('Could not resolve cover for', title, e);
+    } catch {
+      // Normal fallback when cover is not available; resolvedCovers[key] remains '' to prevent repeat attempts
     }
   }
 
@@ -176,8 +191,8 @@
         if (!imageLoadFailed[pageBg]) return pageBg;
       }
     }
-    if (resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]]) {
-      return resolvedCovers[key];
+    if (resolvedCovers[key] !== undefined) {
+      return resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]] ? resolvedCovers[key] : '';
     }
     if (dl.coverImage && !imageLoadFailed[dl.coverImage]) {
       return dl.coverImage;
@@ -207,8 +222,8 @@
         if (!imageLoadFailed[header]) return header;
       }
     }
-    if (resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]]) {
-      return resolvedCovers[key];
+    if (resolvedCovers[key] !== undefined) {
+      return resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]] ? resolvedCovers[key] : '';
     }
     if (dl.coverImage && !imageLoadFailed[dl.coverImage]) {
       return dl.coverImage;
@@ -238,8 +253,8 @@
         if (!imageLoadFailed[header]) return header;
       }
     }
-    if (resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]]) {
-      return resolvedCovers[key];
+    if (resolvedCovers[key] !== undefined) {
+      return resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]] ? resolvedCovers[key] : '';
     }
     resolveMissingCover(record.gameTitle, record.gameId);
     return '';
@@ -274,8 +289,8 @@
     if (dl.coverImage && !imageLoadFailed[dl.coverImage]) {
       return dl.coverImage;
     }
-    if (resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]]) {
-      return resolvedCovers[key];
+    if (resolvedCovers[key] !== undefined) {
+      return resolvedCovers[key] && !imageLoadFailed[resolvedCovers[key]] ? resolvedCovers[key] : '';
     }
     resolveMissingCover(dl.gameTitle, dl.gameId);
     return '';
@@ -468,7 +483,7 @@
       const app = (window as any)?.go?.main?.App;
       if (app && app.GetDiskSpaceInfo) {
         const info = await app.GetDiskSpaceInfo(downloadPath);
-        if (info && info.freeBytes > 0) {
+        if (isMounted && info && info.freeBytes > 0) {
           diskSpace = info;
         }
       }
@@ -540,15 +555,20 @@
   }
 
   onMount(() => {
+    isMounted = true;
     loadDiskSpace();
-    const diskTimer = setInterval(loadDiskSpace, 5000);
+    const diskTimer = setInterval(() => {
+      if (isMounted) loadDiskSpace();
+    }, 5000);
     const speedTimer = setInterval(() => {
+      if (!isMounted) return;
       const curNet = totalSpeedBytes;
       const curDisk = (currentDownload && currentDownload.status === 'downloading') ? Math.round(curNet * 0.95) : 0;
       speedHistory = [...speedHistory.slice(1), curNet];
       diskHistory = [...diskHistory.slice(1), curDisk];
     }, 1000);
     return () => {
+      isMounted = false;
       clearInterval(diskTimer);
       clearInterval(speedTimer);
     };
@@ -570,9 +590,6 @@
         class="w-full h-full object-cover object-top brightness-60 contrast-105 opacity-70 transition-opacity duration-500"
         onerror={() => {
           imageLoadFailed[activeBackgroundUrl] = true;
-          if (currentDownload) {
-            resolveMissingCover(currentDownload.gameTitle, currentDownload.gameId);
-          }
         }}
       />
       <!-- Dark Scrim Gradients matching Ducke #07080a base -->
@@ -615,20 +632,27 @@
         <div class="absolute top-0 bottom-0 right-0 w-16 bg-gradient-to-r from-transparent to-[#090d14] hidden md:block"></div>
 
         <!-- Game Logo or Title overlaid at bottom left (matching screenshot) -->
-        <div class="absolute bottom-3 left-4 right-4 flex items-end z-20">
-          {#if logoUrl && !imageLoadFailed[logoUrl]}
-            <img
-              src={logoUrl}
-              alt={currentDownload.gameTitle}
-              class="max-h-10 sm:max-h-12 max-w-[85%] object-contain object-left filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]"
-              onerror={() => {
-                imageLoadFailed[logoUrl] = true;
-                resolveMissingLogo(currentDownload.gameTitle, currentDownload.gameId);
-              }}
-            />
-          {:else}
-            <span class="text-base sm:text-lg font-black text-white uppercase tracking-wider filter drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] line-clamp-2">
-              {currentDownload.gameTitle}
+        <div class="absolute bottom-3 left-4 right-4 flex items-end justify-between gap-2 z-20">
+          <div class="flex items-end gap-2 max-w-[85%]">
+            {#if logoUrl && !imageLoadFailed[logoUrl]}
+              <img
+                src={logoUrl}
+                alt={currentDownload.gameTitle}
+                class="max-h-10 sm:max-h-12 object-contain object-left filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]"
+                onerror={() => {
+                  imageLoadFailed[logoUrl] = true;
+                  resolveMissingLogo(currentDownload.gameTitle, currentDownload.gameId);
+                }}
+              />
+            {:else}
+              <span class="text-base sm:text-lg font-black text-white uppercase tracking-wider filter drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] line-clamp-2">
+                {currentDownload.gameTitle}
+              </span>
+            {/if}
+          </div>
+          {#if currentDownload.isTorrent}
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-white/10 text-white border border-white/15 shrink-0">
+              TORRENT
             </span>
           {/if}
         </div>
@@ -818,13 +842,23 @@
             {#if isPaused}
               Приостановлено
             {:else if isDownloading}
-              {#if currentDownload.etaSeconds > 0}
+              {#if currentDownload.isTorrent}
+                {#if currentDownload.etaSeconds > 0}
+                  Осталось {formatSteamETA(currentDownload.etaSeconds)} • Пиры: {currentDownload.torrentPeers || 0} (сиды: {currentDownload.torrentSeeds || 0})
+                {:else}
+                  Загрузка данных... • Пиры: {currentDownload.torrentPeers || 0} (сиды: {currentDownload.torrentSeeds || 0})
+                {/if}
+              {:else if currentDownload.etaSeconds > 0}
                 Осталось примерно {formatSteamETA(currentDownload.etaSeconds)}
               {:else}
                 Загрузка данных...
               {/if}
             {:else if isScanning}
-              Проверка файлов...
+              {#if currentDownload.isTorrent}
+                Поиск пиров / Получение метаданных...
+              {:else}
+                Проверка файлов...
+              {/if}
             {:else if isFailed}
               <span class="text-rose-400">Ошибка: {currentDownload.errorMessage || 'Сбой'}</span>
             {:else}
@@ -941,7 +975,14 @@
                   {/if}
                 </div>
                 <div class="min-w-0">
-                  <h4 class="text-sm font-bold text-white uppercase tracking-wide truncate">{qItem.gameTitle}</h4>
+                  <div class="flex items-center gap-2">
+                    <h4 class="text-sm font-bold text-white uppercase tracking-wide truncate">{qItem.gameTitle}</h4>
+                    {#if qItem.isTorrent}
+                      <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-white/10 text-white border border-white/15 shrink-0">
+                        TORRENT
+                      </span>
+                    {/if}
+                  </div>
                   <span class="text-[10px] font-mono text-[#8f98a0] uppercase tracking-wider block mt-0.5">
                     РАЗМЕР: {formatBytesRu(qItem.totalBytes)} · В ОЧЕРЕДИ
                   </span>

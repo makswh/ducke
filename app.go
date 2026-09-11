@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -35,6 +37,7 @@ type App struct {
 	steamService *metadata.SteamService
 	downloader   *downloader.DownloadManager
 	catalogMu    sync.Mutex
+	torrentMu    sync.Mutex
 	appDataDir   string
 }
 
@@ -95,27 +98,64 @@ func (a *App) startup(ctx context.Context) {
 		wailsRuntime.EventsEmit(a.ctx, "download:progress", event)
 	})
 
-	// Auto-purge any historical corrupt matches where title similarity < 70%
-	if purgedCount, err := a.db.PurgeMismatchedMetadata(metadata.CalculateTitleSimilarity, 0.70); err == nil && purgedCount > 0 {
-		log.Printf("[Steam] Purged %d mismatched metadata records for fresh lookup", purgedCount)
-	}
+	// Defer heavy database maintenance to background goroutine so startup queries (GetCatalog, GetTorrentCatalog)
+	// return immediately with cached records without waiting for SQLite locks
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
 
-	// Reset any historical unmatched games (e.g. Abathor) so modern Steam Suggest engine processes them
-	if resetCount, err := a.db.ResetUnmatchedGames(); err == nil && resetCount > 0 {
-		log.Printf("[Steam] Re-queued %d unmatched games for enrichment with modern Suggest API", resetCount)
-	}
-
-	// Start progressive background enrichment worker
-	a.steamService.StartBackgroundEnrichment(func(gameID int64, appID int) {
-		if game, err := a.db.GetGameByID(gameID); err == nil {
-			wailsRuntime.EventsEmit(a.ctx, "game:enriched", game)
+		// Auto-purge any historical corrupt matches where title similarity < 70%
+		if purgedCount, err := a.db.PurgeMismatchedMetadata(metadata.CalculateTitleSimilarity, 0.70); err == nil && purgedCount > 0 {
+			log.Printf("[Steam] Purged %d mismatched metadata records for fresh lookup", purgedCount)
 		}
-	})
+
+		// Reset any historical unmatched games (e.g. Abathor) so modern Steam Suggest engine processes them
+		if resetCount, err := a.db.ResetUnmatchedGames(); err == nil && resetCount > 0 {
+			log.Printf("[Steam] Re-queued %d unmatched games for enrichment with modern Suggest API", resetCount)
+		}
+
+		// Propagate metadata to duplicate releases (e.g. repacks, versions)
+		if dupeSynced, err := a.db.SyncDuplicateGamesMetadata(); err == nil && dupeSynced > 0 {
+			log.Printf("[Steam] Propagated Steam metadata to %d duplicate releases", dupeSynced)
+		}
+
+		// Start progressive background enrichment worker after maintenance has populated/reset records
+		a.triggerBackgroundEnrichment()
+	}()
+}
+
+func (a *App) triggerBackgroundEnrichment() {
+	if a.steamService == nil {
+		return
+	}
+	a.steamService.StartBackgroundEnrichment(
+		func(gameID int64, appID int) {
+			if game, err := a.db.GetGameByID(gameID); err == nil && game != nil {
+				if a.ctx != nil {
+					wailsRuntime.EventsEmit(a.ctx, "game:enriched", game)
+					if game.IconURL != "" {
+						wailsRuntime.EventsEmit(a.ctx, "game:icon-updated", map[string]interface{}{
+							"gameId":  gameID,
+							"appId":   appID,
+							"iconUrl": game.IconURL,
+						})
+					}
+				}
+			}
+		},
+		func(progress metadata.MetadataProgress) {
+			if a.ctx != nil {
+				wailsRuntime.EventsEmit(a.ctx, "metadata:progress", progress)
+			}
+		},
+	)
 }
 
 func (a *App) shutdown(ctx context.Context) {
 	if a.steamService != nil {
 		a.steamService.StopBackgroundEnrichment()
+	}
+	if a.downloader != nil {
+		a.downloader.Shutdown()
 	}
 	if a.db != nil {
 		_ = a.db.Close()
@@ -133,6 +173,7 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	if forceRefresh {
 		_, _ = a.db.PurgeMismatchedMetadata(metadata.CalculateTitleSimilarity, 0.70)
 		_, _ = a.db.ResetUnmatchedGames()
+		_, _ = a.db.SyncDuplicateGamesMetadata()
 	}
 
 	games, err := a.db.GetAllGames()
@@ -160,16 +201,20 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	log.Printf("[Remote] Connecting to %s server (%s:%d) to scan directory: \"%s\"...",
 		strings.ToUpper(settings.ActiveServer.Protocol), settings.ActiveServer.Host, settings.ActiveServer.Port, remoteDir)
 
+	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "connecting", "message": "Подключение к серверу..."})
 	client := remote.NewRemoteClient(settings.ActiveServer.Protocol)
 	if err := client.Connect(*settings.ActiveServer); err != nil {
 		log.Printf("[Remote] ERROR: Connection failed: %v", err)
+		wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "error", "message": "Ошибка подключения к серверу"})
 		return games, fmt.Errorf("failed to connect to server: %w", err)
 	}
 	defer client.Close()
 
+	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "scanning", "message": "Сканирование каталога..."})
 	remoteItems, err := client.ScanRepository(remoteDir)
 	if err != nil {
 		log.Printf("[Remote] ERROR: Repository scan failed: %v", err)
+		wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "error", "message": "Ошибка сканирования репозитория"})
 		return games, fmt.Errorf("failed to scan repository %s: %w", remoteDir, err)
 	}
 
@@ -177,9 +222,11 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 
 	if err := a.db.UpsertGames(remoteItems); err != nil {
 		log.Printf("[Remote] ERROR: Failed to cache games in database: %v", err)
+		wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "error", "message": "Ошибка сохранения каталога"})
 		return nil, fmt.Errorf("failed to cache games: %w", err)
 	}
 
+	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "ready", "message": ""})
 	return a.db.GetAllGames()
 }
 
@@ -281,26 +328,42 @@ func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 	}
 	details.BackgroundURL = game.BackgroundImage
 
-	// 5. Asynchronously fetch missing Steam reviews in the background if needed (non-blocking)
-	if details.Game.SteamAppID > 0 && (details.Game.TotalReviews == 0 || details.Game.ReviewScoreDesc == "") {
-		go func(gameID int64, appID int) {
-			if a.steamService != nil {
-				desc, pct, tot, pos := a.steamService.FetchSteamReviewSummary(appID)
-				if tot > 0 {
-					_ = a.db.UpdateSteamReviewSummary(appID, desc, pct, tot, pos)
-					if a.ctx != nil {
-						wailsRuntime.EventsEmit(a.ctx, "game:reviews-updated", map[string]interface{}{
-							"gameId":          gameID,
-							"steamAppId":      appID,
-							"reviewScoreDesc": desc,
-							"reviewPercent":   pct,
-							"totalReviews":    tot,
-							"positiveReviews": pos,
-						})
+	// 5. Asynchronously fetch missing Steam store details and reviews in background if needed (non-blocking)
+	if details.Game.SteamAppID > 0 {
+		needReviews := details.Game.TotalReviews == 0 || details.Game.ReviewScoreDesc == ""
+		needDetails := (details.Game.ShortDescription == "" && details.Game.DetailedDescription == "") || (len(details.Game.Screenshots) == 0 && len(details.Game.Genres) == 0)
+		if needReviews || needDetails {
+			go func(gameID int64, appID int, fetchReviews, fetchDetails bool) {
+				if a.steamService != nil {
+					if fetchDetails {
+						meta, err := a.steamService.FetchAppDetails(appID)
+						if err == nil && meta != nil {
+							if updatedGame, err := a.db.GetGameByID(gameID); err == nil && updatedGame != nil {
+								if a.ctx != nil {
+									wailsRuntime.EventsEmit(a.ctx, "game:enriched", updatedGame)
+								}
+							}
+						}
+					}
+					if fetchReviews {
+						desc, pct, tot, pos := a.steamService.FetchSteamReviewSummary(appID)
+						if tot > 0 {
+							_ = a.db.UpdateSteamReviewSummary(appID, desc, pct, tot, pos)
+							if a.ctx != nil {
+								wailsRuntime.EventsEmit(a.ctx, "game:reviews-updated", map[string]interface{}{
+									"gameId":          gameID,
+									"steamAppId":      appID,
+									"reviewScoreDesc": desc,
+									"reviewPercent":   pct,
+									"totalReviews":    tot,
+									"positiveReviews": pos,
+								})
+							}
+						}
 					}
 				}
-			}
-		}(game.ID, details.Game.SteamAppID)
+			}(game.ID, details.Game.SteamAppID, needReviews, needDetails)
+		}
 	}
 
 	return details, nil
@@ -372,6 +435,13 @@ func (a *App) EnrichGameNow(gameID int64) (*database.GameEntity, error) {
 	return game, err
 }
 
+func (a *App) GetMetadataProgress() metadata.MetadataProgress {
+	if a.steamService == nil {
+		return metadata.MetadataProgress{}
+	}
+	return a.steamService.GetProgress()
+}
+
 func (a *App) SearchSteamCandidates(query string) ([]metadata.SteamCandidate, error) {
 	return a.steamService.SearchSteamCandidates(query)
 }
@@ -415,7 +485,15 @@ func (a *App) ResolveGameCover(gameID int64, title string, steamAppID int) (stri
 		return "", fmt.Errorf("steam service not initialized")
 	}
 
-	coverURL, err := a.steamService.GetSteamGridCover(title)
+	cleanTitle := remote.SanitizeForSteamSearch(title)
+	if cleanTitle == "" {
+		cleanTitle = strings.TrimSpace(title)
+	}
+
+	coverURL, err := a.steamService.GetSteamGridCover(cleanTitle)
+	if (err != nil || coverURL == "") && cleanTitle != title {
+		coverURL, err = a.steamService.GetSteamGridCover(title)
+	}
 	if err != nil || coverURL == "" {
 		return "", err
 	}
@@ -434,7 +512,15 @@ func (a *App) ResolveGameBanner(gameID int64, title string, steamAppID int) (str
 		return "", fmt.Errorf("steam service not initialized")
 	}
 
-	bannerURL, err := a.steamService.GetSteamGridBanner(title)
+	cleanTitle := remote.SanitizeForSteamSearch(title)
+	if cleanTitle == "" {
+		cleanTitle = strings.TrimSpace(title)
+	}
+
+	bannerURL, err := a.steamService.GetSteamGridBanner(cleanTitle)
+	if (err != nil || bannerURL == "") && cleanTitle != title {
+		bannerURL, err = a.steamService.GetSteamGridBanner(title)
+	}
 	if err == nil && bannerURL != "" {
 		return bannerURL, nil
 	}
@@ -449,8 +535,16 @@ func (a *App) ResolveGameLogo(gameID int64, title string, steamAppID int) (strin
 		return "", fmt.Errorf("steam service not initialized")
 	}
 
+	cleanTitle := remote.SanitizeForSteamSearch(title)
+	if cleanTitle == "" {
+		cleanTitle = strings.TrimSpace(title)
+	}
+
 	// 1. Try SteamGridDB logo first (SteamGridDB logos are high quality, transparent PNGs)
-	logoURL, err := a.steamService.GetSteamGridLogo(title)
+	logoURL, err := a.steamService.GetSteamGridLogo(cleanTitle)
+	if (err != nil || logoURL == "") && cleanTitle != title {
+		logoURL, err = a.steamService.GetSteamGridLogo(title)
+	}
 	if err == nil && logoURL != "" {
 		return logoURL, nil
 	}
@@ -551,7 +645,19 @@ func (a *App) ExtractDominantColor(imageURL string) string {
 // ==========================================
 
 func (a *App) StartDownload(gameID int64, destinationPath string) (string, error) {
+	game, err := a.db.GetGameByID(gameID)
+	if err == nil && game != nil && game.SourceType == "torrent" {
+		return a.downloader.StartTorrentDownload(*game, destinationPath)
+	}
 	return a.downloader.StartDownload(gameID, destinationPath)
+}
+
+func (a *App) StartTorrentDownload(gameID int64, destinationPath string) (string, error) {
+	game, err := a.db.GetGameByID(gameID)
+	if err != nil || game == nil {
+		return "", fmt.Errorf("игра не найдена: %w", err)
+	}
+	return a.downloader.StartTorrentDownload(*game, destinationPath)
 }
 
 func (a *App) PauseDownload(downloadID string) error {
@@ -694,6 +800,251 @@ func (a *App) DeleteServer(serverID string) error {
 	return nil
 }
 
+// ==========================================
+// Torrent Sources & Catalog Methods
+// ==========================================
+
+func (a *App) GetTorrentSources() []config.TorrentSourceConfig {
+	return a.cfgManager.GetSettings().TorrentSources
+}
+
+// fetchHydraSource downloads, validates, and parses a JSON source catalog
+func fetchHydraSource(sourceURL string) (*database.HydraSourceFile, string, error) {
+	sourceURL = strings.TrimSpace(sourceURL)
+	if sourceURL == "" {
+		return nil, "", fmt.Errorf("URL или путь к источнику не может быть пустым")
+	}
+
+	var body []byte
+	var err error
+
+	if strings.HasPrefix(sourceURL, "http://") || strings.HasPrefix(sourceURL, "https://") {
+		client := &http.Client{Timeout: 30 * time.Second}
+		req, errReq := http.NewRequest("GET", sourceURL, nil)
+		if errReq != nil {
+			return nil, "", fmt.Errorf("ошибка создания запроса: %w", errReq)
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Ducke/1.0")
+
+		resp, errDo := client.Do(req)
+		if errDo != nil {
+			return nil, "", fmt.Errorf("не удалось загрузить источник: %w", errDo)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, "", fmt.Errorf("сервер вернул статус %d", resp.StatusCode)
+		}
+
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, "", fmt.Errorf("ошибка чтения ответа: %w", err)
+		}
+	} else {
+		filePath := strings.TrimPrefix(sourceURL, "file:///")
+		filePath = strings.TrimPrefix(filePath, "file://")
+		body, err = os.ReadFile(filePath)
+		if err != nil {
+			return nil, "", fmt.Errorf("ошибка чтения локального файла: %w", err)
+		}
+	}
+
+	var hf database.HydraSourceFile
+	if err := json.Unmarshal(body, &hf); err != nil {
+		return nil, "", fmt.Errorf("неверный формат источника: %w", err)
+	}
+
+	if len(hf.Downloads) == 0 {
+		return nil, "", fmt.Errorf("источник не содержит раздач")
+	}
+
+	sourceName := strings.TrimSpace(hf.Name)
+	if sourceName == "" {
+		cleanName := filepath.Base(sourceURL)
+		sourceName = strings.TrimSuffix(cleanName, filepath.Ext(cleanName))
+		if sourceName == "" {
+			sourceName = "Пользовательский источник"
+		}
+	}
+
+	return &hf, sourceName, nil
+}
+
+func (a *App) AddTorrentSource(sourceURL string) (*config.TorrentSourceConfig, error) {
+	sourceURL = strings.TrimSpace(sourceURL)
+	if sourceURL == "" {
+		return nil, fmt.Errorf("URL источника не может быть пустым")
+	}
+
+	settings := a.cfgManager.GetSettings()
+	for _, s := range settings.TorrentSources {
+		if strings.EqualFold(strings.TrimSpace(s.URL), sourceURL) {
+			return nil, fmt.Errorf("источник с таким URL уже добавлен (\"%s\")", s.Name)
+		}
+	}
+
+	hf, sourceName, err := fetchHydraSource(sourceURL)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceID := fmt.Sprintf("tsrc_%d", time.Now().UnixNano())
+
+	if err := a.db.UpsertTorrentGames(sourceID, sourceName, hf.Downloads); err != nil {
+		return nil, fmt.Errorf("ошибка сохранения раздач в базу: %w", err)
+	}
+
+	srcConfig := config.TorrentSourceConfig{
+		ID:         sourceID,
+		Name:       sourceName,
+		URL:        sourceURL,
+		Enabled:    true,
+		ItemCount:  len(hf.Downloads),
+		LastSynced: time.Now().Unix(),
+	}
+
+	settings.TorrentSources = append(settings.TorrentSources, srcConfig)
+	if err := a.cfgManager.SaveSettings(settings); err != nil {
+		return nil, fmt.Errorf("ошибка сохранения настроек: %w", err)
+	}
+
+	log.Printf("[Torrent] Added source \"%s\" (%d items) from %s", sourceName, len(hf.Downloads), sourceURL)
+
+	if a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "settings:updated", a.cfgManager.GetSettings())
+		wailsRuntime.EventsEmit(a.ctx, "torrents:updated", nil)
+	}
+
+	return &srcConfig, nil
+}
+
+// ImportTorrentSourceFile opens native file dialog to select a JSON source catalog and imports it
+func (a *App) ImportTorrentSourceFile() (*config.TorrentSourceConfig, error) {
+	filePath, err := wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{
+		Title: "Выберите JSON-каталог источников",
+		Filters: []wailsRuntime.FileFilter{
+			{
+				DisplayName: "JSON Files (*.json)",
+				Pattern:     "*.json",
+			},
+			{
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
+	if err != nil || filePath == "" {
+		return nil, err
+	}
+
+	return a.AddTorrentSource(filePath)
+}
+
+func (a *App) RemoveTorrentSource(id string) error {
+	settings := a.cfgManager.GetSettings()
+	newSources := make([]config.TorrentSourceConfig, 0, len(settings.TorrentSources))
+	for _, s := range settings.TorrentSources {
+		if s.ID != id {
+			newSources = append(newSources, s)
+		}
+	}
+	settings.TorrentSources = newSources
+	if err := a.cfgManager.SaveSettings(settings); err != nil {
+		return err
+	}
+
+	if err := a.db.DeleteTorrentGamesBySource(id); err != nil {
+		log.Printf("[Torrent] Error pruning games for source %s: %v", id, err)
+	}
+
+	log.Printf("[Torrent] Removed source %s", id)
+
+	if a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "settings:updated", a.cfgManager.GetSettings())
+		wailsRuntime.EventsEmit(a.ctx, "torrents:updated", nil)
+	}
+	return nil
+}
+
+func (a *App) ToggleTorrentSource(id string, enabled bool) error {
+	settings := a.cfgManager.GetSettings()
+	for i := range settings.TorrentSources {
+		if settings.TorrentSources[i].ID == id {
+			settings.TorrentSources[i].Enabled = enabled
+			break
+		}
+	}
+	if err := a.cfgManager.SaveSettings(settings); err != nil {
+		return err
+	}
+
+	if a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "settings:updated", a.cfgManager.GetSettings())
+		wailsRuntime.EventsEmit(a.ctx, "torrents:updated", nil)
+	}
+	return nil
+}
+
+func (a *App) SyncTorrentSources() error {
+	settings := a.cfgManager.GetSettings()
+	updated := false
+
+	for i := range settings.TorrentSources {
+		src := &settings.TorrentSources[i]
+		if !src.Enabled || strings.TrimSpace(src.URL) == "" {
+			continue
+		}
+
+		hf, sourceName, err := fetchHydraSource(src.URL)
+		if err != nil {
+			log.Printf("[Torrent] Sync error for %s (%s): %v", src.Name, src.URL, err)
+			continue
+		}
+
+		if err := a.db.UpsertTorrentGames(src.ID, sourceName, hf.Downloads); err != nil {
+			log.Printf("[Torrent] Sync database error for %s: %v", src.Name, err)
+			continue
+		}
+
+		src.Name = sourceName
+		src.ItemCount = len(hf.Downloads)
+		src.LastSynced = time.Now().Unix()
+		updated = true
+		log.Printf("[Torrent] Synced source \"%s\": %d items", src.Name, src.ItemCount)
+	}
+
+	if updated {
+		_ = a.cfgManager.SaveSettings(settings)
+		if a.ctx != nil {
+			wailsRuntime.EventsEmit(a.ctx, "settings:updated", a.cfgManager.GetSettings())
+			wailsRuntime.EventsEmit(a.ctx, "torrents:updated", nil)
+		}
+	}
+
+	return nil
+}
+
+func (a *App) GetTorrentCatalog(forceRefresh bool) ([]database.GameEntity, error) {
+	a.torrentMu.Lock()
+	defer a.torrentMu.Unlock()
+
+	if forceRefresh {
+		_ = a.SyncTorrentSources()
+		_, _ = a.db.PurgeMismatchedMetadata(metadata.CalculateTitleSimilarity, 0.70)
+		_, _ = a.db.ResetUnmatchedGames()
+		_, _ = a.db.SyncDuplicateGamesMetadata()
+		a.triggerBackgroundEnrichment()
+	}
+
+	games, err := a.db.GetTorrentGames()
+	if err == nil && len(games) == 0 && len(a.cfgManager.GetSettings().TorrentSources) > 0 {
+		_ = a.SyncTorrentSources()
+		return a.db.GetTorrentGames()
+	}
+
+	return games, err
+}
+
 // OpenConfigFolder opens the Ducke configuration/data directory in native explorer
 func (a *App) OpenConfigFolder() error {
 	path := a.appDataDir
@@ -789,19 +1140,81 @@ func (a *App) SelectDirectory() (string, error) {
 	return selected, err
 }
 
-// OpenLocalFolder opens native file manager at folder path
+// OpenLocalFolder opens native file manager at folder path, safely handling non-existent paths, files, and fallback directories
 func (a *App) OpenLocalFolder(folderPath string) error {
+	folderPath = strings.TrimSpace(folderPath)
 	if folderPath == "" {
 		return fmt.Errorf("path is empty")
 	}
 
+	cleanPath := filepath.Clean(filepath.FromSlash(folderPath))
+
+	// Resolve the most accurate existing path on disk
+	resolvedPath := cleanPath
+	isFile := false
+
+	fi, err := os.Stat(cleanPath)
+	if err == nil {
+		if !fi.IsDir() {
+			isFile = true
+		}
+	} else {
+		// Path does not exist directly. Look in parent directory for matching folder
+		parentDir := filepath.Dir(cleanPath)
+		found := false
+		if entries, rErr := os.ReadDir(parentDir); rErr == nil {
+			baseName := strings.ToLower(filepath.Base(cleanPath))
+			for _, entry := range entries {
+				entryLower := strings.ToLower(entry.Name())
+				if strings.Contains(entryLower, baseName) || strings.Contains(baseName, entryLower) {
+					candidate := filepath.Join(parentDir, entry.Name())
+					if cFi, cErr := os.Stat(candidate); cErr == nil {
+						resolvedPath = candidate
+						if !cFi.IsDir() {
+							isFile = true
+						}
+						found = true
+						break
+					}
+				}
+			}
+		}
+
+		if !found {
+			// Fallback: If parent directory exists, open parent directory (e.g. user's downloads folder)
+			if pFi, pErr := os.Stat(parentDir); pErr == nil && pFi.IsDir() {
+				resolvedPath = parentDir
+			} else if a.cfgManager != nil {
+				// Fallback to configured download path
+				cfgPath := a.cfgManager.GetSettings().DownloadPath
+				if cFi, cErr := os.Stat(cfgPath); cErr == nil && cFi.IsDir() {
+					resolvedPath = cfgPath
+				} else {
+					return fmt.Errorf("папка не найдена: %s", cleanPath)
+				}
+			} else {
+				return fmt.Errorf("папка не найдена: %s", cleanPath)
+			}
+		}
+	}
+
 	switch runtime.GOOS {
 	case "windows":
-		return exec.Command("explorer", folderPath).Start()
+		if isFile {
+			return exec.Command("explorer", "/select,", resolvedPath).Start()
+		}
+		return exec.Command("explorer", resolvedPath).Start()
 	case "darwin":
-		return exec.Command("open", folderPath).Start()
+		if isFile {
+			return exec.Command("open", "-R", resolvedPath).Start()
+		}
+		return exec.Command("open", resolvedPath).Start()
 	default: // linux, steamOS
-		return exec.Command("xdg-open", folderPath).Start()
+		target := resolvedPath
+		if isFile {
+			target = filepath.Dir(resolvedPath)
+		}
+		return exec.Command("xdg-open", target).Start()
 	}
 }
 
@@ -984,7 +1397,7 @@ type AppInfo struct {
 func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
 		Name:    "Ducke",
-		Version: "1.0.0",
+		Version: "1.1.0",
 	}
 }
 
@@ -1038,6 +1451,49 @@ func (a *App) ExportLogs(targetPath string) (string, error) {
 	}
 	log.Printf("[System] Successfully exported logs to %s", targetPath)
 	return targetPath, nil
+}
+
+// ==========================================
+// Favorites & Backlog Methods
+// ==========================================
+
+// GetFavorites returns all saved favorite games with their metadata
+func (a *App) GetFavorites() ([]database.FavoriteItem, error) {
+	if a.db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	return a.db.GetFavorites()
+}
+
+// SetFavoriteStatus sets or updates the backlog status for a game (planned, playing, completed)
+func (a *App) SetFavoriteStatus(gameID int64, status string) error {
+	if a.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	err := a.db.SetFavorite(gameID, status)
+	if err == nil && a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "favorites:updated", map[string]interface{}{
+			"gameId": gameID,
+			"status": status,
+		})
+	}
+	return err
+}
+
+// RemoveFromFavorites removes a game from favorites
+func (a *App) RemoveFromFavorites(gameID int64) error {
+	if a.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	err := a.db.RemoveFavorite(gameID)
+	if err == nil && a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "favorites:updated", map[string]interface{}{
+			"gameId":  gameID,
+			"status":  "",
+			"removed": true,
+		})
+	}
+	return err
 }
 
 

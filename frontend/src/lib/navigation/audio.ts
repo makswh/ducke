@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Ducke Procedural UI Sound Synthesizer (Web Audio API)
  * Generates crisp console sound effects without loading external audio assets.
  */
@@ -17,6 +17,11 @@ class SoundEngine {
     if (this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume();
     }
+  }
+
+  // Generic click / tap alias to playSelect
+  public playClick() {
+    this.playSelect();
   }
 
   // Soft console blip on focus move

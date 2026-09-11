@@ -28,7 +28,10 @@
     Maximize2,
     Minimize2,
     CheckCircle2,
-    ChevronUp
+    ChevronUp,
+    ChevronDown,
+    Disc,
+    Bookmark
   } from 'lucide-svelte';
   import VideoPlayer from '../VideoPlayer.svelte';
   import { sound } from '../../navigation/audio';
@@ -66,6 +69,41 @@
   let directAppIdInput = $state<string>('');
   let isSavingSteam = $state<boolean>(false);
 
+  // Favorites backlog state
+  let isFavoriteDropdownOpen = $state<boolean>(false);
+  let favoriteDropdownContainerEl = $state<HTMLDivElement | null>(null);
+  let favoriteDropdownTriggerEl = $state<HTMLButtonElement | null>(null);
+
+  async function handleToggleFavoriteStatus(status: string) {
+    const targetGame = pageDetails?.game || game;
+    if (!targetGame?.id) return;
+    try {
+      sound.playSelect();
+      isFavoriteDropdownOpen = false;
+      await AppAPI.SetFavoriteStatus(targetGame.id, status);
+      targetGame.favoriteStatus = status;
+      if (game) game.favoriteStatus = status;
+    } catch (e) {
+      console.error('Failed to set favorite status:', e);
+    }
+  }
+
+  async function handleRemoveFavorite() {
+    const targetGame = pageDetails?.game || game;
+    if (!targetGame?.id) return;
+    try {
+      sound.playFocus();
+      isFavoriteDropdownOpen = false;
+      await AppAPI.RemoveFromFavorites(targetGame.id);
+      targetGame.favoriteStatus = '';
+      if (game) game.favoriteStatus = '';
+    } catch (e) {
+      console.error('Failed to remove from favorites:', e);
+    }
+  }
+
+  let currentFavoriteStatus = $derived((pageDetails?.game || game)?.favoriteStatus || '');
+
   $effect(() => {
     if (downloadPath) customDownloadPath = downloadPath;
   });
@@ -76,8 +114,8 @@
   });
 
   let isDownloading = $derived(
-    (activeDownload && (activeDownload.status === 'downloading' || activeDownload.status === 'queued')) ||
-    (pageDetails && (pageDetails.downloadStatus === 'downloading' || pageDetails.downloadStatus === 'queued'))
+    (activeDownload && (activeDownload.status === 'downloading' || activeDownload.status === 'queued' || activeDownload.status === 'scanning')) ||
+    (pageDetails && (pageDetails.downloadStatus === 'downloading' || pageDetails.downloadStatus === 'queued' || pageDetails.downloadStatus === 'scanning'))
   );
   let isCompleted = $derived(
     (activeDownload && activeDownload.status === 'completed') ||
@@ -85,10 +123,61 @@
   );
 
   let movieOverrides = $state<Record<number, SteamMovie[]>>({});
+  let enrichingGameIds = new Set<number>();
+  let selectedVariantId = $state<number | null>(null);
+  let isVariantDropdownOpen = $state<boolean>(false);
+  let variantDropdownTriggerEl = $state<HTMLButtonElement | null>(null);
+  let variantDropdownContainerEl = $state<HTMLDivElement | null>(null);
 
+  let activeVariantsList = $derived((pageDetails?.game || game)?.variants || []);
+
+  let activeVariant = $derived.by(() => {
+    const vg = pageDetails?.game || game;
+    if (!vg?.variants || vg.variants.length === 0) return null;
+    return vg.variants.find((v: any) => v.id === selectedVariantId) || vg.variants[0];
+  });
+
+  $effect(() => {
+    const vg = pageDetails?.game || game;
+    if (vg?.variants && vg.variants.length > 0) {
+      if (!selectedVariantId || !vg.variants.some((v: any) => v.id === selectedVariantId)) {
+        selectedVariantId = vg.variants[0].id;
+      }
+    }
+  });
+
+  function handleWindowPointerDown(e: PointerEvent) {
+    const target = e.target as Node | null;
+    if (!target) return;
+    if (isVariantDropdownOpen) {
+      if (!variantDropdownContainerEl?.contains(target) && !variantDropdownTriggerEl?.contains(target)) {
+        isVariantDropdownOpen = false;
+      }
+    }
+    if (isFavoriteDropdownOpen) {
+      if (!favoriteDropdownContainerEl?.contains(target) && !favoriteDropdownTriggerEl?.contains(target)) {
+        isFavoriteDropdownOpen = false;
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Game Switch & Data Loading Architecture (Big Picture)
+  // --------------------------------------------------------------------------
   let lastGameId: number | null = null;
   let isSwitching = $state<boolean>(false);
+  let switchSequence = 0;
   let switchTimeout: any = null;
+  let scrollContainer = $state<HTMLDivElement | null>(null);
+  let isMounted = true;
+
+  // In-memory cache for fast back-and-forth switching
+  const pageDetailsCache = new Map<number, GamePageDetails>();
+
+  onDestroy(() => {
+    isMounted = false;
+    clearTimeout(switchTimeout);
+  });
 
   function getAppAPI(): any {
     if (typeof window !== 'undefined' && (window as any)?.go?.main?.App) {
@@ -97,9 +186,24 @@
     return AppAPI;
   }
 
+  function createInitialPageDetails(g: GameEntity): GamePageDetails {
+    return {
+      game: g,
+      downloadStatus: 'none',
+      downloadProgress: null,
+      localPath: '',
+      isInstalled: false,
+      logoUrl: g.iconUrl || '',
+      bannerUrl: g.backgroundImage || g.headerImage || '',
+      coverUrl: g.capsuleImage || '',
+      backgroundUrl: g.backgroundImage || '',
+      media: []
+    };
+  }
+
   $effect(() => {
     const curId = game?.id;
-    if (!curId) {
+    if (!curId || !game) {
       pageDetails = null;
       isSwitching = false;
       lastGameId = null;
@@ -108,46 +212,60 @@
 
     if (curId !== lastGameId) {
       lastGameId = curId;
+      const seq = ++switchSequence;
+
+      // 1. Reset interactive state immediately
       activeMediaIndex = 0;
+      selectedVariantId = game?.variants && game.variants.length > 0 ? game.variants[0].id : curId;
+      isVariantDropdownOpen = false;
+      isFavoriteDropdownOpen = false;
 
-      // Flash skeleton smoothly for exactly 180ms
-      isSwitching = true;
-      clearTimeout(switchTimeout);
-      switchTimeout = setTimeout(() => {
+      // 2. Reset scroll position to top
+      if (scrollContainer) {
+        scrollContainer.scrollTop = 0;
+      }
+
+      // 3. Populate immediate baseline data (from cache or game entity)
+      if (pageDetailsCache.has(curId)) {
+        pageDetails = pageDetailsCache.get(curId)!;
         isSwitching = false;
-      }, 180);
-
-      loadGameDetails(curId);
-
-      if (game.steamAppId && game.steamAppId > 0) {
-        const currentMovies = movieOverrides[curId] || game.movies || [];
-        const hasValidHls = Array.isArray(currentMovies) && currentMovies.some((m: any) => m.hls && m.hls.trim() !== '');
-        if (!hasValidHls) {
-          const app = getAppAPI();
-          if (app && typeof app.GetGameMovies === 'function') {
-            app.GetGameMovies(game.steamAppId).then((freshMovies: any) => {
-              if (freshMovies && freshMovies.length > 0) {
-                movieOverrides[curId] = freshMovies;
-              }
-            }).catch(() => {});
-          }
+      } else {
+        pageDetails = createInitialPageDetails(game);
+        const hasRichData = !!(game.shortDescription || game.detailedDescription || (game.screenshots && game.screenshots.length > 0));
+        if (!hasRichData) {
+          isSwitching = true;
+          clearTimeout(switchTimeout);
+          switchTimeout = setTimeout(() => {
+            if (isMounted && seq === switchSequence) {
+              isSwitching = false;
+            }
+          }, 150);
+        } else {
+          isSwitching = false;
         }
       }
+
+      // 4. Launch coordinated background loaders
+      fetchGamePageDetails(curId, seq);
+      resolveMoviesIfNeeded(game, seq);
+      triggerPriorityEnrichmentIfNeeded(game, curId, seq);
     }
   });
 
-  async function loadGameDetails(gameId: number) {
+  async function fetchGamePageDetails(gameId: number, seq: number) {
+    if (!isMounted) return;
+
     try {
       const app = getAppAPI();
-      if (app && typeof app.GetGamePageDetails === 'function') {
-        const res = await app.GetGamePageDetails(gameId);
-        if (res && (!game || game.id === gameId)) {
-          pageDetails = res;
-        }
-      } else if (app && typeof app.GetGameDetails === 'function') {
+      if (!app) return;
+
+      let res: GamePageDetails | null = null;
+      if (typeof app.GetGamePageDetails === 'function') {
+        res = await app.GetGamePageDetails(gameId);
+      } else if (typeof app.GetGameDetails === 'function') {
         const details = await app.GetGameDetails(gameId);
-        if (details && (!game || game.id === gameId)) {
-          pageDetails = {
+        if (details) {
+          res = {
             game: details,
             downloadStatus: 'none',
             downloadProgress: null,
@@ -157,36 +275,62 @@
             bannerUrl: '',
             coverUrl: '',
             backgroundUrl: '',
+            media: []
           };
         }
-      } else if (game) {
-        pageDetails = {
-          game: game,
-          downloadStatus: 'none',
-          downloadProgress: null,
-          localPath: '',
-          isInstalled: false,
-          logoUrl: '',
-          bannerUrl: '',
-          coverUrl: '',
-          backgroundUrl: '',
-        };
+      }
+
+      if (!isMounted || seq !== switchSequence) return;
+
+      if (res) {
+        pageDetailsCache.set(gameId, res);
+        pageDetails = res;
       }
     } catch (err) {
       console.warn('[BigPictureGameDetail] Failed to get page details:', err);
-      if (game && !pageDetails) {
-        pageDetails = {
-          game: game,
-          downloadStatus: 'none',
-          downloadProgress: null,
-          localPath: '',
-          isInstalled: false,
-          logoUrl: '',
-          bannerUrl: '',
-          coverUrl: '',
-          backgroundUrl: '',
-        };
+    } finally {
+      if (isMounted && seq === switchSequence) {
+        isSwitching = false;
       }
+    }
+  }
+
+  function resolveMoviesIfNeeded(g: GameEntity, seq: number) {
+    if (!g.steamAppId || g.steamAppId <= 0) return;
+
+    const currentMovies = movieOverrides[g.id] || g.movies || [];
+    const hasValidHls = Array.isArray(currentMovies) && currentMovies.some((m: any) => m.hls && m.hls.trim() !== '');
+    if (hasValidHls) return;
+
+    const app = getAppAPI();
+    if (app && typeof app.GetGameMovies === 'function') {
+      app.GetGameMovies(g.steamAppId).then((freshMovies: any) => {
+        if (isMounted && seq === switchSequence && freshMovies && freshMovies.length > 0) {
+          movieOverrides[g.id] = freshMovies;
+        }
+      }).catch(() => {});
+    }
+  }
+
+  function triggerPriorityEnrichmentIfNeeded(g: GameEntity, curId: number, seq: number) {
+    if (enrichingGameIds.has(curId)) return;
+    const hasRich = !!(
+      (g.screenshots && g.screenshots.length > 0) ||
+      (g.movies && g.movies.length > 0) ||
+      g.shortDescription ||
+      g.detailedDescription ||
+      (g.genres && g.genres.length > 0)
+    );
+    if (hasRich) return;
+
+    enrichingGameIds.add(curId);
+    const app = getAppAPI();
+    if (app && typeof app.EnrichGameNow === 'function') {
+      app.EnrichGameNow(curId).then((enriched: any) => {
+        if (isMounted && seq === switchSequence && enriched) {
+          fetchGamePageDetails(curId, seq);
+        }
+      }).catch(() => {});
     }
   }
 
@@ -380,6 +524,13 @@
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && (isVariantDropdownOpen || isFavoriteDropdownOpen)) {
+      e.preventDefault();
+      e.stopPropagation();
+      isVariantDropdownOpen = false;
+      isFavoriteDropdownOpen = false;
+      return;
+    }
     if (isSteamModalOpen) return;
     if (e.key === 'ArrowRight' || e.key === 'KeyD') {
       nextMedia();
@@ -390,6 +541,7 @@
 
   onMount(() => {
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('pointerdown', handleWindowPointerDown, true);
     const onFsChange = () => {
       isScreenshotFullscreen = !!document.fullscreenElement;
     };
@@ -414,6 +566,8 @@
         document.exitFullscreen?.().catch(console.error);
       } else if (isSteamModalOpen) {
         closeSteamModal();
+      } else if (isVariantDropdownOpen) {
+        isVariantDropdownOpen = false;
       }
     };
     const onGoBack = (e: Event) => {
@@ -423,6 +577,10 @@
         e.stopPropagation();
       } else if (isSteamModalOpen) {
         closeSteamModal();
+        e.preventDefault();
+        e.stopPropagation();
+      } else if (isVariantDropdownOpen) {
+        isVariantDropdownOpen = false;
         e.preventDefault();
         e.stopPropagation();
       }
@@ -449,8 +607,25 @@
       }
     });
 
+    const unsubEnriched = EventsOn('game:enriched', (enrichedGame: any) => {
+      if (!isMounted || !enrichedGame) return;
+      const targetId = game?.id;
+      if (targetId && (enrichedGame.id === targetId || (enrichedGame.steamAppId > 0 && enrichedGame.steamAppId === game?.steamAppId))) {
+        if (pageDetails) {
+          pageDetails.game = { ...pageDetails.game, ...enrichedGame };
+          pageDetailsCache.set(targetId, pageDetails);
+        }
+        if (game) {
+          game = { ...game, ...enrichedGame };
+        }
+        resolveAccentColor(enrichedGame, switchSequence);
+        resolveMoviesIfNeeded(enrichedGame, switchSequence);
+      }
+    });
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('pointerdown', handleWindowPointerDown, true);
       document.removeEventListener('fullscreenchange', onFsChange);
       window.removeEventListener('app:gallery-prev', onPrev);
       window.removeEventListener('app:gallery-next', onNext);
@@ -460,6 +635,7 @@
       window.removeEventListener('app:go-back', onGoBack);
       clearTimeout(switchTimeout);
       if (typeof unsubReviews === 'function') unsubReviews();
+      if (typeof unsubEnriched === 'function') unsubEnriched();
     };
   });
 
@@ -478,7 +654,7 @@
   function handleDownload() {
     if (!game) return;
     sound.playSelect();
-    onStartDownload(game.id, customDownloadPath);
+    onStartDownload(selectedVariantId || game.id, customDownloadPath);
   }
 
   async function handleLaunch() {
@@ -511,21 +687,27 @@
 
   function scrollToTop() {
     sound.playSelect();
-    const container = document.querySelector<HTMLElement>('[data-nav-zone="detail"]');
-    if (container) {
-      container.scrollTo({ top: 0, behavior: 'smooth' });
+    if (scrollContainer) {
+      scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }
 
   // Steam Modal Management
   async function openSteamModal() {
     sound.playSelect();
-    steamSearchTerm = game?.cleanTitle || game?.displayTitle || game?.steamTitle || game?.folderName || '';
+    const raw = game?.steamTitle || (game as any)?.searchTitle || game?.cleanTitle || game?.displayTitle || game?.folderName || '';
+    const cleaned = raw
+      .replace(/\[.*?\]|\(.*?\)|[\{\}]/g, ' ')
+      .replace(/\b(v\s*\d+([._\s]\d+)*|build\s*\d+|patch\s*\d+|update\s*\d+)\b/gi, ' ')
+      .replace(/\b(19[7-9]\d|20[0-3]\d)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    steamSearchTerm = cleaned || raw;
     directAppIdInput = (game?.steamAppId && game.steamAppId > 0) ? String(game.steamAppId) : '';
     steamCandidates = [];
     isSteamModalOpen = true;
     window.dispatchEvent(new CustomEvent('app:modal-opened'));
-    await performSteamSearch();
+    await performSteamSearch(true);
   }
 
   function closeSteamModal() {
@@ -536,7 +718,7 @@
     }
   }
 
-  async function performSteamSearch() {
+  async function performSteamSearch(autoLinkExact = false) {
     const cleanQuery = (steamSearchTerm || '')
       .replace(/^[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]\s*/gi, '')
       .replace(/\s*[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]$/gi, '')
@@ -550,6 +732,12 @@
       if (app && typeof app.SearchSteamCandidates === 'function') {
         const res = await app.SearchSteamCandidates(cleanQuery);
         steamCandidates = res || [];
+
+        // Automatically link if exact 100% (or score >= 0.95) match found on initial auto-search
+        if (autoLinkExact && steamCandidates.length > 0 && steamCandidates[0].score >= 0.95 && (!game?.steamAppId || game.steamAppId <= 0)) {
+          await handleLinkAppId(steamCandidates[0].appId);
+          return;
+        }
       }
     } catch (e) {
       console.warn('Steam search failed:', e);
@@ -610,7 +798,7 @@
   let activeGame = $derived(pageDetails?.game || game);
 </script>
 
-<div data-nav-zone="detail" class="flex-1 flex flex-col h-full overflow-y-auto bg-[#07080a] text-white select-none relative">
+<div bind:this={scrollContainer} data-nav-zone="detail" class="flex-1 flex flex-col h-full overflow-y-auto bg-[#07080a] text-white select-none relative">
   {#if game}
     {#if isSwitching}
       <!-- Atmospheric Fullscreen Backdrop Skeleton -->
@@ -823,7 +1011,7 @@
           </div>
         {:else}
           <h1 class="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-white drop-shadow-md leading-tight">
-            {activeGame?.steamTitle || activeGame?.cleanTitle || activeGame?.displayTitle || activeGame?.folderName}
+            {(activeGame?.steamTitle && !/^Steam App \d+$/i.test(activeGame.steamTitle)) ? activeGame.steamTitle : (activeGame?.cleanTitle || activeGame?.displayTitle || activeGame?.folderName)}
           </h1>
         {/if}
 
@@ -925,14 +1113,71 @@
                 <span>СКАЧИВАЕТСЯ ({Math.round(activeDownload?.progress || pageDetails?.downloadProgress?.progressPercent || 0)}%)</span>
               </div>
             {:else}
-              <button
-                data-nav-item
-                class="px-8 py-4 rounded-2xl bg-white text-black hover:bg-sky-400 transition-all text-sm font-black tracking-wide flex items-center gap-3 cursor-pointer shadow-2xl active:scale-98 focus:ring-2 focus:ring-white focus:outline-none"
-                onclick={handleDownload}
-              >
-                <Download class="w-5 h-5 stroke-[3]" />
-                <span>СКАЧАТЬ В ХРАНИЛИЩЕ [A]</span>
-              </button>
+              <div class="relative inline-flex items-stretch rounded-2xl shadow-2xl overflow-visible {isVariantDropdownOpen ? 'z-30' : ''}">
+                <button
+                  data-nav-item
+                  class="px-8 py-4 bg-white text-black hover:bg-sky-400 transition-all active:scale-[0.98] text-sm font-black tracking-wide flex items-center gap-3 cursor-pointer focus:ring-2 focus:ring-white focus:outline-none {activeVariantsList && activeVariantsList.length > 1 ? 'rounded-l-2xl' : 'rounded-2xl'}"
+                  onclick={handleDownload}
+                >
+                  <Download class="w-5 h-5 stroke-[3]" />
+                  <span>СКАЧАТЬ В ХРАНИЛИЩЕ [A]</span>
+                  <span class="opacity-40 font-normal">|</span>
+                  <span class="font-mono text-xs font-bold tracking-normal">{activeVariant?.sizeDisplay || game.sizeDisplay}</span>
+                </button>
+
+                {#if activeVariantsList && activeVariantsList.length > 1}
+                  <button
+                    bind:this={variantDropdownTriggerEl}
+                    data-nav-item
+                    type="button"
+                    class="px-4 flex items-center justify-center bg-white text-black hover:bg-sky-400 border-l border-black/15 transition-all active:scale-95 cursor-pointer rounded-r-2xl focus:ring-2 focus:ring-white focus:outline-none"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      isVariantDropdownOpen = !isVariantDropdownOpen;
+                    }}
+                    title="Выбрать версию ({activeVariantsList.length} доступно)"
+                  >
+                    <ChevronDown class="w-4 h-4 stroke-[2.5] transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
+                  </button>
+
+                  {#if isVariantDropdownOpen}
+                    <div
+                      bind:this={variantDropdownContainerEl}
+                      class="absolute left-0 bottom-full mb-3 z-50 w-[360px] sm:w-[420px] max-h-72 overflow-y-auto overscroll-contain rounded-2xl bg-[#0d1117] border border-white/10 shadow-2xl p-2 space-y-1 backdrop-blur-md"
+                    >
+                      <div class="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#64748b]">
+                        Выбор версии ({activeVariantsList.length})
+                      </div>
+                      {#each activeVariantsList as variant (variant.id)}
+                        {@const isSelected = (activeVariant?.id === variant.id)}
+                        <button
+                          data-nav-item
+                          type="button"
+                          class="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-xs transition-colors cursor-pointer {isSelected ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                          onclick={(e) => {
+                            e.stopPropagation();
+                            selectedVariantId = variant.id;
+                            isVariantDropdownOpen = false;
+                          }}
+                        >
+                          <div class="min-w-0 flex-1 pointer-events-none">
+                            <div class="truncate text-white text-xs">{variant.rawName}</div>
+                            <div class="text-[10px] text-[#64748b] font-mono">
+                              {variant.sourceType === 'torrent' ? 'Торрент' : 'FTP'}
+                            </div>
+                          </div>
+                          <div class="flex items-center gap-2 flex-shrink-0 font-mono text-[11px] pointer-events-none {isSelected ? 'text-sky-400 font-bold' : 'text-[#64748b]'}">
+                            <span>{variant.sizeDisplay}</span>
+                            {#if isSelected}
+                              <Check class="w-3.5 h-3.5 stroke-[2.5]" />
+                            {/if}
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                {/if}
+              </div>
 
               <button
                 data-nav-item
@@ -944,6 +1189,95 @@
                 <span>Папка</span>
               </button>
             {/if}
+
+            <!-- Favorites Backlog Dropdown Button -->
+            <div class="relative">
+              <button
+                bind:this={favoriteDropdownTriggerEl}
+                data-nav-item
+                type="button"
+                class="p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors focus:ring-2 focus:ring-white focus:outline-none {currentFavoriteStatus ? 'bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/25' : 'bg-white/10 hover:bg-white/20 text-white border-white/5'}"
+                onclick={() => {
+                  sound.playFocus();
+                  isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
+                }}
+                title="Статус в избранном"
+              >
+                <Bookmark class="w-4 h-4 {currentFavoriteStatus ? 'text-sky-400 fill-sky-400/40' : 'text-[#8e95a2]'}" />
+                <span>
+                  {#if currentFavoriteStatus === 'playing'}
+                    Прохожу
+                  {:else if currentFavoriteStatus === 'completed'}
+                    Пройдено
+                  {:else if currentFavoriteStatus === 'planned'}
+                    В планах
+                  {:else}
+                    В избранное
+                  {/if}
+                </span>
+                <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isFavoriteDropdownOpen ? 'rotate-180' : ''}" />
+              </button>
+
+              {#if isFavoriteDropdownOpen}
+                <div
+                  bind:this={favoriteDropdownContainerEl}
+                  class="absolute left-0 bottom-full mb-3 z-50 w-56 rounded-2xl bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1 backdrop-blur-md"
+                >
+                  <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#64748b]">
+                    Статус прохождения
+                  </div>
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'planned' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                    onclick={() => handleToggleFavoriteStatus('planned')}
+                  >
+                    <span>В планах</span>
+                    {#if currentFavoriteStatus === 'planned'}
+                      <Check class="w-3.5 h-3.5 text-sky-400" />
+                    {/if}
+                  </button>
+
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'playing' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                    onclick={() => handleToggleFavoriteStatus('playing')}
+                  >
+                    <span>Прохожу</span>
+                    {#if currentFavoriteStatus === 'playing'}
+                      <Check class="w-3.5 h-3.5 text-sky-400" />
+                    {/if}
+                  </button>
+
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'completed' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                    onclick={() => handleToggleFavoriteStatus('completed')}
+                  >
+                    <span>Пройдено</span>
+                    {#if currentFavoriteStatus === 'completed'}
+                      <Check class="w-3.5 h-3.5 text-sky-400" />
+                    {/if}
+                  </button>
+
+                  {#if currentFavoriteStatus}
+                    <div class="pt-1 mt-1 border-t border-white/5">
+                      <button
+                        data-nav-item
+                        type="button"
+                        class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                        onclick={handleRemoveFavorite}
+                      >
+                        <X class="w-3.5 h-3.5" />
+                        <span>Удалить из избранного</span>
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
           </div>
 
           <!-- Destination Path Info -->
@@ -1060,7 +1394,6 @@
                   src={item.type === 'video' ? item.thumbnail : item.url}
                   alt={item.name}
                   class="w-full h-full object-cover"
-                  loading="lazy"
                 />
 
                 {#if item.type === 'video'}

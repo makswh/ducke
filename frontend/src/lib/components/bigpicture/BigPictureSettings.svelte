@@ -20,11 +20,13 @@
     CheckCircle2,
     Terminal,
     Download,
+    Magnet,
     X
   } from 'lucide-svelte';
   import { sound } from '../../navigation/audio';
   import * as AppAPI from '../../../../wailsjs/go/main/App';
   import { EventsOn, EventsOff } from '../../../../wailsjs/runtime/runtime';
+  import TorrentSourcesManager from '../TorrentSourcesManager.svelte';
 
   interface StorageDrive {
     id: string;
@@ -64,6 +66,7 @@
     enableLogs?: boolean;
     activeServer?: ServerConfig;
     savedServers: ServerConfig[];
+    torrentSources?: any[];
   }
 
   let {
@@ -79,7 +82,7 @@
     onCloseApp = () => {}
   } = $props();
 
-  type SettingsCategory = 'storage' | 'server' | 'downloads' | 'logs' | 'about';
+  type SettingsCategory = 'storage' | 'server' | 'torrents' | 'downloads' | 'logs' | 'about';
   let activeCategory = $state<SettingsCategory>('storage');
 
   let localSettings = $state<AppSettings>({
@@ -91,6 +94,7 @@
     steamApiKey: '',
     enableLogs: false,
     savedServers: [],
+    torrentSources: [],
     activeServer: {
       id: 'srv_1',
       name: 'Основной сервер',
@@ -105,7 +109,7 @@
   });
 
   let selectedServerId = $state<string>('');
-  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.0.0' });
+  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.0' });
   let storageDrives = $state<StorageDrive[]>([]);
   let isTestingConnection = $state<boolean>(false);
   let testResult = $state<{ success: boolean; message: string } | null>(null);
@@ -235,7 +239,8 @@
           steamApiKey: current.steamApiKey || '',
           enableLogs: !!current.enableLogs,
           savedServers,
-          activeServer
+          activeServer,
+          torrentSources: Array.isArray(current.torrentSources) ? current.torrentSources.map((s: any) => ({ ...s })) : []
         };
 
         if (!selectedServerId && activeServer) {
@@ -502,6 +507,23 @@
       >
         <Server class="w-5 h-5 flex-shrink-0 {activeCategory === 'server' ? 'text-sky-400' : ''}" />
         <span>Серверы</span>
+      </button>
+
+      <button
+        data-nav-item
+        class="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'torrents' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        onclick={() => {
+          sound.playFocus();
+          activeCategory = 'torrents';
+        }}
+      >
+        <Magnet class="w-5 h-5 flex-shrink-0 {activeCategory === 'torrents' ? 'text-sky-400' : ''}" />
+        <span>Торренты</span>
+        {#if (localSettings.torrentSources || []).length > 0}
+          <span class="ml-auto text-xs px-2 py-0.5 rounded-md bg-white/[0.08] text-[#8e95a2] font-mono">
+            {(localSettings.torrentSources || []).length}
+          </span>
+        {/if}
       </button>
 
       <button
@@ -933,6 +955,18 @@
           </div>
         {/if}
       </div>
+
+    <!-- ============================================================ -->
+    <!-- TORRENTS                                                     -->
+    <!-- ============================================================ -->
+    {:else if activeCategory === 'torrents'}
+      <TorrentSourcesManager
+        isBigPicture={true}
+        torrentSources={localSettings.torrentSources || []}
+        onSourcesChanged={(sources) => {
+          localSettings.torrentSources = sources;
+        }}
+      />
 
     <!-- ============================================================ -->
     <!-- 3. DOWNLOADS                                                  -->

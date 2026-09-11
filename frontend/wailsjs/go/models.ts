@@ -1,5 +1,27 @@
 export namespace config {
 	
+	export class TorrentSourceConfig {
+	    id: string;
+	    name: string;
+	    url: string;
+	    enabled: boolean;
+	    itemCount: number;
+	    lastSynced: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TorrentSourceConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.url = source["url"];
+	        this.enabled = source["enabled"];
+	        this.itemCount = source["itemCount"];
+	        this.lastSynced = source["lastSynced"];
+	    }
+	}
 	export class ServerConfig {
 	    id: string;
 	    name: string;
@@ -38,6 +60,7 @@ export namespace config {
 	    enableLogs: boolean;
 	    activeServer?: ServerConfig;
 	    savedServers: ServerConfig[];
+	    torrentSources: TorrentSourceConfig[];
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -54,6 +77,7 @@ export namespace config {
 	        this.enableLogs = source["enableLogs"];
 	        this.activeServer = this.convertValues(source["activeServer"], ServerConfig);
 	        this.savedServers = this.convertValues(source["savedServers"], ServerConfig);
+	        this.torrentSources = this.convertValues(source["torrentSources"], TorrentSourceConfig);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -74,6 +98,7 @@ export namespace config {
 		    return a;
 		}
 	}
+	
 
 }
 
@@ -89,6 +114,8 @@ export namespace database {
 	    downloadedBytes: number;
 	    status: string;
 	    errorMessage: string;
+	    isTorrent: boolean;
+	    magnetUri?: string;
 	    createdAt: number;
 	    updatedAt: number;
 	
@@ -107,8 +134,44 @@ export namespace database {
 	        this.downloadedBytes = source["downloadedBytes"];
 	        this.status = source["status"];
 	        this.errorMessage = source["errorMessage"];
+	        this.isTorrent = source["isTorrent"];
+	        this.magnetUri = source["magnetUri"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class GameVariant {
+	    id: number;
+	    rawName: string;
+	    cleanTitle: string;
+	    sizeBytes: number;
+	    sizeDisplay: string;
+	    sourceType: string;
+	    torrentSource?: string;
+	    remotePath: string;
+	    magnetUri?: string;
+	    uploadDate?: string;
+	    isDirectory: boolean;
+	    steamAppId?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GameVariant(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.rawName = source["rawName"];
+	        this.cleanTitle = source["cleanTitle"];
+	        this.sizeBytes = source["sizeBytes"];
+	        this.sizeDisplay = source["sizeDisplay"];
+	        this.sourceType = source["sourceType"];
+	        this.torrentSource = source["torrentSource"];
+	        this.remotePath = source["remotePath"];
+	        this.magnetUri = source["magnetUri"];
+	        this.uploadDate = source["uploadDate"];
+	        this.isDirectory = source["isDirectory"];
+	        this.steamAppId = source["steamAppId"];
 	    }
 	}
 	export class SteamMovie {
@@ -152,6 +215,7 @@ export namespace database {
 	    headerImage?: string;
 	    capsuleImage?: string;
 	    backgroundImage?: string;
+	    iconUrl?: string;
 	    screenshots?: string[];
 	    movies?: SteamMovie[];
 	    genres?: string[];
@@ -164,6 +228,12 @@ export namespace database {
 	    reviewScoreDesc?: string;
 	    reviewPercent?: number;
 	    totalReviews?: number;
+	    sourceType?: string;
+	    torrentSource?: string;
+	    magnetUri?: string;
+	    uploadDate?: string;
+	    favoriteStatus?: string;
+	    variants?: GameVariant[];
 	
 	    static createFrom(source: any = {}) {
 	        return new GameEntity(source);
@@ -189,6 +259,7 @@ export namespace database {
 	        this.headerImage = source["headerImage"];
 	        this.capsuleImage = source["capsuleImage"];
 	        this.backgroundImage = source["backgroundImage"];
+	        this.iconUrl = source["iconUrl"];
 	        this.screenshots = source["screenshots"];
 	        this.movies = this.convertValues(source["movies"], SteamMovie);
 	        this.genres = source["genres"];
@@ -201,6 +272,12 @@ export namespace database {
 	        this.reviewScoreDesc = source["reviewScoreDesc"];
 	        this.reviewPercent = source["reviewPercent"];
 	        this.totalReviews = source["totalReviews"];
+	        this.sourceType = source["sourceType"];
+	        this.torrentSource = source["torrentSource"];
+	        this.magnetUri = source["magnetUri"];
+	        this.uploadDate = source["uploadDate"];
+	        this.favoriteStatus = source["favoriteStatus"];
+	        this.variants = this.convertValues(source["variants"], GameVariant);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -221,6 +298,46 @@ export namespace database {
 		    return a;
 		}
 	}
+	export class FavoriteItem {
+	    gameId: number;
+	    status: string;
+	    addedAt: string;
+	    updatedAt: string;
+	    game: GameEntity;
+	
+	    static createFrom(source: any = {}) {
+	        return new FavoriteItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.gameId = source["gameId"];
+	        this.status = source["status"];
+	        this.addedAt = source["addedAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.game = this.convertValues(source["game"], GameEntity);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
 
 }
 
@@ -244,6 +361,10 @@ export namespace downloader {
 	    totalFiles: number;
 	    localPath: string;
 	    errorMessage?: string;
+	    isTorrent: boolean;
+	    magnetUri?: string;
+	    torrentSeeds: number;
+	    torrentPeers: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DownloadProgressEvent(source);
@@ -268,6 +389,10 @@ export namespace downloader {
 	        this.totalFiles = source["totalFiles"];
 	        this.localPath = source["localPath"];
 	        this.errorMessage = source["errorMessage"];
+	        this.isTorrent = source["isTorrent"];
+	        this.magnetUri = source["magnetUri"];
+	        this.torrentSeeds = source["torrentSeeds"];
+	        this.torrentPeers = source["torrentPeers"];
 	    }
 	}
 	export class StorageDriveInfo {
@@ -449,6 +574,24 @@ export namespace main {
 
 export namespace metadata {
 	
+	export class MetadataProgress {
+	    isSyncing: boolean;
+	    current: number;
+	    total: number;
+	    currentGame: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MetadataProgress(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.isSyncing = source["isSyncing"];
+	        this.current = source["current"];
+	        this.total = source["total"];
+	        this.currentGame = source["currentGame"];
+	    }
+	}
 	export class SteamCandidate {
 	    appId: number;
 	    name: string;

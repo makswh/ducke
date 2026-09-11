@@ -21,10 +21,12 @@
     CheckCircle2,
     Terminal,
     Download,
+    Magnet,
     X
   } from 'lucide-svelte';
   import * as AppAPI from '../../../wailsjs/go/main/App';
   import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime';
+  import TorrentSourcesManager from './TorrentSourcesManager.svelte';
 
   interface StorageDrive {
     id: string;
@@ -64,6 +66,7 @@
     enableLogs?: boolean;
     activeServer?: ServerConfig;
     savedServers: ServerConfig[];
+    torrentSources?: any[];
   }
 
   let {
@@ -77,7 +80,7 @@
     onClearMetadataCache = async (): Promise<number> => 0
   } = $props();
 
-  type SettingsTab = 'storage' | 'server' | 'downloads' | 'interface' | 'logs' | 'about';
+  type SettingsTab = 'storage' | 'server' | 'torrents' | 'downloads' | 'interface' | 'logs' | 'about';
   let activeSubTab = $state<SettingsTab>('storage');
 
   let localSettings = $state<AppSettings>({
@@ -89,6 +92,7 @@
     steamApiKey: '',
     enableLogs: false,
     savedServers: [],
+    torrentSources: [],
     activeServer: {
       id: 'srv_1',
       name: 'Основной сервер',
@@ -103,7 +107,7 @@
   });
 
   let selectedServerId = $state<string>('');
-  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.0.0' });
+  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.0' });
   let storageDrives = $state<StorageDrive[]>([]);
   let isTestingConnection = $state<boolean>(false);
   let testResult = $state<{ success: boolean; message: string } | null>(null);
@@ -240,7 +244,8 @@
           steamApiKey: current.steamApiKey || '',
           enableLogs: !!current.enableLogs,
           savedServers,
-          activeServer
+          activeServer,
+          torrentSources: Array.isArray(current.torrentSources) ? current.torrentSources.map((s: any) => ({ ...s })) : []
         };
 
         if (!selectedServerId && activeServer) {
@@ -481,6 +486,20 @@
       >
         <Server class="w-4 h-4 flex-shrink-0 {activeSubTab === 'server' ? 'text-sky-400' : ''}" />
         <span>Серверы</span>
+      </button>
+
+      <button
+        data-nav-item
+        class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-left {activeSubTab === 'torrents' ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        onclick={() => (activeSubTab = 'torrents')}
+      >
+        <Magnet class="w-4 h-4 flex-shrink-0 {activeSubTab === 'torrents' ? 'text-sky-400' : ''}" />
+        <span>Торренты</span>
+        {#if (localSettings.torrentSources || []).length > 0}
+          <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded-md bg-white/[0.06] text-[#8e95a2] font-mono">
+            {(localSettings.torrentSources || []).length}
+          </span>
+        {/if}
       </button>
 
       <button
@@ -906,6 +925,15 @@
           </div>
         {/if}
       </div>
+
+    <!-- TORRENTS -->
+    {:else if activeSubTab === 'torrents'}
+      <TorrentSourcesManager
+        torrentSources={localSettings.torrentSources || []}
+        onSourcesChanged={(sources) => {
+          localSettings.torrentSources = sources;
+        }}
+      />
 
     <!-- 3. DOWNLOADS -->
     {:else if activeSubTab === 'downloads'}
