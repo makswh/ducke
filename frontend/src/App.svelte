@@ -7,6 +7,7 @@
   import DownloadsView from './lib/components/DownloadsView.svelte';
   import SettingsView from './lib/components/SettingsView.svelte';
   import FavoritesView from './lib/components/FavoritesView.svelte';
+  import CollectionsView from './lib/components/CollectionsView.svelte';
   import GamepadHUD from './lib/components/GamepadHUD.svelte';
   import { gamepad } from './lib/navigation/gamepad';
 
@@ -41,7 +42,7 @@
 
   // Application State (Svelte 5 Runes)
   let displayMode = $state<'desktop' | 'bigpicture'>('desktop');
-  let activeTab = $state<'catalog' | 'torrents' | 'favorites' | 'downloads' | 'settings'>('catalog');
+  let activeTab = $state<'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('catalog');
 
   function switchToBigPicture() {
     displayMode = 'bigpicture';
@@ -61,8 +62,8 @@
     }
   }
   let searchQuery = $state<string>('');
-  let games = $state<any[]>([]);
-  let torrentGames = $state<any[]>([]);
+  let games = $state.raw<any[]>([]);
+  let torrentGames = $state.raw<any[]>([]);
   let activeDownloads = $state<any[]>([]);
   let downloadHistory = $state<any[]>([]);
   let settings = $state<any | null>(null);
@@ -83,6 +84,95 @@
     total: 0,
     currentGame: ''
   });
+
+  // Batch buffer for real-time metadata/review/icon updates to prevent constant 10k array recreation
+  const pendingEnrichments = new Map<number | string, any>();
+  const pendingReviews = new Map<number | string, any>();
+  const pendingIcons = new Map<number | string, string>();
+  let batchFlushTimer: any = null;
+
+  function flushBatchedGameUpdates() {
+    batchFlushTimer = null;
+    if (pendingEnrichments.size === 0 && pendingReviews.size === 0 && pendingIcons.size === 0) return;
+
+    const enrichments = new Map(pendingEnrichments);
+    const reviews = new Map(pendingReviews);
+    const icons = new Map(pendingIcons);
+    pendingEnrichments.clear();
+    pendingReviews.clear();
+    pendingIcons.clear();
+
+    const applyUpdates = (list: any[]) => {
+      if (!list || list.length === 0) return list;
+      let modified = false;
+      const next = list.map((g) => {
+        if (!g) return g;
+        let itemModified = false;
+        let updated = g;
+
+        // Check enrichments
+        const enr = enrichments.get(g.id) || (g.steamAppId ? enrichments.get(`steam:${g.steamAppId}`) : null);
+        if (enr) {
+          itemModified = true;
+          updated = {
+            ...updated,
+            steamTitle: enr.steamTitle || updated.steamTitle,
+            iconUrl: enr.iconUrl || updated.iconUrl,
+            shortDescription: enr.shortDescription || updated.shortDescription,
+            headerImage: enr.headerImage || updated.headerImage,
+            capsuleImage: enr.capsuleImage || updated.capsuleImage,
+            backgroundImage: enr.backgroundImage || updated.backgroundImage,
+            genres: (enr.genres && enr.genres.length > 0) ? enr.genres : updated.genres,
+            tags: (enr.tags && enr.tags.length > 0) ? enr.tags : updated.tags,
+            developers: (enr.developers && enr.developers.length > 0) ? enr.developers : updated.developers,
+            publishers: (enr.publishers && enr.publishers.length > 0) ? enr.publishers : updated.publishers,
+            releaseDate: enr.releaseDate || updated.releaseDate,
+            controllerSupport: enr.controllerSupport || updated.controllerSupport,
+            metacriticScore: enr.metacriticScore || updated.metacriticScore,
+            reviewScoreDesc: enr.reviewScoreDesc || updated.reviewScoreDesc,
+            reviewPercent: enr.reviewPercent || updated.reviewPercent,
+            totalReviews: enr.totalReviews || updated.totalReviews,
+          };
+        }
+
+        // Check reviews
+        const rev = reviews.get(g.id) || (g.steamAppId ? reviews.get(`steam:${g.steamAppId}`) : null);
+        if (rev) {
+          itemModified = true;
+          updated = {
+            ...updated,
+            reviewScoreDesc: rev.reviewScoreDesc,
+            reviewPercent: rev.reviewPercent,
+            totalReviews: rev.totalReviews,
+          };
+        }
+
+        // Check icons
+        const ic = icons.get(g.id) || (g.steamAppId ? icons.get(`steam:${g.steamAppId}`) : null);
+        if (ic && ic !== updated.iconUrl) {
+          itemModified = true;
+          updated = { ...updated, iconUrl: ic };
+        }
+
+        if (itemModified) {
+          modified = true;
+          return updated;
+        }
+        return g;
+      });
+
+      return modified ? next : list;
+    };
+
+    games = applyUpdates(games);
+    torrentGames = applyUpdates(torrentGames);
+  }
+
+  function scheduleBatchFlush() {
+    if (!batchFlushTimer) {
+      batchFlushTimer = setTimeout(flushBatchedGameUpdates, 1000);
+    }
+  }
 
   let hasFtpServers = $derived.by(() => {
     if (!settings) return false;
@@ -474,37 +564,11 @@
     // Listen to progressive Steam enrichment events
     EventsOn('game:enriched', (enrichedGame: any) => {
       if (!enrichedGame) return;
-      const match = (g: any) => {
-        if (!g) return g;
-        if (g.id === enrichedGame.id) return enrichedGame;
-        if (enrichedGame.steamAppId && enrichedGame.steamAppId !== 0 && g.steamAppId === enrichedGame.steamAppId) {
-          return {
-            ...g,
-            steamTitle: enrichedGame.steamTitle || g.steamTitle,
-            iconUrl: enrichedGame.iconUrl || g.iconUrl,
-            shortDescription: enrichedGame.shortDescription || g.shortDescription,
-            detailedDescription: enrichedGame.detailedDescription || g.detailedDescription,
-            headerImage: enrichedGame.headerImage || g.headerImage,
-            capsuleImage: enrichedGame.capsuleImage || g.capsuleImage,
-            backgroundImage: enrichedGame.backgroundImage || g.backgroundImage,
-            screenshots: (enrichedGame.screenshots && enrichedGame.screenshots.length > 0) ? enrichedGame.screenshots : g.screenshots,
-            movies: (enrichedGame.movies && enrichedGame.movies.length > 0) ? enrichedGame.movies : g.movies,
-            genres: (enrichedGame.genres && enrichedGame.genres.length > 0) ? enrichedGame.genres : g.genres,
-            developers: (enrichedGame.developers && enrichedGame.developers.length > 0) ? enrichedGame.developers : g.developers,
-            publishers: (enrichedGame.publishers && enrichedGame.publishers.length > 0) ? enrichedGame.publishers : g.publishers,
-            releaseDate: enrichedGame.releaseDate || g.releaseDate,
-            controllerSupport: enrichedGame.controllerSupport || g.controllerSupport,
-            pcRequirements: enrichedGame.pcRequirements || g.pcRequirements,
-            metacriticScore: enrichedGame.metacriticScore || g.metacriticScore,
-            reviewScoreDesc: enrichedGame.reviewScoreDesc || g.reviewScoreDesc,
-            reviewPercent: enrichedGame.reviewPercent || g.reviewPercent,
-            totalReviews: enrichedGame.totalReviews || g.totalReviews,
-          };
-        }
-        return g;
-      };
-      games = (games || []).map(match);
-      torrentGames = (torrentGames || []).map(match);
+      pendingEnrichments.set(enrichedGame.id, enrichedGame);
+      if (enrichedGame.steamAppId) {
+        pendingEnrichments.set(`steam:${enrichedGame.steamAppId}`, enrichedGame);
+      }
+      scheduleBatchFlush();
     });
 
     // Listen to background Steam metadata enrichment progress
@@ -521,19 +585,9 @@
     // Listen to real-time Steam review summary updates
     EventsOn('game:reviews-updated', (event: any) => {
       if (!event) return;
-      const updateReview = (g: any) => {
-        if (g && (g.id === event.gameId || (event.steamAppId > 0 && g.steamAppId === event.steamAppId))) {
-          return {
-            ...g,
-            reviewScoreDesc: event.reviewScoreDesc,
-            reviewPercent: event.reviewPercent,
-            totalReviews: event.totalReviews,
-          };
-        }
-        return g;
-      };
-      games = (games || []).map(updateReview);
-      torrentGames = (torrentGames || []).map(updateReview);
+      if (event.gameId) pendingReviews.set(event.gameId, event);
+      if (event.steamAppId) pendingReviews.set(`steam:${event.steamAppId}`, event);
+      scheduleBatchFlush();
     });
 
     // Listen to remote catalog scan status
@@ -549,22 +603,17 @@
     // Listen to fast real-time icon updates
     EventsOn('game:icon-updated', (event: any) => {
       if (!event || (!event.appId && !event.gameId) || !event.iconUrl) return;
-      const updateIcon = (g: any) => {
-        if (g && ((event.appId > 0 && g.steamAppId === event.appId) || g.id === event.gameId)) {
-          return { ...g, iconUrl: event.iconUrl };
-        }
-        return g;
-      };
-      games = (games || []).map(updateIcon);
-      torrentGames = (torrentGames || []).map(updateIcon);
+      if (event.gameId) pendingIcons.set(event.gameId, event.iconUrl);
+      if (event.appId) pendingIcons.set(`steam:${event.appId}`, event.iconUrl);
+      scheduleBatchFlush();
     });
 
     // Setup Gamepad Navigation
     gamepad.onTabChange = (dir) => {
-      const tabs: ('catalog' | 'torrents' | 'favorites' | 'downloads' | 'settings')[] = [];
+      const tabs: ('catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings')[] = [];
       if (hasFtpServers) tabs.push('catalog');
       if (hasTorrentSources) tabs.push('torrents');
-      tabs.push('favorites', 'downloads', 'settings');
+      tabs.push('collections', 'favorites', 'downloads', 'settings');
       const curIdx = tabs.indexOf(activeTab);
       if (curIdx === -1) {
         activeTab = tabs[0] || 'settings';
@@ -605,6 +654,10 @@
   });
 
   onDestroy(() => {
+    if (batchFlushTimer) {
+      clearTimeout(batchFlushTimer);
+      batchFlushTimer = null;
+    }
     gamepad.stop();
     EventsOff('download:progress');
     EventsOff('game:enriched');
@@ -612,6 +665,7 @@
     EventsOff('torrents:updated');
     EventsOff('catalog:status');
     EventsOff('game:icon-updated');
+    EventsOff('game:reviews-updated');
   });
 </script>
 
@@ -693,6 +747,16 @@
           downloadPath={settings?.downloadPath || 'C:\\Ducke'}
           onStartDownload={handleStartDownload}
           onSelectFolder={SelectDirectory}
+        />
+      {:else if activeTab === 'collections'}
+        <CollectionsView
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onStartDownload={handleStartDownload}
+          onSelectFolder={SelectDirectory}
+          onSearchInCatalog={(query: string) => {
+            searchQuery = query;
+            activeTab = hasTorrentSources ? 'torrents' : (hasFtpServers ? 'catalog' : 'settings');
+          }}
         />
       {:else if activeTab === 'favorites'}
         <FavoritesView

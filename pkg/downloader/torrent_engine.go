@@ -4,13 +4,32 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/storage"
 	"golang.org/x/time/rate"
 )
+
+// PublicTier1Trackers is a curated list of reliable, high-availability public BitTorrent trackers
+// that dramatically expands swarm discovery and ensures steady seed redundancy across all regions.
+var PublicTier1Trackers = [][]string{
+	{"udp://tracker.opentrackr.org:1337/announce"},
+	{"udp://open.stealth.si:80/announce"},
+	{"udp://tracker.torrent.eu.org:451/announce"},
+	{"udp://tracker.openbittorrent.com:6969/announce"},
+	{"udp://explodie.org:6969/announce"},
+	{"udp://tracker.coppersurfer.tk:6969/announce"},
+	{"udp://tracker.internetwarriors.net:1337/announce"},
+	{"udp://tracker.moeking.me:6969/announce"},
+	{"udp://opentor.net:6969/announce"},
+	{"udp://retracker.lanta-net.ru:2710/announce"},
+	{"udp://tracker.cyberia.is:6969/announce"},
+	{"http://tracker.openbittorrent.com:80/announce"},
+}
 
 // engineCompletionStores maps *TorrentEngine -> *sync.Map of downloadID -> storage.PieceCompletion.
 // This avoids modifying the TorrentEngine struct layout while still tracking completion handles.
@@ -49,11 +68,41 @@ func NewTorrentEngine(dataDir string, initialSpeedLimitKBps int) (*TorrentEngine
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = dataDir
 
+	// 1. Swarm Connection Limits & Peer Watermarks
+	// Modern clients use 80-150 connections per torrent to aggregate bandwidth across many seeders.
+	cfg.EstablishedConnsPerTorrent = 120
+	cfg.HalfOpenConnsPerTorrent = 50
+	cfg.TotalHalfOpenConns = 150
+	cfg.TorrentPeersHighWater = 1000
+	cfg.TorrentPeersLowWater = 150
+	cfg.HandshakesTimeout = 4 * time.Second
+	cfg.NominalDialTimeout = 10 * time.Second
+	cfg.MinDialTimeout = 2 * time.Second
+
+	// 2. Multi-core Piece Verification & In-flight Data Buffering
+	numWorkers := runtime.NumCPU()
+	if numWorkers < 4 {
+		numWorkers = 4
+	} else if numWorkers > 8 {
+		numWorkers = 8
+	}
+	cfg.PieceHashersPerTorrent = numWorkers
+	cfg.MaxUnverifiedBytes = 64 * 1024 * 1024
+
+	// 3. DHT Continuous Discovery & Re-announcing
+	// Periodically re-announce to DHT to maintain an active, fresh swarm as peers disconnect
+	cfg.PeriodicallyAnnounceTorrentsToDht = true
+
+	// 4. Rate Limiter with generous burst to prevent thread sleep stutters
 	var limiter *rate.Limiter
 	if initialSpeedLimitKBps > 0 {
-		limiter = rate.NewLimiter(rate.Limit(initialSpeedLimitKBps*1024), 2*1024*1024)
+		burst := initialSpeedLimitKBps * 1024 * 2
+		if burst < 4*1024*1024 {
+			burst = 4 * 1024 * 1024
+		}
+		limiter = rate.NewLimiter(rate.Limit(initialSpeedLimitKBps*1024), burst)
 	} else {
-		limiter = rate.NewLimiter(rate.Inf, 2*1024*1024)
+		limiter = rate.NewLimiter(rate.Inf, 16*1024*1024)
 	}
 	cfg.DownloadRateLimiter = limiter
 	cfg.NoUpload = false
@@ -72,7 +121,8 @@ func NewTorrentEngine(dataDir string, initialSpeedLimitKBps int) (*TorrentEngine
 		return nil, fmt.Errorf("failed to init torrent client: %w", err)
 	}
 
-	log.Printf("[Torrent] BitTorrent engine online (DataDir: %s, SpeedLimit: %d KB/s)", dataDir, initialSpeedLimitKBps)
+	log.Printf("[Torrent] BitTorrent engine online (DataDir: %s, SpeedLimit: %d KB/s, Hashers: %d, MaxConns: %d)",
+		dataDir, initialSpeedLimitKBps, cfg.PieceHashersPerTorrent, cfg.EstablishedConnsPerTorrent)
 
 	return &TorrentEngine{
 		client:      client,
@@ -124,6 +174,27 @@ func (te *TorrentEngine) AddMagnet(downloadID string, magnetURI string, destDir 
 		return nil, fmt.Errorf("invalid magnet URI: %w", err)
 	}
 
+	// Merge reliable Tier-1 public trackers to maximize seeder discovery
+	existingTrackers := make(map[string]bool)
+	for _, tier := range spec.Trackers {
+		for _, tr := range tier {
+			existingTrackers[strings.ToLower(strings.TrimSpace(tr))] = true
+		}
+	}
+	for _, tier := range PublicTier1Trackers {
+		var newTier []string
+		for _, tr := range tier {
+			normalized := strings.ToLower(strings.TrimSpace(tr))
+			if !existingTrackers[normalized] {
+				existingTrackers[normalized] = true
+				newTier = append(newTier, tr)
+			}
+		}
+		if len(newTier) > 0 {
+			spec.Trackers = append(spec.Trackers, newTier)
+		}
+	}
+
 	spec.Storage = storage.NewFileWithCompletion(destDir, completion)
 
 	t, _, err := te.client.AddTorrentSpec(spec)
@@ -132,6 +203,10 @@ func (te *TorrentEngine) AddMagnet(downloadID string, magnetURI string, destDir 
 		getCompletionStore(te).Delete(downloadID)
 		return nil, fmt.Errorf("failed to add torrent spec: %w", err)
 	}
+
+	// Ensure trackers and connection limits are applied to active torrent handle
+	t.AddTrackers(PublicTier1Trackers)
+	t.SetMaxEstablishedConns(120)
 
 	te.torrents[downloadID] = t
 	return t, nil
@@ -204,11 +279,16 @@ func (te *TorrentEngine) SetSpeedLimit(kbps int) {
 	}
 	if kbps <= 0 {
 		te.rateLimiter.SetLimit(rate.Inf)
-		log.Printf("[Torrent] Speed limit set to unlimited")
+		te.rateLimiter.SetBurst(16 * 1024 * 1024)
+		log.Printf("[Torrent] Speed limit set to unlimited (Burst: 16 MB)")
 	} else {
+		burst := kbps * 1024 * 2
+		if burst < 4*1024*1024 {
+			burst = 4 * 1024 * 1024
+		}
 		te.rateLimiter.SetLimit(rate.Limit(kbps * 1024))
-		te.rateLimiter.SetBurst(2 * 1024 * 1024)
-		log.Printf("[Torrent] Speed limit set to %d KB/s", kbps)
+		te.rateLimiter.SetBurst(burst)
+		log.Printf("[Torrent] Speed limit set to %d KB/s (Burst: %d KB)", kbps, burst/1024)
 	}
 }
 

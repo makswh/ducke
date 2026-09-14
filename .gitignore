@@ -39,6 +39,7 @@ ducke.db
 gamevault.db
 ducke_settings.json
 *.log
+logs/
 test_*.json
 
 # Environment variables & local secrets

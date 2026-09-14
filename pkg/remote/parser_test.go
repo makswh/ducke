@@ -125,6 +125,16 @@ func TestSanitizeForSteamSearch(t *testing.T) {
 		{"Breathedge 2 7 5GB", "Breathedge"},
 		{"Breathedge 2.7.5GB", "Breathedge"},
 		{"The Pale Beyond (rus)", "The Pale Beyond"},
+		{"Ready or Not Scene Rune", "Ready or Not"},
+		{"Resident Evil Village HardwareMining", "Resident Evil Village"},
+		{"Far Cry 4 dixen18", "Far Cry 4"},
+		{"Dead Island 2 Other s", "Dead Island 2"},
+		{"Lacuna A Sci Fi Noir Adventure Save the World Edition GOG", "Lacuna A Sci Fi Noir Adventure"},
+		{"Spintires MudRunner от xatab", "Spintires MudRunner"},
+		{"Left 4 Dead 2 2009 l R G Origins", "Left 4 Dead 2"},
+		{"B&#333; Path of the Teal Lotus", "Bō Path of the Teal Lotus"},
+		{"&#201;t&#233;", "Été"},
+		{"EndlessJourney &#26080;&#20241;&#20185;&#36884;", "EndlessJourney"},
 	}
 
 	for _, tt := range tests {
@@ -132,6 +142,31 @@ func TestSanitizeForSteamSearch(t *testing.T) {
 			got := SanitizeForSteamSearch(tt.input)
 			if got != tt.expected {
 				t.Errorf("SanitizeForSteamSearch(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCleanDisplayTitle(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Ready or Not Scene Rune", "Ready or Not"},
+		{"Resident Evil Village HardwareMining", "Resident Evil Village"},
+		{"Far Cry 4 dixen18", "Far Cry 4"},
+		{"Dead Island 2 Other s", "Dead Island 2"},
+		{"B&#333; Path of the Teal Lotus", "Bō Path of the Teal Lotus"},
+		{"&#201;t&#233;", "Été"},
+		{"EndlessJourney &#26080;&#20241;&#20185;&#36884;", "EndlessJourney"},
+		{"Hitman The Complete First Season s PC | от xatab", "Hitman The Complete First Season s PC"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := CleanDisplayTitle(tt.input)
+			if got != tt.expected {
+				t.Errorf("CleanDisplayTitle(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
 	}

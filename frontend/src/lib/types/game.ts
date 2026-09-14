@@ -12,6 +12,7 @@ export interface GameEntity {
   rawName: string;
   cleanTitle: string;
   searchTitle: string;
+  canonicalKey?: string;
   remotePath: string;
   sizeBytes: number;
   sizeDisplay: string;
@@ -30,6 +31,7 @@ export interface GameEntity {
   screenshots?: string[];
   movies?: SteamMovie[];
   genres?: string[];
+  tags?: string[];
   developers?: string[];
   publishers?: string[];
   releaseDate?: string;
@@ -43,6 +45,7 @@ export interface GameEntity {
   torrentSource?: string;
   magnetUri?: string;
   uploadDate?: string;
+  favoriteStatus?: string;
   variants?: GameVariant[];
 }
 

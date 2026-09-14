@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"html"
 	"math"
 	"regexp"
 	"strconv"
@@ -21,7 +22,7 @@ var (
 	versionPattern = regexp.MustCompile(`(?i)\b(v[._\s]*\d+([._\s]\d+)*|build\s*\d+|patch\s*\d+|update\s*\d+)\b`)
 
 	// Common junk words, release groups, platform tags, and edition tags in game titles
-	junkPattern = regexp.MustCompile(`(?i)\b(repack|fitgirl|dodi|xatab|codex|cpi|prophet|skidrow|plaza|razor1911|flt|empress|multi\d*|rip|steamrip|gog|rus|eng|linux|win|windows|mac|macos|pc|native|portable|unpacked|папка\s+игры|папка|игры|таблетка|вшита|лицензия|пиратка|сборка|русификатор|озвучка|текст|edition|deluxe|ultimate|goty|game of the year|director'?s cut|remastered|remaster|remake|reboot|hd|complete|bundle|upgrade|bonus|definitive|anniversary|starring [^,]+)\b`)
+	junkPattern = regexp.MustCompile(`(?i)\b(repack|fitgirl|dodi|xatab|codex|cpi|prophet|skidrow|plaza|razor1911|flt|empress|multi\d*|rip|steamrip|gog|rus|eng|linux|win|windows|mac|macos|pc|native|portable|unpacked|папка\s+игры|папка|игры|таблетка|вшита|лицензия|пиратка|сборка|русификатор|озвучка|текст|edition|deluxe|ultimate|goty|game of the year|director'?s cut|remastered|remaster|remake|reboot|hd|complete|bundle|upgrade|bonus|definitive|anniversary|starring [^,]+|scene(\s+[a-z0-9_]+)?|licen[sc]e(\s+gog)?|лицензия(\s+gog)?|other['’]?s?|hardwaremining|wanterlude|selezen|necros|dixen\d*|yaroslav\d*|exrow|pioneer|cdman|voices\d*|fenixx|alteriwnet|архив|archive|serega(\s*lus)?|canek\d*|chupacabra|save\s+the\s+world)\b`)
 
 	// Unicode-safe junk and repack word dictionary
 	junkWordsMap = map[string]bool{
@@ -34,8 +35,28 @@ var (
 		"unpacked": true, "лицензия": true, "пиратка": true, "сборка": true, "папка": true,
 		"игры": true, "таблетка": true, "вшита": true, "русификатор": true, "озвучка": true,
 		"текст": true, "от": true, "by": true, "версия": true,
+		"scene": true, "rune": true, "tenoke": true, "tinyiso": true, "fairlight": true,
+		"doge": true, "license": true, "licence": true, "other": true, "others": true,
+		"hardwaremining": true, "hardware": true, "mining": true, "wanterlude": true, "selezen": true, "necros": true,
+		"exrow": true, "pioneer": true, "cdman": true, "fenixx": true, "alteriwnet": true, "iwnet": true,
+		"архив": true, "archive": true, "serega": true, "lus": true, "canek": true, "chupacabra": true,
+		"origins": true, "recoding": true, "nolimits": true, "edition": true, "deluxe": true,
+		"ultimate": true, "goty": true, "remastered": true, "remaster": true, "complete": true,
+		"definitive": true, "anniversary": true,
 	}
+)
+
+func isJunkWord(w string) bool {
+	if junkWordsMap[w] {
+		return true
+	}
+	if strings.HasPrefix(w, "dixen") || strings.HasPrefix(w, "yaroslav") || strings.HasPrefix(w, "voices") || strings.HasPrefix(w, "canek") {
+		return true
+	}
+	return false
+}
 	
+var (
 	// Regex for letter-digit boundaries
 	reDigitLetter = regexp.MustCompile(`(\d)([a-zA-Z])`)
 	reLetterDigit = regexp.MustCompile(`([a-zA-Z])(\d)`)
@@ -120,6 +141,8 @@ func foldDiacritics(r rune) rune {
 
 // NormalizeTitle cleans game titles for resilient search and comparison
 func NormalizeTitle(raw string) string {
+	raw = html.UnescapeString(raw)
+
 	// Pre-process CamelCase and glued letters while case info is intact:
 	// "BeingADIK" -> "Being a DIK", "BioShock" -> "Bio Shock"
 	s := reCamelCaseA.ReplaceAllString(raw, "$1 a $2")
@@ -174,7 +197,7 @@ func NormalizeTitle(raw string) string {
 			if yr, err := strconv.Atoi(w); err == nil && yr >= 1970 && yr <= 2035 {
 				continue
 			}
-			if junkWordsMap[w] {
+			if isJunkWord(w) {
 				continue
 			}
 			filtered = append(filtered, w)
@@ -279,26 +302,29 @@ func ExtractBilingualParts(title string) (cyrillicPart string, latinPart string)
 
 // GenerateSearchQueries generates sensible query variants for Steam Store search
 func GenerateSearchQueries(title string) []string {
+	title = html.UnescapeString(title)
 	clean := NormalizeTitle(title)
 	if clean == "" {
 		return nil
 	}
 
-	queries := []string{clean}
-	seen := map[string]bool{clean: true}
+	queries := make([]string, 0, 8)
+	seen := make(map[string]bool)
+
+	addQuery := func(q string) {
+		q = strings.TrimSpace(q)
+		if q != "" && !seen[q] {
+			queries = append(queries, q)
+			seen[q] = true
+		}
+	}
 
 	// Bilingual extraction (e.g. "Сибирь 3 Syberia 3" -> "Syberia 3" and "Сибирь 3")
 	if cyr, lat := ExtractBilingualParts(title); cyr != "" && lat != "" {
 		cleanLat := NormalizeTitle(lat)
-		if cleanLat != "" && !seen[cleanLat] {
-			queries = append(queries, cleanLat)
-			seen[cleanLat] = true
-		}
+		addQuery(cleanLat)
 		cleanCyr := NormalizeTitle(cyr)
-		if cleanCyr != "" && !seen[cleanCyr] {
-			queries = append(queries, cleanCyr)
-			seen[cleanCyr] = true
-		}
+		addQuery(cleanCyr)
 	}
 
 	// Multilingual or release slash segment queries (e.g. "Сибирь 3 / Syberia 3 PC | by xatab" -> "Syberia 3")
@@ -308,42 +334,36 @@ func GenerateSearchQueries(title string) []string {
 		})
 		for _, p := range parts {
 			cleanPart := NormalizeTitle(p)
-			if cleanPart != "" && !seen[cleanPart] {
-				queries = append(queries, cleanPart)
-				seen[cleanPart] = true
-			}
+			addQuery(cleanPart)
 		}
 	}
 
+	// Full clean query
+	addQuery(clean)
+
 	// Variant with acronyms expanded (e.g. "gta vice city de" -> "grand theft auto vice city definitive edition")
 	expanded := expandAcronyms(clean)
-	if expanded != clean && !seen[expanded] {
-		queries = append(queries, expanded)
-		seen[expanded] = true
+	if expanded != clean {
+		addQuery(expanded)
 	}
 
 	// Variant with Roman Numerals converted to Arabic
 	arabicVariant := convertRomanNumerals(clean, true)
-	if arabicVariant != clean && !seen[arabicVariant] {
-		queries = append(queries, arabicVariant)
-		seen[arabicVariant] = true
+	if arabicVariant != clean {
+		addQuery(arabicVariant)
 	}
 
 	// Variant with Arabic converted to Roman Numerals
 	romanVariant := convertRomanNumerals(clean, false)
-	if romanVariant != clean && !seen[romanVariant] {
-		queries = append(queries, romanVariant)
-		seen[romanVariant] = true
+	if romanVariant != clean {
+		addQuery(romanVariant)
 	}
 
 	// Variant with only the core franchise words (first 3-4 words if title is very long)
 	words := strings.Fields(clean)
 	if len(words) > 3 {
 		shortQuery := strings.Join(words[:3], " ")
-		if !seen[shortQuery] {
-			queries = append(queries, shortQuery)
-			seen[shortQuery] = true
-		}
+		addQuery(shortQuery)
 	}
 
 	return queries
@@ -544,6 +564,9 @@ func computeSimilarityTokens(qStr, cStr, normQ, normC, rawQ, rawC string) float6
 	// Check for missing critical query words (e.g. "Ragnarok" in "God of War Ragnarok")
 	hasMissingKeyWord := false
 	for _, qw := range qWords {
+		if isJunkWord(qw) {
+			continue
+		}
 		found := false
 		for _, cw := range cWords {
 			if wordsMatch(qw, cw) {
@@ -560,6 +583,8 @@ func computeSimilarityTokens(qStr, cStr, normQ, normC, rawQ, rawC string) float6
 	}
 
 	isPrefixMatch := strings.HasPrefix(qStr, cStr) || strings.HasPrefix(normQ, normC) || strings.HasPrefix(cStr, qStr) || strings.HasPrefix(normC, normQ)
+	isContainsMatch := (len(cWords) >= 2 && (strings.Contains(normQ, normC) || strings.Contains(qStr, cStr))) ||
+		(len(qWords) >= 2 && (strings.Contains(normC, normQ) || strings.Contains(cStr, qStr)))
 
 	var score float64
 	// If ALL query words are present in the candidate (e.g. "Spider Man" in "Marvel Spider Man", "Asterigos" in "Asterigos Curse of the Stars")
@@ -575,12 +600,17 @@ func computeSimilarityTokens(qStr, cStr, normQ, normC, rawQ, rawC string) float6
 		} else {
 			score = candidateCoverage
 		}
-	} else if candidateCoverage >= 0.99 && len(cWords) >= 2 {
+	} else if candidateCoverage >= 0.99 {
 		// Candidate is fully contained in query (e.g. "Edge of Sanity" inside "Edge of Sanity v 1 1 1 ...")
 		if isPrefixMatch && !hasMissingKeyWord {
 			// Exact prefix match of canonical game title with no missing major subtitle
 			score = 0.92 + (0.08 * queryCoverage)
 		} else if !hasMissingKeyWord {
+			score = 0.85 + (0.15 * queryCoverage)
+		} else if !isPrefixMatch && isContainsMatch && (len(cWords) >= 3 || len([]rune(normC)) >= 12) {
+			// Candidate title is contained in query verbatim (e.g. "Soushin no Ars Magna The Alchemist of Ars Magna")
+			score = 0.88 + (0.12 * queryCoverage)
+		} else if len(cWords) >= 2 && !isPrefixMatch && strings.Contains(normQ, normC) {
 			score = 0.80 + (0.15 * queryCoverage)
 		} else {
 			// Candidate is a substring, but query contains a major distinctive keyword (e.g. "Ragnarok" in "God of War Ragnarok")
@@ -593,6 +623,9 @@ func computeSimilarityTokens(qStr, cStr, normQ, normC, rawQ, rawC string) float6
 
 		// Check for missing critical query word penalty
 		for _, qw := range qWords {
+			if isJunkWord(qw) {
+				continue
+			}
 			found := false
 			for _, cw := range cWords {
 				if wordsMatch(qw, cw) {

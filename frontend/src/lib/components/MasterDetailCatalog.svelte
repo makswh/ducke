@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import {
     Gamepad2,
     HardDrive,
@@ -33,9 +33,63 @@
   let selectedGameId = $state<number | null>(null);
   let imageLoadFailed = $state<Record<string, boolean>>({});
 
+  // Debounced search query (150ms) to keep input instantaneous on 10k+ libraries
+  let debouncedSearchQuery = $state<string>('');
+  let debounceTimer: any = null;
+
+  $effect(() => {
+    const raw = searchQuery;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (!raw) {
+      debouncedSearchQuery = '';
+    } else {
+      debounceTimer = setTimeout(() => {
+        debouncedSearchQuery = raw;
+      }, 150);
+    }
+  });
+
+  onDestroy(() => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+  });
+
+  // Deduplicate only when raw 'games' array reference changes and precompute search corpus & flags
+  let deduplicatedList = $derived.by(() => {
+    const list = deduplicateGames(games || []);
+    return list.map((g) => {
+      const gList = (g.genres || []).map((x: string) => x.toLowerCase().trim()).filter(Boolean);
+      const tList = (g.tags || []).map((x: string) => x.toLowerCase().trim()).filter(Boolean);
+      const pList = (g.publishers || []).map((x: string) => x.toLowerCase().trim()).filter(Boolean);
+      const vList = (g.variants || []).map((v: any) => `${v.rawName || ''} ${v.torrentSource || ''}`.toLowerCase().trim()).filter(Boolean);
+      const searchCorpus = `${g.cleanTitle || ''} ${g.steamTitle || ''} ${gList.join(' ')} ${tList.join(' ')} ${pList.join(' ')} ${vList.join(' ')}`.toLowerCase();
+
+      const hasController = g.controllerSupport === 'full' || g.controllerSupport === 'partial';
+      const isRpg = gList.some((x: string) => x.includes('rpg') || x.includes('ролев'));
+      const isAction = gList.some((x: string) => x.includes('action') || x.includes('экшен'));
+      const isCollection = !!(g.isCollection || (g.parentPath && g.parentPath !== ''));
+      const isUnder10gb = (g.sizeBytes || 0) > 0 && (g.sizeBytes || 0) <= 10 * 1024 * 1024 * 1024;
+      const isOver50gb = (g.sizeBytes || 0) >= 50 * 1024 * 1024 * 1024;
+
+      return {
+        ...g,
+        _searchCorpus: searchCorpus,
+        _genreLowerSet: new Set(gList),
+        _hasController: hasController,
+        _isRpg: isRpg,
+        _isAction: isAction,
+        _isCollection: isCollection,
+        _isUnder10gb: isUnder10gb,
+        _isOver50gb: isOver50gb
+      };
+    });
+  });
+
   let availableGenres = $derived.by(() => {
     const counts = new Map<string, number>();
-    for (const g of games || []) {
+    for (const g of deduplicatedList) {
       if (g.genres && Array.isArray(g.genres)) {
         for (const raw of g.genres) {
           const genre = raw.trim();
@@ -68,43 +122,41 @@
     }
   }
 
-  // Deduplicate and filter games
+  // Single-pass filter over deduplicated list
   let filteredGames = $derived.by(() => {
-    const list = deduplicateGames(games || []);
+    const q = debouncedSearchQuery.trim().toLowerCase();
+    const selGenre = selectedGenre !== 'all' ? selectedGenre.toLowerCase() : null;
+    const selFilter = selectedFilter;
 
-    let result = list.filter((g) => {
-      if (searchQuery && searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const titleMatch = (g.cleanTitle || '').toLowerCase().includes(q);
-        const steamTitleMatch = (g.steamTitle || '').toLowerCase().includes(q);
-        const genreMatch = (g.genres || []).some((genre) => genre.toLowerCase().includes(q));
-        const pubMatch = (g.publishers || []).some((pub) => pub.toLowerCase().includes(q));
-        const variantMatch = (g.variants || []).some((v) => (v.rawName || '').toLowerCase().includes(q) || (v.torrentSource || '').toLowerCase().includes(q));
-        if (!titleMatch && !steamTitleMatch && !genreMatch && !pubMatch && !variantMatch) return false;
+    let result = deduplicatedList.filter((g) => {
+      // 1. Fast search match using precomputed corpus
+      if (q && !g._searchCorpus.includes(q)) {
+        return false;
       }
 
-      if (selectedGenre !== 'all') {
-        const match = (g.genres || []).some((gen) => gen.toLowerCase() === selectedGenre.toLowerCase());
-        if (!match) return false;
+      // 2. Fast genre match using Set O(1)
+      if (selGenre && !g._genreLowerSet.has(selGenre)) {
+        return false;
       }
 
-      if (selectedFilter === 'controller') {
-        return g.controllerSupport === 'full' || g.controllerSupport === 'partial';
+      // 3. Fast filter presets using precomputed booleans
+      if (selFilter === 'controller') {
+        return g._hasController;
       }
-      if (selectedFilter === 'rpg') {
-        return (g.genres || []).some((genre) => genre.toLowerCase().includes('rpg') || genre.toLowerCase().includes('ролев'));
+      if (selFilter === 'rpg') {
+        return g._isRpg;
       }
-      if (selectedFilter === 'action') {
-        return (g.genres || []).some((genre) => genre.toLowerCase().includes('action') || genre.toLowerCase().includes('экшен'));
+      if (selFilter === 'action') {
+        return g._isAction;
       }
-      if (selectedFilter === 'collections') {
-        return g.isCollection || (g.parentPath && g.parentPath !== '');
+      if (selFilter === 'collections') {
+        return g._isCollection;
       }
-      if (selectedFilter === 'under10gb') {
-        return g.sizeBytes > 0 && g.sizeBytes <= 10 * 1024 * 1024 * 1024;
+      if (selFilter === 'under10gb') {
+        return g._isUnder10gb;
       }
-      if (selectedFilter === 'over50gb') {
-        return g.sizeBytes >= 50 * 1024 * 1024 * 1024;
+      if (selFilter === 'over50gb') {
+        return g._isOver50gb;
       }
 
       return true;
@@ -135,16 +187,66 @@
     return result;
   });
 
-  // Auto-select first game when list loads
+  function ensureGameVisible(gameId: number) {
+    if (!listContainer || filteredGames.length === 0) return;
+    const idx = filteredGames.findIndex((g) => g.id === gameId);
+    if (idx < 0) return;
+    const itemTop = idx * ITEM_SLOT;
+    const itemBottom = itemTop + ITEM_SLOT;
+    const curTop = listContainer.scrollTop;
+    const curBottom = curTop + containerHeight;
+
+    if (itemTop < curTop) {
+      listContainer.scrollTop = itemTop;
+    } else if (itemBottom > curBottom) {
+      listContainer.scrollTop = itemBottom - containerHeight;
+    }
+  }
+
+  // Auto-select first game when list loads, and track merged games
   $effect(() => {
     if (filteredGames.length > 0 && selectedGameId === null) {
       selectedGameId = filteredGames[0].id;
+      return;
+    }
+
+    if (selectedGameId !== null && deduplicatedList.length > 0) {
+      const existsDirectly = deduplicatedList.some((g) => g.id === selectedGameId);
+      if (!existsDirectly) {
+        // Game was merged as a variant into a primary parent game!
+        const parent = deduplicatedList.find((g) =>
+          g.variants && g.variants.some((v: any) => v.id === selectedGameId)
+        );
+        if (parent) {
+          selectedGameId = parent.id;
+          ensureGameVisible(parent.id);
+        }
+      }
     }
   });
 
   let selectedGame = $derived.by(() => {
-    if (!selectedGameId && filteredGames.length > 0) return filteredGames[0];
-    return filteredGames.find((g) => g.id === selectedGameId) || (filteredGames.length > 0 ? filteredGames[0] : null);
+    if (filteredGames.length === 0) return null;
+    if (!selectedGameId) return filteredGames[0];
+
+    // 1. Direct top-level match
+    const direct = filteredGames.find((g) => g.id === selectedGameId);
+    if (direct) return direct;
+
+    // 2. Merged variant match in filteredGames
+    const mergedInFiltered = filteredGames.find((g) =>
+      g.variants && g.variants.some((v: any) => v.id === selectedGameId)
+    );
+    if (mergedInFiltered) return mergedInFiltered;
+
+    // 3. Merged variant match in entire deduplicated list
+    const mergedInAll = deduplicatedList.find((g) =>
+      g.id === selectedGameId || (g.variants && g.variants.some((v: any) => v.id === selectedGameId))
+    );
+    if (mergedInAll) return mergedInAll;
+
+    // 4. Fallback to first filtered game
+    return filteredGames[0];
   });
 
   function isPlaceholderTitle(title: string | undefined | null): boolean {
@@ -221,7 +323,7 @@
 
   // Reset scroll position when filter, genre, sort, or search changes
   $effect(() => {
-    const _ = [searchQuery, selectedGenre, selectedFilter, selectedSort];
+    const _ = [debouncedSearchQuery, selectedGenre, selectedFilter, selectedSort];
     if (listContainer) {
       listContainer.scrollTop = 0;
       scrollTop = 0;
@@ -247,7 +349,7 @@
 
 <div class="flex-1 flex h-full overflow-hidden bg-[#07080a]">
   <!-- 1. LEFT SIDEBAR: Master Game List -->
-  <aside data-nav-zone="list" class="panel-master relative w-[310px] lg:w-[340px] flex flex-col flex-shrink-0 h-full select-none border-r border-white/[0.06] bg-[#0c0e12]">
+  <aside data-nav-zone="list" class="panel-master relative w-[310px] lg:w-[340px] flex flex-col flex-shrink-0 h-full select-none border-r border-white/[0.06] bg-[#07080a]">
     <!-- Search & Filter Controls -->
     <div class="p-3 pb-2.5 border-b border-white/[0.06] space-y-2">
       <div class="flex items-center justify-between">
@@ -356,7 +458,7 @@
                     <Layers class="w-3.5 h-3.5 {selectedGenre === 'all' && selectedFilter === 'all' ? 'text-sky-400' : 'text-[#6b7280]'}" />
                     <span>Все игры</span>
                   </div>
-                  <span class="text-[10px] text-[#8e95a2] font-mono px-1.5 py-0.5 rounded bg-white/[0.04]">{games.length}</span>
+                  <span class="text-[10px] text-[#8e95a2] font-mono px-1.5 py-0.5 rounded bg-white/[0.04]">{deduplicatedList.length}</span>
                 </button>
 
                 <!-- Dynamic genres -->
@@ -501,18 +603,17 @@
       class="flex-1 overflow-y-auto p-2 select-none"
     >
       {#if isLoading && filteredGames.length === 0}
-        <!-- Loading Skeleton State -->
-        <div class="px-2.5 py-2 mb-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-xs text-sky-300 flex items-center gap-2">
-          <div class="w-3.5 h-3.5 rounded-full border-2 border-sky-400 border-t-transparent animate-spin flex-shrink-0"></div>
-          <span class="truncate font-medium">{loadingStatusText || 'Загрузка библиотеки игр...'}</span>
+        <!-- Minimal loading indicator in sidebar -->
+        <div class="px-3 py-2 mb-1.5 text-[11px] text-[#525a6c] font-mono tracking-wider uppercase truncate">
+          {loadingStatusText || 'Загрузка...'}
         </div>
         <div class="flex flex-col gap-1 w-full">
-          {#each Array(8) as _}
-            <div class="h-[58px] rounded-xl bg-white/[0.03] border border-white/[0.04] p-2.5 px-3 flex flex-col justify-between animate-pulse">
-              <div class="h-3 bg-white/10 rounded w-3/4"></div>
+          {#each Array(9) as _, i}
+            <div class="h-[58px] rounded-xl sk-block p-2.5 px-3 flex flex-col justify-between" style="animation-delay: {i * 60}ms">
+              <div class="sk-line h-3 w-3/4"></div>
               <div class="flex justify-between items-center">
-                <div class="h-2 bg-white/5 rounded w-16"></div>
-                <div class="h-2 bg-white/5 rounded w-12"></div>
+                <div class="sk-line h-2 w-16"></div>
+                <div class="sk-line h-2 w-12"></div>
               </div>
             </div>
           {/each}
@@ -538,7 +639,7 @@
                 data-nav-item
                 role="button"
                 tabindex="0"
-                class="group relative h-[58px] overflow-hidden rounded-xl cursor-pointer transition-colors duration-150 border-2 {isSelected ? 'border-sky-500 bg-[#131722]' : 'border-white/[0.04] bg-[#0c0e14]/90 hover:bg-[#11141c] hover:border-white/10'}"
+                class="group relative h-[58px] overflow-hidden rounded-xl cursor-pointer transition-colors duration-150 border-2 {isSelected ? 'border-sky-500 bg-[#131722]' : 'border-white/[0.04] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10'}"
                 onclick={() => {
                   selectedGameId = game.id;
                 }}
@@ -564,9 +665,12 @@
                       <img
                         src={game.iconUrl}
                         alt=""
+                        decoding="async"
                         class="w-5 h-5 rounded flex-shrink-0 object-contain"
                         onerror={() => {
-                          imageLoadFailed[game.iconUrl] = true;
+                          if (game.iconUrl) {
+                            imageLoadFailed[game.iconUrl] = true;
+                          }
                         }}
                       />
                     {/if}
@@ -602,8 +706,11 @@
     {downloadPath}
     {onStartDownload}
     {onSelectFolder}
-    onSelectGenre={(g) => {
+    onSelectGenre={(g: string) => {
       selectedGenre = g;
+    }}
+    onSelectTag={(t: string) => {
+      searchQuery = t;
     }}
   />
 </div>

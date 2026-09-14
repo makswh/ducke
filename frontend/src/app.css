@@ -3,13 +3,13 @@
 
 @layer base {
   :root {
-    --bg-rail: #0a0c0e;
-    --bg-master: #0f1115;
-    --bg-detail: #13151a;
-    --bg-card: #181a20;
-    --bg-card-hover: #1e2128;
-    --bg-card-active: #242731;
-    --bg-input: #0a0c0e;
+    --bg-rail: #07080a;
+    --bg-master: #07080a;
+    --bg-detail: #07080a;
+    --bg-card: #0c0e14;
+    --bg-card-hover: #141720;
+    --bg-card-active: #181d28;
+    --bg-input: #07080a;
     
     --border-subtle: rgba(255, 255, 255, 0.05);
     --border-focus: rgba(255, 255, 255, 0.12);
@@ -64,17 +64,17 @@
 
 /* Master-Detail Components */
 .panel-rail {
-  background-color: var(--bg-rail);
+  background-color: #07080a;
   border-right: 1px solid var(--border-subtle);
 }
 
 .panel-master {
-  background-color: var(--bg-master);
+  background-color: #07080a;
   border-right: 1px solid var(--border-subtle);
 }
 
 .panel-detail {
-  background-color: var(--bg-detail);
+  background-color: #07080a;
 }
 
 /* Card Selection and States */
@@ -279,3 +279,46 @@
   text-align: left;
 }
 
+/* Loading sweep animation for minimal progress bar */
+@keyframes loading-sweep {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(250%); }
+  100% { transform: translateX(250%); }
+}
+
+/* ─── Skeleton utilities ──────────────────────────────────────── */
+/* Single shimmer pass: a diagonal glint moving left → right      */
+@keyframes sk-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 600px 0; }
+}
+
+/* Opaque filled block (cover art, video area) */
+.sk-block {
+  background-color: rgba(255, 255, 255, 0.03);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.045) 50%,
+    transparent 100%
+  );
+  background-size: 400px 100%;
+  background-repeat: no-repeat;
+  animation: sk-shimmer 2.2s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+/* Text-line placeholder (thin, even more subtle) */
+.sk-line {
+  background-color: rgba(255, 255, 255, 0.04);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.055) 50%,
+    transparent 100%
+  );
+  background-size: 400px 100%;
+  background-repeat: no-repeat;
+  animation: sk-shimmer 2.2s ease-in-out infinite;
+  border-radius: 3px;
+}

@@ -32,6 +32,7 @@ type GameEntity struct {
 	RawName           string       `json:"rawName"`
 	CleanTitle        string       `json:"cleanTitle"`
 	SearchTitle       string       `json:"searchTitle"`
+	CanonicalKey      string       `json:"canonicalKey,omitempty"`
 	RemotePath        string       `json:"remotePath"`
 	SizeBytes         int64        `json:"sizeBytes"`
 	SizeDisplay       string       `json:"sizeDisplay"`
@@ -51,6 +52,7 @@ type GameEntity struct {
 	Screenshots       []string     `json:"screenshots,omitempty"`
 	Movies            []SteamMovie `json:"movies,omitempty"`
 	Genres            []string     `json:"genres,omitempty"`
+	Tags              []string     `json:"tags,omitempty"`
 	Developers        []string     `json:"developers,omitempty"`
 	Publishers        []string     `json:"publishers,omitempty"`
 	ReleaseDate       string       `json:"releaseDate,omitempty"`
@@ -123,6 +125,7 @@ type SteamMetadata struct {
 	Screenshots         []string     `json:"screenshots"`
 	Movies              []SteamMovie `json:"movies"`
 	Genres              []string     `json:"genres"`
+	Tags                []string     `json:"tags,omitempty"`
 	Developers          []string     `json:"developers"`
 	Publishers          []string     `json:"publishers"`
 	ReleaseDate         string       `json:"releaseDate"`
@@ -156,6 +159,9 @@ type DownloadRecord struct {
 type Database struct {
 	mu sync.RWMutex
 	db *sql.DB
+
+	matcherMu sync.RWMutex
+	matcher   *LibraryMatcher
 }
 
 func InitDB(appDir string) (*Database, error) {
@@ -174,6 +180,9 @@ func InitDB(appDir string) (*Database, error) {
 		PRAGMA journal_mode = WAL;
 		PRAGMA synchronous = NORMAL;
 		PRAGMA busy_timeout = 5000;
+		PRAGMA cache_size = -64000;
+		PRAGMA temp_store = MEMORY;
+		PRAGMA mmap_size = 268435456;
 	`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to configure sqlite pragma: %w", err)
@@ -204,6 +213,7 @@ func (d *Database) migrate() error {
 		raw_name TEXT NOT NULL,
 		clean_title TEXT NOT NULL,
 		search_title TEXT NOT NULL,
+		canonical_key TEXT DEFAULT '',
 		remote_path TEXT NOT NULL UNIQUE,
 		size_bytes INTEGER DEFAULT 0,
 		size_display TEXT DEFAULT '',
@@ -227,6 +237,7 @@ func (d *Database) migrate() error {
 		screenshots TEXT,
 		movies TEXT,
 		genres TEXT,
+		tags TEXT,
 		developers TEXT,
 		publishers TEXT,
 		release_date TEXT,
@@ -261,18 +272,28 @@ func (d *Database) migrate() error {
 	}
 
 	// Automatic schema migration for existing databases
+	_, _ = d.db.Exec("ALTER TABLE games ADD COLUMN canonical_key TEXT DEFAULT ''")
+	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_canonical_key ON games(canonical_key)")
 	_, _ = d.db.Exec("ALTER TABLE steam_metadata ADD COLUMN movies TEXT DEFAULT '[]'")
 	_, _ = d.db.Exec("ALTER TABLE steam_metadata ADD COLUMN review_score_desc TEXT DEFAULT ''")
 	_, _ = d.db.Exec("ALTER TABLE steam_metadata ADD COLUMN review_percent INTEGER DEFAULT 0")
 	_, _ = d.db.Exec("ALTER TABLE steam_metadata ADD COLUMN total_reviews INTEGER DEFAULT 0")
 	_, _ = d.db.Exec("ALTER TABLE steam_metadata ADD COLUMN total_positive INTEGER DEFAULT 0")
 	_, _ = d.db.Exec("ALTER TABLE steam_metadata ADD COLUMN icon_url TEXT DEFAULT ''")
+	_, _ = d.db.Exec("ALTER TABLE steam_metadata ADD COLUMN tags TEXT DEFAULT '[]'")
 	// Invalidate and delete any legacy cached steam_metadata where movies exist but lack modern HLS streams
 	_, _ = d.db.Exec("DELETE FROM steam_metadata WHERE movies IS NOT NULL AND movies != '[]' AND movies != 'null' AND movies NOT LIKE '%hls%'")
 	// Also mark those games as unsynced so background worker immediately refreshes them
 	_, _ = d.db.Exec("UPDATE games SET steam_synced = 0 WHERE steam_appid > 0 AND steam_appid NOT IN (SELECT appid FROM steam_metadata)")
 	// Invalidate horizontal capsules (e.g. 231x87, 616x353) stored in capsule_image so portrait 600x900 covers are used instead
 	_, _ = d.db.Exec("UPDATE steam_metadata SET capsule_image = '' WHERE capsule_image LIKE '%capsule_231x87%' OR capsule_image LIKE '%capsule_616x353%' OR capsule_image LIKE '%capsule_467x181%' OR capsule_image LIKE '%header%'")
+	_, _ = d.db.Exec(`
+		CREATE TABLE IF NOT EXISTS stopgame_cache (
+			cache_key TEXT PRIMARY KEY,
+			response_json TEXT NOT NULL,
+			updated_at INTEGER NOT NULL
+		);
+	`)
 
 	// Torrent sources and downloads support
 	_, _ = d.db.Exec("ALTER TABLE games ADD COLUMN source_type TEXT DEFAULT 'ftp'")
@@ -297,7 +318,61 @@ func (d *Database) migrate() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_favorites_status ON favorites(status);
 	`)
+
+	// Backfill missing canonical keys asynchronously in background
+	go d.BackfillCanonicalKeys()
+
 	return nil
+}
+
+// BackfillCanonicalKeys ensures all legacy records have a precomputed canonical_key
+func (d *Database) BackfillCanonicalKeys() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	rows, err := d.db.Query(`SELECT id, clean_title FROM games WHERE canonical_key IS NULL OR canonical_key = '' LIMIT 25000`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type keyItem struct {
+		id    int64
+		title string
+	}
+	var items []keyItem
+	for rows.Next() {
+		var it keyItem
+		if err := rows.Scan(&it.id, &it.title); err == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+
+	if len(items) == 0 {
+		return
+	}
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`UPDATE games SET canonical_key = ? WHERE id = ?`)
+	if err != nil {
+		return
+	}
+	defer stmt.Close()
+
+	for _, it := range items {
+		cKey := remote.CleanCanonicalKey(it.title)
+		_, _ = stmt.Exec(cKey, it.id)
+	}
+
+	if err := tx.Commit(); err == nil {
+		log.Printf("[Database] Backfilled canonical_key for %d games", len(items))
+	}
 }
 
 // UpsertGames updates or inserts remote game records
@@ -313,13 +388,14 @@ func (d *Database) UpsertGames(items []remote.RemoteItem) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO games (
-			raw_name, clean_title, search_title, remote_path, size_bytes, size_display,
+			raw_name, clean_title, search_title, canonical_key, remote_path, size_bytes, size_display,
 			is_directory, is_collection, parent_path, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(remote_path) DO UPDATE SET
 			raw_name = excluded.raw_name,
 			clean_title = excluded.clean_title,
 			search_title = excluded.search_title,
+			canonical_key = excluded.canonical_key,
 			size_bytes = excluded.size_bytes,
 			size_display = excluded.size_display,
 			is_directory = excluded.is_directory,
@@ -342,10 +418,12 @@ func (d *Database) UpsertGames(items []remote.RemoteItem) error {
 			isColl = 1
 		}
 
+		canonicalKey := remote.CleanCanonicalKey(item.CleanTitle)
 		_, err := stmt.Exec(
 			item.RawName,
 			item.CleanTitle,
 			item.SearchTitle,
+			canonicalKey,
 			item.RemotePath,
 			item.SizeBytes,
 			item.SizeDisplay,
@@ -381,13 +459,32 @@ func (d *Database) ResetInvalidSteamMatches() error {
 const gameSelectFields = `
 	g.id, g.raw_name, g.clean_title, g.search_title, g.remote_path, g.size_bytes,
 	g.size_display, g.is_directory, g.is_collection, g.parent_path, g.steam_appid, g.steam_synced,
+	COALESCE(g.canonical_key, ''),
 	COALESCE(g.source_type, 'ftp'), COALESCE(g.torrent_source, ''), COALESCE(g.uris, '[]'), COALESCE(g.upload_date, ''),
 	COALESCE(s.title, ''), COALESCE(s.short_description, ''), COALESCE(s.detailed_description, ''),
 	COALESCE(s.header_image, ''), COALESCE(s.capsule_image, ''), COALESCE(s.background_image, ''),
 	COALESCE(s.icon_url, ''),
-	COALESCE(s.screenshots, '[]'), COALESCE(s.movies, '[]'), COALESCE(s.genres, '[]'), COALESCE(s.developers, '[]'),
+	COALESCE(s.screenshots, '[]'), COALESCE(s.movies, '[]'), COALESCE(s.genres, '[]'), COALESCE(s.tags, '[]'), COALESCE(s.developers, '[]'),
 	COALESCE(s.publishers, '[]'), COALESCE(s.release_date, ''), COALESCE(s.controller_support, ''),
 	COALESCE(s.pc_requirements, ''), COALESCE(s.metacritic_score, 0),
+	COALESCE(s.review_score_desc, ''), COALESCE(s.review_percent, 0), COALESCE(s.total_reviews, 0),
+	COALESCE(f.status, '')
+`
+
+// gameSelectFieldsLite omits heavy fields (detailed_description, pc_requirements, screenshots, movies)
+// shrinking JSON IPC catalog payloads by ~95% for 10,000+ items. Full details are loaded on-demand via GetGamePageDetails.
+const gameSelectFieldsLite = `
+	g.id, g.raw_name, g.clean_title, g.search_title, g.remote_path, g.size_bytes,
+	g.size_display, g.is_directory, g.is_collection, g.parent_path, g.steam_appid, g.steam_synced,
+	COALESCE(g.canonical_key, ''),
+	COALESCE(g.source_type, 'ftp'), COALESCE(g.torrent_source, ''), COALESCE(g.uris, '[]'), COALESCE(g.upload_date, ''),
+	COALESCE(s.title, ''), COALESCE(s.short_description, ''),
+	COALESCE(s.header_image, ''), COALESCE(s.capsule_image, ''), COALESCE(s.background_image, ''),
+	COALESCE(s.icon_url, ''),
+	COALESCE(s.screenshots, '[]'),
+	COALESCE(s.genres, '[]'), COALESCE(s.tags, '[]'), COALESCE(s.developers, '[]'),
+	COALESCE(s.publishers, '[]'), COALESCE(s.release_date, ''), COALESCE(s.controller_support, ''),
+	COALESCE(s.metacritic_score, 0),
 	COALESCE(s.review_score_desc, ''), COALESCE(s.review_percent, 0), COALESCE(s.total_reviews, 0),
 	COALESCE(f.status, '')
 `
@@ -400,16 +497,17 @@ func (d *Database) scanGame(scanner rowScanner) (GameEntity, error) {
 	var g GameEntity
 	var isDir, isColl, synced int
 	var urisJSON string
-	var screenshotsJSON, moviesJSON, genresJSON, devsJSON, pubsJSON string
+	var screenshotsJSON, moviesJSON, genresJSON, tagsJSON, devsJSON, pubsJSON string
 
 	err := scanner.Scan(
 		&g.ID, &g.RawName, &g.CleanTitle, &g.SearchTitle, &g.RemotePath, &g.SizeBytes,
 		&g.SizeDisplay, &isDir, &isColl, &g.ParentPath, &g.SteamAppID, &synced,
+		&g.CanonicalKey,
 		&g.SourceType, &g.TorrentSource, &urisJSON, &g.UploadDate,
 		&g.SteamTitle, &g.ShortDescription, &g.DetailedDescription,
 		&g.HeaderImage, &g.CapsuleImage, &g.BackgroundImage,
 		&g.IconURL,
-		&screenshotsJSON, &moviesJSON, &genresJSON, &devsJSON, &pubsJSON,
+		&screenshotsJSON, &moviesJSON, &genresJSON, &tagsJSON, &devsJSON, &pubsJSON,
 		&g.ReleaseDate, &g.ControllerSupport, &g.PCRequirements, &g.MetacriticScore,
 		&g.ReviewScoreDesc, &g.ReviewPercent, &g.TotalReviews,
 		&g.FavoriteStatus,
@@ -450,22 +548,111 @@ func (d *Database) scanGame(scanner rowScanner) (GameEntity, error) {
 	if g.CleanTitle == "" {
 		g.CleanTitle = remote.CleanDisplayTitle(g.RawName)
 	}
+	if g.CanonicalKey == "" {
+		g.CanonicalKey = remote.CleanCanonicalKey(g.CleanTitle)
+	}
 	g.SearchTitle = remote.SanitizeForSteamSearch(g.CleanTitle)
 
 	_ = json.Unmarshal([]byte(screenshotsJSON), &g.Screenshots)
 	_ = json.Unmarshal([]byte(moviesJSON), &g.Movies)
 	_ = json.Unmarshal([]byte(genresJSON), &g.Genres)
+	_ = json.Unmarshal([]byte(tagsJSON), &g.Tags)
 	_ = json.Unmarshal([]byte(devsJSON), &g.Developers)
 	_ = json.Unmarshal([]byte(pubsJSON), &g.Publishers)
 
 	if g.CapsuleImage == "" && g.SteamAppID > 0 {
-		g.CapsuleImage = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", g.SteamAppID)
+		g.CapsuleImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", g.SteamAppID)
 	}
 	if g.HeaderImage == "" && g.SteamAppID > 0 {
-		g.HeaderImage = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", g.SteamAppID)
+		g.HeaderImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", g.SteamAppID)
 	}
 	if g.BackgroundImage == "" && g.SteamAppID > 0 {
-		g.BackgroundImage = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/page_bg_generated_v6b.jpg", g.SteamAppID)
+		g.BackgroundImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/page_bg_generated_v6b.jpg", g.SteamAppID)
+	}
+
+	if strings.HasPrefix(g.SteamTitle, "Steam App ") {
+		g.SteamTitle = ""
+	}
+
+	return g, nil
+}
+
+func (d *Database) scanGameLite(scanner rowScanner) (GameEntity, error) {
+	var g GameEntity
+	var isDir, isColl, synced int
+	var urisJSON string
+	var screenshotsJSON, genresJSON, tagsJSON, devsJSON, pubsJSON string
+
+	err := scanner.Scan(
+		&g.ID, &g.RawName, &g.CleanTitle, &g.SearchTitle, &g.RemotePath, &g.SizeBytes,
+		&g.SizeDisplay, &isDir, &isColl, &g.ParentPath, &g.SteamAppID, &synced,
+		&g.CanonicalKey,
+		&g.SourceType, &g.TorrentSource, &urisJSON, &g.UploadDate,
+		&g.SteamTitle, &g.ShortDescription,
+		&g.HeaderImage, &g.CapsuleImage, &g.BackgroundImage,
+		&g.IconURL,
+		&screenshotsJSON,
+		&genresJSON, &tagsJSON, &devsJSON, &pubsJSON,
+		&g.ReleaseDate, &g.ControllerSupport,
+		&g.MetacriticScore,
+		&g.ReviewScoreDesc, &g.ReviewPercent, &g.TotalReviews,
+		&g.FavoriteStatus,
+	)
+	if err != nil {
+		return g, err
+	}
+
+	g.IsDirectory = isDir == 1
+	g.IsCollection = isColl == 1
+	g.SteamSynced = synced == 1
+
+	if g.SourceType == "" {
+		g.SourceType = "ftp"
+	}
+
+	var uris []string
+	if err := json.Unmarshal([]byte(urisJSON), &uris); err == nil && len(uris) > 0 {
+		g.MagnetURI = uris[0]
+	} else if strings.HasPrefix(g.RemotePath, "magnet:") {
+		g.MagnetURI = g.RemotePath
+	}
+
+	if g.SourceType == "ftp" {
+		if g.SizeDisplay == "Unknown" || (g.SizeBytes == 0 && g.RawName != "") || strings.Contains(g.CleanTitle, "GB") || strings.Contains(g.CleanTitle, "MB") {
+			parsed := remote.ParseFolderName(g.RawName, g.RemotePath, g.IsDirectory)
+			if parsed.SizeBytes > 0 {
+				g.SizeBytes = parsed.SizeBytes
+				g.SizeDisplay = parsed.SizeDisplay
+			}
+			if parsed.CleanTitle != "" {
+				g.CleanTitle = parsed.CleanTitle
+			}
+		}
+	}
+
+	g.CleanTitle = remote.CleanDisplayTitle(g.CleanTitle)
+	if g.CleanTitle == "" {
+		g.CleanTitle = remote.CleanDisplayTitle(g.RawName)
+	}
+	if g.CanonicalKey == "" {
+		g.CanonicalKey = remote.CleanCanonicalKey(g.CleanTitle)
+	}
+	g.SearchTitle = remote.SanitizeForSteamSearch(g.CleanTitle)
+
+	_ = json.Unmarshal([]byte(screenshotsJSON), &g.Screenshots)
+	_ = json.Unmarshal([]byte(genresJSON), &g.Genres)
+	_ = json.Unmarshal([]byte(tagsJSON), &g.Tags)
+	_ = json.Unmarshal([]byte(devsJSON), &g.Developers)
+	_ = json.Unmarshal([]byte(pubsJSON), &g.Publishers)
+
+	if g.CapsuleImage == "" && g.SteamAppID > 0 {
+		g.CapsuleImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", g.SteamAppID)
+	}
+	if g.HeaderImage == "" && g.SteamAppID > 0 {
+		g.HeaderImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", g.SteamAppID)
+	}
+	if g.BackgroundImage == "" && g.SteamAppID > 0 {
+		g.BackgroundImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/page_bg_generated_v6b.jpg", g.SteamAppID)
 	}
 
 	if strings.HasPrefix(g.SteamTitle, "Steam App ") {
@@ -522,13 +709,18 @@ func DeduplicateGames(games []GameEntity) []GameEntity {
 				keys = append(keys, fmt.Sprintf("steam:%s", stk))
 			}
 		}
-		kClean := remote.CleanCanonicalKey(g.CleanTitle)
+		kClean := g.CanonicalKey
+		if kClean == "" {
+			kClean = remote.CleanCanonicalKey(g.CleanTitle)
+		}
 		if kClean != "" {
 			keys = append(keys, fmt.Sprintf("title:%s", kClean))
 		}
-		kSearch := remote.CleanCanonicalKey(g.SearchTitle)
-		if kSearch != "" && kSearch != kClean {
-			keys = append(keys, fmt.Sprintf("title:%s", kSearch))
+		if g.CanonicalKey == "" {
+			kSearch := remote.CleanCanonicalKey(g.SearchTitle)
+			if kSearch != "" && kSearch != kClean {
+				keys = append(keys, fmt.Sprintf("title:%s", kSearch))
+			}
 		}
 
 		for _, k := range keys {
@@ -678,7 +870,7 @@ func (d *Database) GetAllGames() ([]GameEntity, error) {
 	defer d.mu.RUnlock()
 
 	query := `
-		SELECT ` + gameSelectFields + `
+		SELECT ` + gameSelectFieldsLite + `
 		FROM games g
 		LEFT JOIN steam_metadata s ON g.steam_appid = s.appid AND g.steam_appid != 0
 		LEFT JOIN favorites f ON g.id = f.game_id
@@ -694,7 +886,7 @@ func (d *Database) GetAllGames() ([]GameEntity, error) {
 
 	games := make([]GameEntity, 0)
 	for rows.Next() {
-		g, err := d.scanGame(rows)
+		g, err := d.scanGameLite(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -710,7 +902,7 @@ func (d *Database) GetTorrentGames() ([]GameEntity, error) {
 	defer d.mu.RUnlock()
 
 	query := `
-		SELECT ` + gameSelectFields + `
+		SELECT ` + gameSelectFieldsLite + `
 		FROM games g
 		LEFT JOIN steam_metadata s ON g.steam_appid = s.appid AND g.steam_appid != 0
 		LEFT JOIN favorites f ON g.id = f.game_id
@@ -726,7 +918,7 @@ func (d *Database) GetTorrentGames() ([]GameEntity, error) {
 
 	games := make([]GameEntity, 0)
 	for rows.Next() {
-		g, err := d.scanGame(rows)
+		g, err := d.scanGameLite(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -914,14 +1106,15 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO games (
-			raw_name, clean_title, search_title, remote_path, size_bytes, size_display,
+			raw_name, clean_title, search_title, canonical_key, remote_path, size_bytes, size_display,
 			is_directory, is_collection, parent_path, steam_appid, steam_synced,
 			source_type, torrent_source, uris, upload_date, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'torrent', ?, ?, ?, CURRENT_TIMESTAMP)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'torrent', ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(remote_path) DO UPDATE SET
 			raw_name = excluded.raw_name,
 			clean_title = excluded.clean_title,
 			search_title = excluded.search_title,
+			canonical_key = excluded.canonical_key,
 			size_bytes = excluded.size_bytes,
 			size_display = excluded.size_display,
 			torrent_source = excluded.torrent_source,
@@ -956,6 +1149,7 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 
 		cleanTitle := remote.CleanDisplayTitle(item.Title)
 		searchTitle := remote.SanitizeForSteamSearch(cleanTitle)
+		canonicalKey := remote.CleanCanonicalKey(cleanTitle)
 		sizeBytes := remote.ParseFileSize(item.FileSize)
 		sizeDisplay := strings.TrimSpace(item.FileSize)
 		if sizeDisplay == "" && sizeBytes > 0 {
@@ -974,7 +1168,7 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 		}
 
 		if _, err := stmt.Exec(
-			item.Title, cleanTitle, searchTitle, primaryURI, sizeBytes, sizeDisplay,
+			item.Title, cleanTitle, searchTitle, canonicalKey, primaryURI, sizeBytes, sizeDisplay,
 			sourceName, steamAppID, steamSynced,
 			sourceID, string(urisJSON), item.UploadDate,
 		); err != nil {
@@ -1276,16 +1470,17 @@ func (d *Database) SaveSteamMetadata(meta SteamMetadata) error {
 	screenshotsJSON, _ := json.Marshal(meta.Screenshots)
 	moviesJSON, _ := json.Marshal(meta.Movies)
 	genresJSON, _ := json.Marshal(meta.Genres)
+	tagsJSON, _ := json.Marshal(meta.Tags)
 	devsJSON, _ := json.Marshal(meta.Developers)
 	pubsJSON, _ := json.Marshal(meta.Publishers)
 
 	_, err := d.db.Exec(`
 		INSERT INTO steam_metadata (
 			appid, title, short_description, detailed_description, header_image, capsule_image,
-			background_image, icon_url, screenshots, movies, genres, developers, publishers, release_date,
+			background_image, icon_url, screenshots, movies, genres, tags, developers, publishers, release_date,
 			controller_support, pc_requirements, metacritic_score,
 			review_score_desc, review_percent, total_reviews, total_positive, cached_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(appid) DO UPDATE SET
 			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE steam_metadata.title END,
 			short_description = CASE WHEN excluded.short_description != '' THEN excluded.short_description ELSE steam_metadata.short_description END,
@@ -1297,6 +1492,7 @@ func (d *Database) SaveSteamMetadata(meta SteamMetadata) error {
 			screenshots = CASE WHEN excluded.screenshots != '[]' AND excluded.screenshots != '' THEN excluded.screenshots ELSE steam_metadata.screenshots END,
 			movies = CASE WHEN excluded.movies != '[]' AND excluded.movies != '' THEN excluded.movies ELSE steam_metadata.movies END,
 			genres = CASE WHEN excluded.genres != '[]' AND excluded.genres != '' THEN excluded.genres ELSE steam_metadata.genres END,
+			tags = CASE WHEN excluded.tags != '[]' AND excluded.tags != '' THEN excluded.tags ELSE steam_metadata.tags END,
 			developers = CASE WHEN excluded.developers != '[]' AND excluded.developers != '' THEN excluded.developers ELSE steam_metadata.developers END,
 			publishers = CASE WHEN excluded.publishers != '[]' AND excluded.publishers != '' THEN excluded.publishers ELSE steam_metadata.publishers END,
 			release_date = CASE WHEN excluded.release_date != '' THEN excluded.release_date ELSE steam_metadata.release_date END,
@@ -1311,7 +1507,7 @@ func (d *Database) SaveSteamMetadata(meta SteamMetadata) error {
 	`,
 		meta.AppID, meta.Title, meta.ShortDescription, meta.DetailedDescription,
 		meta.HeaderImage, meta.CapsuleImage, meta.BackgroundImage, meta.IconURL,
-		string(screenshotsJSON), string(moviesJSON), string(genresJSON), string(devsJSON), string(pubsJSON),
+		string(screenshotsJSON), string(moviesJSON), string(genresJSON), string(tagsJSON), string(devsJSON), string(pubsJSON),
 		meta.ReleaseDate, meta.ControllerSupport, meta.PCRequirements, meta.MetacriticScore,
 		meta.ReviewScoreDesc, meta.ReviewPercent, meta.TotalReviews, meta.TotalPositive,
 		time.Now().Unix(),
@@ -1327,7 +1523,7 @@ func (d *Database) GetSteamMetadataFromCache(appID int) (*SteamMetadata, error) 
 
 	row := d.db.QueryRow(`
 		SELECT appid, title, short_description, detailed_description, header_image, capsule_image,
-		       background_image, COALESCE(icon_url, ''), screenshots, COALESCE(movies, '[]'), genres, developers, publishers, release_date,
+		       background_image, COALESCE(icon_url, ''), screenshots, COALESCE(movies, '[]'), genres, COALESCE(tags, '[]'), developers, publishers, release_date,
 		       controller_support, pc_requirements, metacritic_score,
 		       COALESCE(review_score_desc, ''), COALESCE(review_percent, 0), COALESCE(total_reviews, 0), COALESCE(total_positive, 0),
 		       cached_at
@@ -1335,13 +1531,13 @@ func (d *Database) GetSteamMetadataFromCache(appID int) (*SteamMetadata, error) 
 	`, appID)
 
 	var m SteamMetadata
-	var screenshotsJSON, moviesJSON, genresJSON, devsJSON, pubsJSON string
+	var screenshotsJSON, moviesJSON, genresJSON, tagsJSON, devsJSON, pubsJSON string
 
 	err := row.Scan(
 		&m.AppID, &m.Title, &m.ShortDescription, &m.DetailedDescription,
 		&m.HeaderImage, &m.CapsuleImage, &m.BackgroundImage,
 		&m.IconURL,
-		&screenshotsJSON, &moviesJSON, &genresJSON, &devsJSON, &pubsJSON,
+		&screenshotsJSON, &moviesJSON, &genresJSON, &tagsJSON, &devsJSON, &pubsJSON,
 		&m.ReleaseDate, &m.ControllerSupport, &m.PCRequirements, &m.MetacriticScore,
 		&m.ReviewScoreDesc, &m.ReviewPercent, &m.TotalReviews, &m.TotalPositive,
 		&m.CachedAt,
@@ -1353,6 +1549,7 @@ func (d *Database) GetSteamMetadataFromCache(appID int) (*SteamMetadata, error) 
 	_ = json.Unmarshal([]byte(screenshotsJSON), &m.Screenshots)
 	_ = json.Unmarshal([]byte(moviesJSON), &m.Movies)
 	_ = json.Unmarshal([]byte(genresJSON), &m.Genres)
+	_ = json.Unmarshal([]byte(tagsJSON), &m.Tags)
 	_ = json.Unmarshal([]byte(devsJSON), &m.Developers)
 	_ = json.Unmarshal([]byte(pubsJSON), &m.Publishers)
 
@@ -1371,6 +1568,16 @@ func (d *Database) GetSteamMetadataFromCache(appID int) (*SteamMetadata, error) 
 	}
 
 	return &m, nil
+}
+
+// UpdateSteamMetadataTags updates the tags for a given appID
+func (d *Database) UpdateSteamMetadataTags(appID int, tags []string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	tagsJSON, _ := json.Marshal(tags)
+	_, err := d.db.Exec(`UPDATE steam_metadata SET tags = ? WHERE appid = ?`, string(tagsJSON), appID)
+	return err
 }
 
 // UpdateSteamMetadataCover updates the capsule_image for a given appID
@@ -1590,4 +1797,153 @@ func formatBytes(bytes int64) string {
 		return fmt.Sprintf("%d B", bytes)
 	}
 }
+
+// GetStopGameCache retrieves cached JSON if updated_at is within maxAge
+func (d *Database) GetStopGameCache(key string, maxAge time.Duration) (string, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	minTimestamp := time.Now().Add(-maxAge).Unix()
+	var jsonStr string
+	err := d.db.QueryRow(`
+		SELECT response_json FROM stopgame_cache
+		WHERE cache_key = ? AND updated_at >= ?
+	`, key, minTimestamp).Scan(&jsonStr)
+	if err != nil {
+		return "", false
+	}
+	return jsonStr, true
+}
+
+// SetStopGameCache stores JSON in stopgame_cache
+func (d *Database) SetStopGameCache(key string, responseJSON string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	_, err := d.db.Exec(`
+		INSERT INTO stopgame_cache (cache_key, response_json, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(cache_key) DO UPDATE SET
+			response_json = excluded.response_json,
+			updated_at = excluded.updated_at
+	`, key, responseJSON, time.Now().Unix())
+	return err
+}
+
+// LibraryMatcher holds indexed maps for lightning-fast external game title matching
+type LibraryMatcher struct {
+	canonicalMap  map[string]GameEntity
+	cleanTitleMap map[string]GameEntity
+	steamTitleMap map[string]GameEntity
+	lastBuilt     time.Time
+}
+
+// InvalidateLibraryMatcher clears the cached in-memory matcher so it will rebuild on next query
+func (d *Database) InvalidateLibraryMatcher() {
+	d.matcherMu.Lock()
+	d.matcher = nil
+	d.matcherMu.Unlock()
+}
+
+func (d *Database) ensureMatcher() *LibraryMatcher {
+	d.matcherMu.RLock()
+	m := d.matcher
+	if m != nil && time.Since(m.lastBuilt) < 15*time.Minute {
+		d.matcherMu.RUnlock()
+		return m
+	}
+	d.matcherMu.RUnlock()
+
+	d.matcherMu.Lock()
+	defer d.matcherMu.Unlock()
+
+	// Double check after lock
+	if d.matcher != nil && time.Since(d.matcher.lastBuilt) < 15*time.Minute {
+		return d.matcher
+	}
+
+	newMatcher := &LibraryMatcher{
+		canonicalMap:  make(map[string]GameEntity),
+		cleanTitleMap: make(map[string]GameEntity),
+		steamTitleMap: make(map[string]GameEntity),
+		lastBuilt:     time.Now(),
+	}
+
+	d.mu.RLock()
+	rows, err := d.db.Query(`
+		SELECT ` + gameSelectFieldsLite + `
+		FROM games g
+		LEFT JOIN steam_metadata s ON g.steam_appid = s.appid AND g.steam_appid != 0
+		LEFT JOIN favorites f ON g.id = f.game_id
+		ORDER BY g.id DESC
+	`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			if g, err := d.scanGameLite(rows); err == nil {
+				cKey := g.CanonicalKey
+				if cKey == "" {
+					cKey = remote.CleanCanonicalKey(g.CleanTitle)
+				}
+				if cKey != "" {
+					if _, exists := newMatcher.canonicalMap[cKey]; !exists {
+						newMatcher.canonicalMap[cKey] = g
+					}
+				}
+				cleanLower := strings.ToLower(strings.TrimSpace(g.CleanTitle))
+				if cleanLower != "" {
+					if _, exists := newMatcher.cleanTitleMap[cleanLower]; !exists {
+						newMatcher.cleanTitleMap[cleanLower] = g
+					}
+				}
+				steamLower := strings.ToLower(strings.TrimSpace(g.SteamTitle))
+				if steamLower != "" {
+					if _, exists := newMatcher.steamTitleMap[steamLower]; !exists {
+						newMatcher.steamTitleMap[steamLower] = g
+					}
+				}
+			}
+		}
+	}
+	d.mu.RUnlock()
+
+	d.matcher = newMatcher
+	return newMatcher
+}
+
+// MatchLibraryGame matches an external game title against Ducke's library in O(1) time
+func (d *Database) MatchLibraryGame(title string) *GameEntity {
+	m := d.ensureMatcher()
+	if m == nil {
+		return nil
+	}
+
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
+		return nil
+	}
+
+	// 1. Check canonical key
+	cKey := remote.CleanCanonicalKey(trimmed)
+	if cKey != "" {
+		if g, ok := m.canonicalMap[cKey]; ok {
+			res := g
+			return &res
+		}
+	}
+
+	// 2. Exact lowercase match
+	lower := strings.ToLower(trimmed)
+	if g, ok := m.cleanTitleMap[lower]; ok {
+		res := g
+		return &res
+	}
+	if g, ok := m.steamTitleMap[lower]; ok {
+		res := g
+		return &res
+	}
+
+	return nil
+}
+
 

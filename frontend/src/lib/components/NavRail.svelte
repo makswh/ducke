@@ -8,11 +8,12 @@
     Magnet,
     Tv,
     Check,
-    Bookmark
+    Bookmark,
+    Compass
   } from 'lucide-svelte';
 
   let {
-    activeTab = $bindable<'catalog' | 'torrents' | 'favorites' | 'downloads' | 'settings'>('catalog'),
+    activeTab = $bindable<'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('catalog'),
     activeDownloadsCount = 0,
     downloadProgress = { isDownloading: false, percent: 0, title: '', speed: '' },
     hasFtpServers = false,
@@ -57,7 +58,7 @@
   let dlStrokeDashoffset = $derived(circumference - (dlPercent / 100) * circumference);
 </script>
 
-<aside data-nav-zone="sidebar" class="w-[60px] flex flex-col items-center justify-between py-4 flex-shrink-0 z-30 select-none bg-[#08090d] border-r border-white/[0.06]">
+<aside data-nav-zone="sidebar" class="w-[60px] flex flex-col items-center justify-between py-4 flex-shrink-0 z-30 select-none bg-[#07080a] border-r border-white/[0.06]">
   <!-- Navigation Tabs (Vertical Icons) -->
   <div class="flex flex-col items-center gap-2 w-full">
     <nav class="flex flex-col items-center gap-2.5 w-full">
@@ -98,6 +99,21 @@
           </button>
         </div>
       {/if}
+
+      <!-- Collections Tab -->
+      <div class="relative w-full flex items-center justify-center">
+        {#if activeTab === 'collections'}
+          <div class="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-white"></div>
+        {/if}
+        <button
+          data-nav-item
+          class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer {activeTab === 'collections' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          onclick={() => (activeTab = 'collections')}
+          title="Подборки игр"
+        >
+          <Compass class="w-5 h-5 stroke-[1.75] {activeTab === 'collections' ? 'text-white' : ''}" />
+        </button>
+      </div>
 
       <!-- Favorites Tab -->
       <div class="relative w-full flex items-center justify-center">

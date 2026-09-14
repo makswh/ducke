@@ -7,6 +7,7 @@
     Calendar,
     Building2,
     Tag,
+    Tags,
     Star,
     Gamepad2,
     Monitor,
@@ -124,6 +125,7 @@
 
   let movieOverrides = $state<Record<number, SteamMovie[]>>({});
   let enrichingGameIds = new Set<number>();
+  let isEnrichingCurrentGame = $state<boolean>(false);
   let selectedVariantId = $state<number | null>(null);
   let isVariantDropdownOpen = $state<boolean>(false);
   let variantDropdownTriggerEl = $state<HTMLButtonElement | null>(null);
@@ -211,12 +213,23 @@
     }
 
     if (curId !== lastGameId) {
+      const prevId = lastGameId;
       lastGameId = curId;
       const seq = ++switchSequence;
 
       // 1. Reset interactive state immediately
       activeMediaIndex = 0;
-      selectedVariantId = game?.variants && game.variants.length > 0 ? game.variants[0].id : curId;
+      if (game?.variants && game.variants.length > 0) {
+        if (selectedVariantId && game.variants.some((v: any) => v.id === selectedVariantId)) {
+          // Keep current selectedVariantId
+        } else if (prevId && game.variants.some((v: any) => v.id === prevId)) {
+          selectedVariantId = prevId;
+        } else {
+          selectedVariantId = game.variants[0].id;
+        }
+      } else {
+        selectedVariantId = curId;
+      }
       isVariantDropdownOpen = false;
       isFavoriteDropdownOpen = false;
 
@@ -285,6 +298,20 @@
       if (res) {
         pageDetailsCache.set(gameId, res);
         pageDetails = res;
+        if (res.game) {
+          if (res.game.screenshots && res.game.screenshots.length > 0) {
+            game.screenshots = res.game.screenshots;
+          }
+          if (res.game.detailedDescription) {
+            game.detailedDescription = res.game.detailedDescription;
+          }
+          if (res.game.genres && res.game.genres.length > 0) {
+            game.genres = res.game.genres;
+          }
+          if (res.game.tags && res.game.tags.length > 0) {
+            game.tags = res.game.tags;
+          }
+        }
       }
     } catch (err) {
       console.warn('[BigPictureGameDetail] Failed to get page details:', err);
@@ -313,7 +340,6 @@
   }
 
   function triggerPriorityEnrichmentIfNeeded(g: GameEntity, curId: number, seq: number) {
-    if (enrichingGameIds.has(curId)) return;
     const hasRich = !!(
       (g.screenshots && g.screenshots.length > 0) ||
       (g.movies && g.movies.length > 0) ||
@@ -321,32 +347,51 @@
       g.detailedDescription ||
       (g.genres && g.genres.length > 0)
     );
-    if (hasRich) return;
+    if (hasRich) {
+      isEnrichingCurrentGame = false;
+      return;
+    }
+
+    if (enrichingGameIds.has(curId)) {
+      isEnrichingCurrentGame = true;
+      return;
+    }
 
     enrichingGameIds.add(curId);
+    isEnrichingCurrentGame = true;
+
     const app = getAppAPI();
     if (app && typeof app.EnrichGameNow === 'function') {
       app.EnrichGameNow(curId).then((enriched: any) => {
-        if (isMounted && seq === switchSequence && enriched) {
-          fetchGamePageDetails(curId, seq);
+        enrichingGameIds.delete(curId);
+        if (isMounted && seq === switchSequence) {
+          isEnrichingCurrentGame = false;
+          if (enriched) {
+            fetchGamePageDetails(curId, seq);
+          }
         }
-      }).catch(() => {});
+      }).catch(() => {
+        enrichingGameIds.delete(curId);
+        if (isMounted && seq === switchSequence) {
+          isEnrichingCurrentGame = false;
+        }
+      });
+    } else {
+      isEnrichingCurrentGame = false;
     }
   }
 
   function sanitizeImageUrl(url: string | undefined): string {
     if (!url) return '';
     let res = url.replace(/^http:\/\//i, 'https://');
-    res = res.replace(/shared\.akamai\.steamstatic\.com/gi, 'shared.fastly.steamstatic.com');
-    res = res.replace(/cdn\.cloudflare\.steamstatic\.com/gi, 'shared.fastly.steamstatic.com');
+    res = res.replace(/shared\.fastly\.steamstatic\.com/gi, 'shared.steamstatic.com');
     return res;
   }
 
   function sanitizeVideoUrl(url: string | undefined): string {
     if (!url) return '';
     let res = url.replace(/^http:\/\//i, 'https://');
-    res = res.replace(/video\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com');
-    res = res.replace(/shared\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com');
+    res = res.replace(/video\.fastly\.steamstatic\.com/gi, 'video.akamai.steamstatic.com');
     return res;
   }
 
@@ -358,7 +403,7 @@
     if (!game) return '';
     if (game.backgroundImage) return sanitizeImageUrl(game.backgroundImage);
     if (game.headerImage) return sanitizeImageUrl(game.headerImage);
-    if (game.steamAppId && game.steamAppId > 0) return `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${game.steamAppId}/page_bg_generated_v6b.jpg`;
+    if (game.steamAppId && game.steamAppId > 0) return `https://shared.steamstatic.com/store_item_assets/steam/apps/${game.steamAppId}/page_bg_generated_v6b.jpg`;
     return '';
   });
 
@@ -409,7 +454,7 @@
         return;
       }
       if (currentSrc.includes('cdn.cloudflare.steamstatic.com')) {
-        target.src = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appId}/library_600x900_2x.jpg`;
+        target.src = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/library_600x900_2x.jpg`;
         return;
       }
     }
@@ -474,8 +519,12 @@
       });
     }
 
-    if (Array.isArray(game.screenshots)) {
-      game.screenshots.forEach((s: any, idx: number) => {
+    const currentScreenshots = (pageDetails?.game?.screenshots && pageDetails.game.screenshots.length > 0)
+      ? pageDetails.game.screenshots
+      : (game.screenshots || []);
+
+    if (Array.isArray(currentScreenshots)) {
+      currentScreenshots.forEach((s: any, idx: number) => {
         const url = sanitizeImageUrl(typeof s === 'string' ? s : s?.url);
         if (url) {
           list.push({
@@ -610,7 +659,15 @@
     const unsubEnriched = EventsOn('game:enriched', (enrichedGame: any) => {
       if (!isMounted || !enrichedGame) return;
       const targetId = game?.id;
-      if (targetId && (enrichedGame.id === targetId || (enrichedGame.steamAppId > 0 && enrichedGame.steamAppId === game?.steamAppId))) {
+      if (
+        targetId &&
+        (enrichedGame.id === targetId ||
+         (enrichedGame.steamAppId > 0 && enrichedGame.steamAppId === game?.steamAppId) ||
+         (game?.variants && game.variants.some((v: any) => v.id === enrichedGame.id)))
+      ) {
+        enrichingGameIds.delete(targetId);
+        enrichingGameIds.delete(enrichedGame.id);
+        isEnrichingCurrentGame = false;
         if (pageDetails) {
           pageDetails.game = { ...pageDetails.game, ...enrichedGame };
           pageDetailsCache.set(targetId, pageDetails);
@@ -1003,7 +1060,7 @@
             <img
               src={logoUrl}
               alt={activeGame?.cleanTitle || activeGame?.folderName}
-              class="max-h-24 sm:max-h-32 max-w-[420px] sm:max-w-[560px] object-contain object-left select-none filter drop-shadow-lg"
+              class="max-h-36 sm:max-h-44 md:max-h-48 max-w-[440px] sm:max-w-[580px] object-contain object-left select-none filter drop-shadow-lg"
               onerror={() => {
                 if (logoUrl) imageLoadFailed[logoUrl] = true;
               }}
@@ -1017,6 +1074,13 @@
 
         <!-- Metadata Chips (Ascetic Slate) -->
         <div class="flex flex-wrap items-center gap-2.5 text-xs">
+          {#if isEnrichingCurrentGame}
+            <div class="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 font-mono font-medium animate-pulse">
+              <RefreshCw class="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+              <span>Очистка названия и поиск данных об игре...</span>
+            </div>
+          {/if}
+
           <!-- PC Badge -->
           <div class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white/[0.06] border border-white/[0.08] text-[#cbd5e1]">
             <Monitor class="w-3.5 h-3.5 text-sky-400" />
@@ -1028,14 +1092,6 @@
             <div class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white/[0.06] border border-white/[0.08] text-[#cbd5e1]">
               <Calendar class="w-3.5 h-3.5 text-sky-400" />
               <span>{activeGame?.releaseDate || activeGame?.steamReleaseDate}</span>
-            </div>
-          {/if}
-
-          <!-- Genres -->
-          {#if (activeGame?.genres && activeGame.genres.length > 0) || activeGame?.steamGenres}
-            <div class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white/[0.06] border border-white/[0.08] text-[#cbd5e1]">
-              <Tag class="w-3.5 h-3.5 text-sky-400" />
-              <span>{(activeGame.genres || activeGame.steamGenres).slice(0, 4).join(', ')}</span>
             </div>
           {/if}
 
@@ -1078,11 +1134,51 @@
           {/if}
         </div>
 
+        <!-- Dedicated Genres List -->
+        {#if (activeGame?.genres && activeGame.genres.length > 0) || (activeGame?.steamGenres && activeGame.steamGenres.length > 0)}
+          {@const gList = activeGame?.genres?.length ? activeGame.genres : (activeGame?.steamGenres || [])}
+          <div class="flex items-center gap-2 flex-wrap pt-0.5">
+            <span class="text-xs font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5 mr-0.5 select-none">
+              <Tag class="w-3.5 h-3.5 text-[#8e95a2]" />
+              Жанры:
+            </span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              {#each gList as genre}
+                <span class="inline-flex items-center px-3 py-1 rounded-xl bg-white/[0.05] border border-white/[0.08] text-xs font-medium text-[#d1d5db]">
+                  {genre}
+                </span>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Popular Tags List -->
+        {#if activeGame?.tags && activeGame.tags.length > 0}
+          <div class="flex items-center gap-2 flex-wrap pt-0.5">
+            <span class="text-xs font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5 mr-0.5 select-none">
+              <Tags class="w-3.5 h-3.5 text-[#8e95a2]" />
+              Метки:
+            </span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              {#each activeGame.tags as tag}
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-lg bg-white/[0.03] border border-white/[0.06] text-xs font-normal text-[#94a3b8]">
+                  {tag}
+                </span>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
         <!-- Short Description / Synopsis -->
         {#if game.shortDescription}
           <p class="text-sm text-[#cbd5e1] leading-relaxed max-w-4xl">
             {@html game.shortDescription}
           </p>
+        {:else if isEnrichingCurrentGame}
+          <div class="flex items-center gap-2 text-xs font-mono text-[#8e95a2] py-2">
+            <span class="inline-block w-2 h-2 rounded-full bg-sky-400 animate-ping"></span>
+            <span>Идет автоматический поиск описания, скриншотов и трейлеров...</span>
+          </div>
         {/if}
 
         <!-- Prominent Download & Path Actions -->
@@ -1280,6 +1376,17 @@
             </div>
           </div>
 
+          <!-- Original Release Info -->
+          {#if (activeVariant?.rawName || (pageDetails?.game || game)?.rawName)}
+            <div class="text-[11px] font-mono text-[#8e95a2] flex items-center gap-1.5 max-w-2xl">
+              <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
+              <span class="text-[#64748b] flex-shrink-0">{activeVariantsList && activeVariantsList.length > 1 ? 'Выбран релиз:' : 'Оригинальный релиз:'}</span>
+              <span class="text-[#cbd5e1] truncate select-all" title={activeVariant?.rawName || (pageDetails?.game || game)?.rawName}>
+                {activeVariant?.rawName || (pageDetails?.game || game)?.rawName}
+              </span>
+            </div>
+          {/if}
+
           <!-- Destination Path Info -->
           <div class="text-[11px] font-mono text-[#8e95a2] flex items-center gap-1.5">
             <span class="text-[#64748b]">{pageDetails?.isInstalled ? 'Установлено в:' : 'Сохранение в:'}</span>
@@ -1470,6 +1577,15 @@
                 {pageDetails?.isInstalled ? 'Установлено' : 'Не установлено'}
               </span>
             </div>
+
+            {#if (activeVariant?.rawName || (pageDetails?.game || game)?.rawName)}
+              <div class="pt-2 flex items-center justify-between gap-4">
+                <span class="text-[#8e95a2] flex-shrink-0">Оригинальный релиз</span>
+                <span class="font-mono text-white text-right truncate max-w-[320px] select-all" title={activeVariant?.rawName || (pageDetails?.game || game)?.rawName}>
+                  {activeVariant?.rawName || (pageDetails?.game || game)?.rawName}
+                </span>
+              </div>
+            {/if}
 
             {#if game.developers && game.developers.length > 0}
               <div class="pt-2 flex items-center justify-between">

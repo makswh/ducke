@@ -102,6 +102,14 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function GetStopGameCompilationDetail(arg1, arg2) {
+  return window['go']['main']['App']['GetStopGameCompilationDetail'](arg1, arg2);
+}
+
+export function GetStopGameCompilations(arg1, arg2) {
+  return window['go']['main']['App']['GetStopGameCompilations'](arg1, arg2);
+}
+
 export function GetStorageDrives() {
   return window['go']['main']['App']['GetStorageDrives']();
 }

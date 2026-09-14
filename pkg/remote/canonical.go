@@ -37,6 +37,12 @@ var canonicalJunkWords = map[string]bool{
 	"soundtrack": true, "ost": true, "multi": true, "selective": true, "download": true,
 	"digital": true, "content": true, "season": true, "pass": true,
 	"v": true, "vv": true, "ver": true, "legacy": true,
+	"scene": true, "rune": true, "tenoke": true, "tinyiso": true, "fairlight": true,
+	"doge": true, "license": true, "licence": true, "other": true, "others": true,
+	"hardwaremining": true, "hardware": true, "mining": true, "wanterlude": true, "selezen": true, "necros": true,
+	"exrow": true, "pioneer": true, "cdman": true, "fenixx": true, "alteriwnet": true,
+	"архив": true, "archive": true, "serega": true, "lus": true, "canek": true, "chupacabra": true,
+	"origins": true, "recoding": true, "nolimits": true,
 }
 
 func foldCanonicalDiacritics(r rune) rune {
@@ -105,6 +111,9 @@ func CleanCanonicalKey(raw string) string {
 				continue
 			}
 			if canonicalJunkWords[w] {
+				continue
+			}
+			if strings.HasPrefix(w, "dixen") || strings.HasPrefix(w, "yaroslav") || strings.HasPrefix(w, "voices") || strings.HasPrefix(w, "canek") {
 				continue
 			}
 			if w == "v" || w == "r" || w == "fix" {

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"gamevault/pkg/collections"
 	"gamevault/pkg/config"
 	"gamevault/pkg/database"
 	"gamevault/pkg/downloader"
@@ -31,14 +32,15 @@ import (
 
 // App struct
 type App struct {
-	ctx          context.Context
-	db           *database.Database
-	cfgManager   *config.ConfigManager
-	steamService *metadata.SteamService
-	downloader   *downloader.DownloadManager
-	catalogMu    sync.Mutex
-	torrentMu    sync.Mutex
-	appDataDir   string
+	ctx                context.Context
+	db                 *database.Database
+	cfgManager         *config.ConfigManager
+	steamService       *metadata.SteamService
+	downloader         *downloader.DownloadManager
+	collectionsService *collections.StopGameService
+	catalogMu          sync.Mutex
+	torrentMu          sync.Mutex
+	appDataDir         string
 }
 
 // NewApp creates a new App application struct
@@ -92,6 +94,7 @@ func (a *App) startup(ctx context.Context) {
 	a.db = db
 
 	a.steamService = metadata.NewSteamService(db)
+	a.collectionsService = collections.NewStopGameService(db)
 
 	// Initialize downloader and stream progress via Wails Events
 	a.downloader = downloader.NewDownloadManager(db, cfgMgr, func(event downloader.DownloadProgressEvent) {
@@ -318,7 +321,7 @@ func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 
 	// 4. Fast local artwork resolution (zero network delay)
 	if game.SteamAppID > 0 {
-		details.LogoURL = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/logo.png", game.SteamAppID)
+		details.LogoURL = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/logo.png", game.SteamAppID)
 	}
 	if game.HeaderImage != "" {
 		details.BannerURL = game.HeaderImage
@@ -328,16 +331,27 @@ func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 	}
 	details.BackgroundURL = game.BackgroundImage
 
-	// 5. Asynchronously fetch missing Steam store details and reviews in background if needed (non-blocking)
+	// 5. Asynchronously fetch missing Steam store details, tags, and reviews in background if needed (non-blocking)
 	if details.Game.SteamAppID > 0 {
 		needReviews := details.Game.TotalReviews == 0 || details.Game.ReviewScoreDesc == ""
 		needDetails := (details.Game.ShortDescription == "" && details.Game.DetailedDescription == "") || (len(details.Game.Screenshots) == 0 && len(details.Game.Genres) == 0)
-		if needReviews || needDetails {
-			go func(gameID int64, appID int, fetchReviews, fetchDetails bool) {
+		needTags := len(details.Game.Tags) == 0
+		if needReviews || needDetails || needTags {
+			go func(gameID int64, appID int, fetchReviews, fetchDetails, fetchTags bool) {
 				if a.steamService != nil {
 					if fetchDetails {
 						meta, err := a.steamService.FetchAppDetails(appID)
 						if err == nil && meta != nil {
+							if updatedGame, err := a.db.GetGameByID(gameID); err == nil && updatedGame != nil {
+								if a.ctx != nil {
+									wailsRuntime.EventsEmit(a.ctx, "game:enriched", updatedGame)
+								}
+							}
+						}
+					} else if fetchTags {
+						tags := a.steamService.FetchAppTags(appID)
+						if len(tags) > 0 {
+							_ = a.db.UpdateSteamMetadataTags(appID, tags)
 							if updatedGame, err := a.db.GetGameByID(gameID); err == nil && updatedGame != nil {
 								if a.ctx != nil {
 									wailsRuntime.EventsEmit(a.ctx, "game:enriched", updatedGame)
@@ -362,7 +376,7 @@ func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 						}
 					}
 				}
-			}(game.ID, details.Game.SteamAppID, needReviews, needDetails)
+			}(details.Game.ID, details.Game.SteamAppID, needReviews, needDetails, needTags)
 		}
 	}
 
@@ -551,7 +565,7 @@ func (a *App) ResolveGameLogo(gameID int64, title string, steamAppID int) (strin
 
 	// 2. If steamAppID is present, fallback to Steam store logo
 	if steamAppID > 0 {
-		steamLogo := fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/logo.png", steamAppID)
+		steamLogo := fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/logo.png", steamAppID)
 		return steamLogo, nil
 	}
 
@@ -1397,7 +1411,7 @@ type AppInfo struct {
 func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
 		Name:    "Ducke",
-		Version: "1.1.0",
+		Version: "1.1.2",
 	}
 }
 
@@ -1495,5 +1509,22 @@ func (a *App) RemoveFromFavorites(gameID int64) error {
 	}
 	return err
 }
+
+// GetStopGameCompilations retrieves a paginated list of compilations from StopGame
+func (a *App) GetStopGameCompilations(sort string, page int) (*collections.CompilationsResponse, error) {
+	if a.collectionsService == nil {
+		return nil, fmt.Errorf("collections service not initialized")
+	}
+	return a.collectionsService.FetchCompilations(sort, page)
+}
+
+// GetStopGameCompilationDetail retrieves a single compilation with full games list and library matching
+func (a *App) GetStopGameCompilationDetail(id string, forceRefresh bool) (*collections.CompilationDetail, error) {
+	if a.collectionsService == nil {
+		return nil, fmt.Errorf("collections service not initialized")
+	}
+	return a.collectionsService.FetchCompilationDetail(id, forceRefresh)
+}
+
 
 

@@ -50,6 +50,7 @@ var (
 	suggestImgRegex     = regexp.MustCompile(`<div class="match_img">\s*<img\s+src="([^"]+)"`)
 	communityTitleRegex = regexp.MustCompile(`(?i)<title>(?:Steam Community|Сообщество Steam|\S+)\s*::\s*([^<]+)</title>`)
 	appHubNameRegex     = regexp.MustCompile(`(?i)<div[^>]*class="[^"]*apphub_AppName[^"]*"[^>]*>([^<]+)</div>`)
+	appTagRegex         = regexp.MustCompile(`<div class="app_tag">([^<]+)</div>`)
 )
 
 // SteamCommunitySearchItem represents an item returned by Steam Community SearchApps endpoint
@@ -749,6 +750,13 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 						_ = s.db.UpdateSteamMetadataIcon(appID, cached.IconURL)
 					}
 				}
+				// If cached metadata lacks tags, fetch popular user tags on demand
+				if len(cached.Tags) == 0 {
+					cached.Tags = s.FetchAppTags(appID)
+					if len(cached.Tags) > 0 {
+						_ = s.db.UpdateSteamMetadataTags(appID, cached.Tags)
+					}
+				}
 				return cached, nil
 			}
 			// Cached entry lacks rich store metadata (incomplete stub). Fall through to fetch full details!
@@ -823,7 +831,7 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 			hlsUrl := strings.TrimSpace(m.HLSH264)
 			if hlsUrl != "" {
 				hlsUrl = strings.ReplaceAll(hlsUrl, "http://", "https://")
-				hlsUrl = strings.ReplaceAll(hlsUrl, "video.akamai.steamstatic.com", "video.fastly.steamstatic.com")
+				hlsUrl = strings.ReplaceAll(hlsUrl, "video.fastly.steamstatic.com", "video.akamai.steamstatic.com")
 			}
 
 			mp4Url := m.MP4.Max
@@ -832,8 +840,7 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 			}
 			if mp4Url != "" {
 				mp4Url = strings.ReplaceAll(mp4Url, "http://", "https://")
-				mp4Url = strings.ReplaceAll(mp4Url, "video.akamai.steamstatic.com", "video.fastly.steamstatic.com")
-				mp4Url = strings.ReplaceAll(mp4Url, "shared.akamai.steamstatic.com", "video.fastly.steamstatic.com")
+				mp4Url = strings.ReplaceAll(mp4Url, "video.fastly.steamstatic.com", "video.akamai.steamstatic.com")
 			}
 
 			webmUrl := m.Webm.Max
@@ -842,14 +849,19 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 			}
 			if webmUrl != "" {
 				webmUrl = strings.ReplaceAll(webmUrl, "http://", "https://")
-				webmUrl = strings.ReplaceAll(webmUrl, "video.akamai.steamstatic.com", "video.fastly.steamstatic.com")
-				webmUrl = strings.ReplaceAll(webmUrl, "shared.akamai.steamstatic.com", "video.fastly.steamstatic.com")
+				webmUrl = strings.ReplaceAll(webmUrl, "video.fastly.steamstatic.com", "video.akamai.steamstatic.com")
 			}
 
-			thumb := m.Thumbnail
+			thumb := strings.TrimSpace(m.Thumbnail)
 			if thumb != "" {
-				thumb = strings.ReplaceAll(thumb, "http://", "https://")
-				thumb = strings.ReplaceAll(thumb, "shared.akamai.steamstatic.com", "shared.fastly.steamstatic.com")
+				if strings.HasPrefix(thumb, "//") {
+					thumb = "https:" + thumb
+				} else if strings.HasPrefix(thumb, "http://") {
+					thumb = "https://" + strings.TrimPrefix(thumb, "http://")
+				} else if !strings.HasPrefix(thumb, "https://") {
+					thumb = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/%s", appID, strings.TrimPrefix(thumb, "/"))
+				}
+				thumb = strings.ReplaceAll(thumb, "shared.fastly.steamstatic.com", "shared.steamstatic.com")
 			}
 
 			movies = append(movies, database.SteamMovie{
@@ -872,12 +884,12 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 			bgImage = data.BackgroundImage
 		}
 		if bgImage == "" {
-			bgImage = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/page_bg_generated_v6b.jpg", appID)
+			bgImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/page_bg_generated_v6b.jpg", appID)
 		}
 
 		// Check Steam CDN for portrait vertical cover (600x900)
 		var capsuleImg string
-		steamCover := fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", appID)
+		steamCover := fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", appID)
 		if s.verifyCDNAsset(steamCover) {
 			capsuleImg = steamCover
 		} else if s.sgdb != nil {
@@ -897,7 +909,7 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 			headerImg = data.CapsuleImage
 		}
 		if headerImg == "" {
-			headerImg = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", appID)
+			headerImg = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", appID)
 		}
 
 		// Fetch authentic Steam user reviews
@@ -905,6 +917,9 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 
 		// Fetch authentic game icon (Steam Community Search or SteamGridDB)
 		iconURL := s.FetchGameIcon(appID, data.Name)
+
+		// Fetch popular Steam user tags
+		tags := s.FetchAppTags(appID)
 
 		meta := database.SteamMetadata{
 			AppID:               appID,
@@ -918,6 +933,7 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 			Screenshots:         screenshots,
 			Movies:              movies,
 			Genres:              genres,
+			Tags:                tags,
 			Developers:          data.Developers,
 			Publishers:          data.Publishers,
 			ReleaseDate:         data.ReleaseDate.Date,
@@ -963,7 +979,7 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 
 // fetchFallbackMetadata generates deterministic high-res CDN metadata for unlisted or delisted games
 func (s *SteamService) fetchFallbackMetadata(appID int) *database.SteamMetadata {
-	baseCDN := fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d", appID)
+	baseCDN := fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d", appID)
 	headerImage := fmt.Sprintf("%s/header.jpg", baseCDN)
 	capsuleImage := fmt.Sprintf("%s/capsule_616x353.jpg", baseCDN)
 	backgroundImage := fmt.Sprintf("%s/page_bg_generated_v6b.jpg", baseCDN)
@@ -977,6 +993,7 @@ func (s *SteamService) fetchFallbackMetadata(appID int) *database.SteamMetadata 
 	// Do NOT set "Steam App <id>" as a title! If title cannot be determined from Steam,
 	// keep it empty so the game's actual cleanTitle is preserved and not overridden.
 	iconURL := s.FetchGameIcon(appID, title)
+	tags := s.FetchAppTags(appID)
 
 	return &database.SteamMetadata{
 		AppID:           appID,
@@ -988,6 +1005,7 @@ func (s *SteamService) fetchFallbackMetadata(appID int) *database.SteamMetadata 
 		Screenshots:     []string{},
 		Movies:          []database.SteamMovie{},
 		Genres:          []string{},
+		Tags:            tags,
 		Developers:      []string{},
 		Publishers:      []string{},
 		CachedAt:        time.Now().Unix(),
@@ -1149,6 +1167,9 @@ func (s *SteamService) fetchPackageMetadata(packageID int) *database.SteamMetada
 				if len(primaryMeta.Genres) > 0 {
 					meta.Genres = primaryMeta.Genres
 				}
+				if len(primaryMeta.Tags) > 0 {
+					meta.Tags = primaryMeta.Tags
+				}
 				if len(primaryMeta.Developers) > 0 {
 					meta.Developers = primaryMeta.Developers
 				}
@@ -1205,6 +1226,102 @@ func (s *SteamService) FetchSteamReviewSummary(appID int) (string, int, int, int
 	}
 
 	return desc, percent, total, pos
+}
+
+// FetchAppTags fetches popular user tags for a Steam app using the lightweight apphoverpublic endpoint
+func (s *SteamService) FetchAppTags(appID int) []string {
+	if appID <= 0 {
+		return nil
+	}
+	s.rateLimiter.Take()
+
+	endpoint := fmt.Sprintf("https://store.steampowered.com/apphoverpublic/%d?l=russian", appID)
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", steamUserAgent)
+	req.Header.Set("Cookie", steamAgeCookie)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	matches := appTagRegex.FindAllStringSubmatch(string(body), -1)
+	if len(matches) == 0 {
+		// Fallback to English if no Russian tags were parsed
+		return s.fetchAppTagsEnglish(appID)
+	}
+
+	var tags []string
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		if len(m) > 1 {
+			tag := strings.TrimSpace(html.UnescapeString(m[1]))
+			if tag != "" && !seen[strings.ToLower(tag)] {
+				seen[strings.ToLower(tag)] = true
+				tags = append(tags, tag)
+				if len(tags) >= 15 {
+					break
+				}
+			}
+		}
+	}
+
+	return tags
+}
+
+func (s *SteamService) fetchAppTagsEnglish(appID int) []string {
+	endpoint := fmt.Sprintf("https://store.steampowered.com/apphoverpublic/%d?l=english", appID)
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", steamUserAgent)
+	req.Header.Set("Cookie", steamAgeCookie)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	matches := appTagRegex.FindAllStringSubmatch(string(body), -1)
+	var tags []string
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		if len(m) > 1 {
+			tag := strings.TrimSpace(html.UnescapeString(m[1]))
+			if tag != "" && !seen[strings.ToLower(tag)] {
+				seen[strings.ToLower(tag)] = true
+				tags = append(tags, tag)
+				if len(tags) >= 15 {
+					break
+				}
+			}
+		}
+	}
+	return tags
 }
 
 // verifyCDNAsset performs a lightweight check to confirm asset presence on Steam CDN

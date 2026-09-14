@@ -132,6 +132,7 @@ func (dm *DownloadManager) calculateSpeedAndEmit() {
 		task.mu.RUnlock()
 
 		if isActive {
+			var overrideDelta int64 = -1
 			if task.IsTorrent && dm.torrentEngine != nil {
 				if t, ok := dm.torrentEngine.GetTorrent(task.ID); ok && t != nil {
 					stats := t.Stats()
@@ -148,10 +149,26 @@ func (dm *DownloadManager) calculateSpeedAndEmit() {
 							task.TotalBytes = t.Length()
 						}
 					}
+
+					// Use continuous wire read metrics for silky smooth, stable speed measurement
+					wireBytes := stats.BytesReadUsefulData.Int64()
+					if wireBytes == 0 {
+						wireBytes = stats.BytesReadData.Int64()
+					}
+					if task.lastWireBytes > 0 && wireBytes >= task.lastWireBytes {
+						overrideDelta = wireBytes - task.lastWireBytes
+					} else if task.lastWireBytes == 0 {
+						overrideDelta = 0
+					}
+					task.lastWireBytes = wireBytes
 					task.mu.Unlock()
 				}
 			}
-			UpdateTaskMetrics(task, now)
+			if overrideDelta >= 0 {
+				UpdateTaskMetrics(task, now, overrideDelta)
+			} else {
+				UpdateTaskMetrics(task, now)
+			}
 			eventsToEmit = append(eventsToEmit, task.ToEvent())
 		}
 	}

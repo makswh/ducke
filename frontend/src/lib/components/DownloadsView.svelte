@@ -130,7 +130,7 @@
       (x) => x && ((dl.gameId && x.id === dl.gameId) || (x.cleanTitle && x.cleanTitle.toLowerCase() === key))
     );
     if (g && g.steamAppId && g.steamAppId > 0) {
-      const steamLogo = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/logo.png`;
+      const steamLogo = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/logo.png`;
       if (!imageLoadFailed[steamLogo]) {
         return steamLogo;
       }
@@ -185,9 +185,9 @@
         return g.screenshots[0];
       }
       if (g.steamAppId && g.steamAppId > 0) {
-        const v6b = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/page_bg_generated_v6b.jpg`;
+        const v6b = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/page_bg_generated_v6b.jpg`;
         if (!imageLoadFailed[v6b]) return v6b;
-        const pageBg = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/page.bg.jpg`;
+        const pageBg = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/page.bg.jpg`;
         if (!imageLoadFailed[pageBg]) return pageBg;
       }
     }
@@ -218,7 +218,7 @@
         return g.backgroundImage;
       }
       if (g.steamAppId && g.steamAppId > 0) {
-        const header = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/header.jpg`;
+        const header = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/header.jpg`;
         if (!imageLoadFailed[header]) return header;
       }
     }
@@ -249,7 +249,7 @@
         return g.backgroundImage;
       }
       if (g.steamAppId && g.steamAppId > 0) {
-        const header = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/header.jpg`;
+        const header = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/header.jpg`;
         if (!imageLoadFailed[header]) return header;
       }
     }
@@ -276,7 +276,7 @@
         return g.headerImage;
       }
       if (g.steamAppId && g.steamAppId > 0) {
-        const header = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/header.jpg`;
+        const header = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/header.jpg`;
         if (!imageLoadFailed[header]) return header;
       }
       if (g.backgroundImage && !imageLoadFailed[g.backgroundImage]) {

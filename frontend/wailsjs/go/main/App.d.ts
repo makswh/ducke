@@ -6,6 +6,7 @@ import {main} from '../models';
 import {downloader} from '../models';
 import {logger} from '../models';
 import {metadata} from '../models';
+import {collections} from '../models';
 
 export function AddTorrentSource(arg1:string):Promise<config.TorrentSourceConfig>;
 
@@ -56,6 +57,10 @@ export function GetLogsText():Promise<string>;
 export function GetMetadataProgress():Promise<metadata.MetadataProgress>;
 
 export function GetSettings():Promise<config.AppSettings>;
+
+export function GetStopGameCompilationDetail(arg1:string,arg2:boolean):Promise<collections.CompilationDetail>;
+
+export function GetStopGameCompilations(arg1:string,arg2:number):Promise<collections.CompilationsResponse>;
 
 export function GetStorageDrives():Promise<Array<downloader.StorageDriveInfo>>;
 

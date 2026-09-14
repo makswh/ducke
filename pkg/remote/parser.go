@@ -2,9 +2,11 @@ package remote
 
 import (
 	"fmt"
+	"html"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // RemoteItem represents a parsed remote directory/file entry
@@ -38,7 +40,29 @@ var (
 	dateRegex = regexp.MustCompile(`(?i)\b(\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4})\b`)
 
 	// Common edition tags to strip for steam search
-	editionRegex = regexp.MustCompile(`(?i)\b(deluxe(\s+edition)?|ultimate(\s+edition)?|goty(\s+edition)?|game\s+of\s+the\s+year(\s+edition)?|collector('s)?\s+edition|remastered|enhanced\s+edition|gold\s+edition|director('s)?\s+cut|complete\s+edition|definitive\s+edition|special\s+edition|anniversary(\s+edition)?|bundle|scooby\s+bundle|repack|portable|multi\d*|selective\s+download|digital|bonus)\b`)
+	editionRegex = regexp.MustCompile(`(?i)\b(deluxe(\s+edition)?|ultimate(\s+edition)?|goty(\s+edition)?|game\s+of\s+the\s+year(\s+edition)?|collector('s)?\s+edition|remastered|enhanced\s+edition|gold\s+edition|director('s)?\s+cut|complete\s+edition|definitive\s+edition|special\s+edition|anniversary(\s+edition)?|bundle|scooby\s+bundle|repack|portable|multi\d*|selective\s+download|digital|bonus|save\s+the\s+world(\s+edition)?|[a-z0-9']+\s+edition|edition)\b`)
+
+	// Scene releases e.g. Scene Rune, Scene Tenoke, Scene TiNYiSO, Scene voices38, Scene EMPRESS
+	sceneRegex = regexp.MustCompile(`(?i)\bscene(\s+[a-z0-9_]+)?\b`)
+
+	// License tags e.g. License GOG, Лицензия GOG, License
+	licenseRegex = regexp.MustCompile(`(?i)(?:^|[\s_])(licen[sc]e|лицензия)(?:\s+gog)?(?:$|[\s_])`)
+
+	// Tracker category residue e.g. Other s, Others, Other's
+	otherRegex = regexp.MustCompile(`(?i)\bother(?:['’]?s|\s+s)?\b`)
+
+	// Standalone store / platform tags e.g. GOG, SteamRIP
+	storeTagRegex = regexp.MustCompile(`(?i)\b(gog|steamrip)\b`)
+
+	// Uploader suffix pipes or tags e.g. | от xatab, | By xatab, | SeregA Lus, | cdman, 2009 l R G Origins
+	uploaderPipeRegex = regexp.MustCompile(`(?i)(?:\b(19\d\d|20\d\d)\s*)?[|│l]\s*(от|by|r\.?\s*g\.?|serega|cdman|fenixx|xatab|decepticon|fitgirl|dodi|canek|chupacabra).*$`)
+
+	// Authors and repackers: hardwaremining, wanterlude, selezen, necros, dixen18, yaroslav98, exrow, pioneer, cdman, voices38, fenixx, etc.
+	repackersRegex = regexp.MustCompile(`(?i)\b(hardwaremining|wanterlude|selezen|necros|dixen\d*|yaroslav\d*|exrow|pioneer|cdman|voices\d*|fenixx|canek\d*|chupacabra|alteriwnet|serega(\s*lus)?|archive)\b|(?:^|[\s_])архив(?:$|[\s_])`)
+
+	authorPrefixRegex = regexp.MustCompile(`(?i)(?:^|[\s|│l])(от|by)\s+[\p{L}\p{N}_]+`)
+	rgGroupRegex      = regexp.MustCompile(`(?i)\br\.?\s*g\.?\s+[\p{L}\p{N}_\s]+\b`)
+	moddedRegex       = regexp.MustCompile(`(?i)\b(modded\s+by\s+[\p{L}\p{N}_]+|папка\s+игры)\b`)
 
 	// Trailing dates or brackets: (2023), [FitGirl Repack], etc.
 	bracketRegex = regexp.MustCompile(`\[.*?\]|\(.*?\)|[\{\}]`)
@@ -152,12 +176,67 @@ func ParseFolderName(name string, remotePath string, isDir bool) RemoteItem {
 	return item
 }
 
+// stripCJKIfLatinOrCyrillic removes CJK ideographs/kana if the title has a substantive Latin or Cyrillic title
+func stripCJKIfLatinOrCyrillic(s string) string {
+	latinCyrCount := 0
+	hasLongWord := false
+	for _, word := range strings.Fields(s) {
+		wCount := 0
+		for _, r := range word {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || unicode.Is(unicode.Cyrillic, r) {
+				wCount++
+				latinCyrCount++
+			}
+		}
+		if wCount >= 3 {
+			hasLongWord = true
+		}
+	}
+
+	if !hasLongWord && latinCyrCount < 4 {
+		return s
+	}
+
+	var sb strings.Builder
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) ||
+			unicode.Is(unicode.Hiragana, r) ||
+			unicode.Is(unicode.Katakana, r) ||
+			unicode.Is(unicode.Hangul, r) ||
+			(r >= 0x3000 && r <= 0x303F) || // CJK symbols and punctuation (e.g. 『 』 〜)
+			(r >= 0xFF00 && r <= 0xFFEF) {  // Halfwidth and fullwidth forms (e.g. ！ ？)
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	res := strings.TrimSpace(sb.String())
+	if res == "" {
+		return s
+	}
+	return res
+}
+
 // CleanDisplayTitle cleans platform tags, braces, dots, and underscores for display and search
 func CleanDisplayTitle(s string) string {
-	s = strings.TrimSpace(s)
+	s = html.UnescapeString(strings.TrimSpace(s))
+	s = stripCJKIfLatinOrCyrillic(s)
+
 	// Strip leading/trailing platform tags like {LINUX}, [WIN], (GOG), etc.
 	s = platformPrefixRegex.ReplaceAllString(s, "")
 	s = platformSuffixRegex.ReplaceAllString(s, "")
+
+	// Strip uploader suffix pipes: e.g. " | от xatab", " | cdman"
+	s = uploaderPipeRegex.ReplaceAllString(s, "")
+
+	// Strip scene releases, licenses, repackers, and other tracker noise
+	s = sceneRegex.ReplaceAllString(s, " ")
+	s = licenseRegex.ReplaceAllString(s, " ")
+	s = otherRegex.ReplaceAllString(s, " ")
+	s = storeTagRegex.ReplaceAllString(s, " ")
+	s = repackersRegex.ReplaceAllString(s, " ")
+	s = authorPrefixRegex.ReplaceAllString(s, " ")
+	s = rgGroupRegex.ReplaceAllString(s, " ")
+	s = moddedRegex.ReplaceAllString(s, " ")
 
 	// Strip remaining size tags before replacing dots
 	s = sizeTagRegex.ReplaceAllString(s, " ")
@@ -167,6 +246,7 @@ func CleanDisplayTitle(s string) string {
 	s = strings.ReplaceAll(s, "{", "")
 	s = strings.ReplaceAll(s, "}", "")
 	s = strings.ReplaceAll(s, ".", " ")
+	s = strings.ReplaceAll(s, "|", " ")
 
 	// Strip any space-broken size remnants (e.g. "2 7 5GB" or "2 75GB")
 	s = brokenSizeRegex.ReplaceAllString(s, " ")
@@ -186,8 +266,19 @@ func cleanUnderscores(s string) string {
 
 // SanitizeForSteamSearch cleans up editions, brackets, and version numbers for Steam search API
 func SanitizeForSteamSearch(title string) string {
-	cleaned := platformPrefixRegex.ReplaceAllString(title, " ")
+	cleaned := html.UnescapeString(title)
+	cleaned = stripCJKIfLatinOrCyrillic(cleaned)
+	cleaned = platformPrefixRegex.ReplaceAllString(cleaned, " ")
 	cleaned = platformSuffixRegex.ReplaceAllString(cleaned, " ")
+	cleaned = uploaderPipeRegex.ReplaceAllString(cleaned, " ")
+	cleaned = sceneRegex.ReplaceAllString(cleaned, " ")
+	cleaned = licenseRegex.ReplaceAllString(cleaned, " ")
+	cleaned = otherRegex.ReplaceAllString(cleaned, " ")
+	cleaned = storeTagRegex.ReplaceAllString(cleaned, " ")
+	cleaned = repackersRegex.ReplaceAllString(cleaned, " ")
+	cleaned = authorPrefixRegex.ReplaceAllString(cleaned, " ")
+	cleaned = rgGroupRegex.ReplaceAllString(cleaned, " ")
+	cleaned = moddedRegex.ReplaceAllString(cleaned, " ")
 	cleaned = bracketRegex.ReplaceAllString(cleaned, " ")
 	cleaned = sizeTagRegex.ReplaceAllString(cleaned, " ")
 	cleaned = brokenSizeRegex.ReplaceAllString(cleaned, " ")
@@ -200,9 +291,14 @@ func SanitizeForSteamSearch(title string) string {
 	cleaned = strings.ReplaceAll(cleaned, "-", " ")
 	cleaned = strings.ReplaceAll(cleaned, ":", " ")
 	cleaned = strings.ReplaceAll(cleaned, "'", "")
+	cleaned = strings.ReplaceAll(cleaned, "’", "")
+	cleaned = strings.ReplaceAll(cleaned, "`", "")
 	cleaned = strings.ReplaceAll(cleaned, "\"", "")
 	cleaned = strings.ReplaceAll(cleaned, "+", " ")
 	cleaned = strings.ReplaceAll(cleaned, "/", " ")
+	cleaned = strings.ReplaceAll(cleaned, "\\", " ")
+	cleaned = strings.ReplaceAll(cleaned, "|", " ")
+	cleaned = strings.ReplaceAll(cleaned, "~", " ")
 	cleaned = strings.Join(strings.Fields(cleaned), " ")
 
 	if cleaned == "" {

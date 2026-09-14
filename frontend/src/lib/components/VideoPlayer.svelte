@@ -54,10 +54,9 @@
     else if (src && src.trim() !== '' && !src.includes('/apps/')) url = src.trim();
 
     if (url) {
-      // Fastly CDN is fast, unblocked and reliable for Steam HLS/MP4 in all regions
-      url = url.replace(/video\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com');
-      url = url.replace(/shared\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com');
       url = url.replace(/^http:\/\//i, 'https://');
+      url = url.replace(/video\.fastly\.steamstatic\.com/gi, 'video.akamai.steamstatic.com');
+      url = url.replace(/shared\.fastly\.steamstatic\.com/gi, 'shared.steamstatic.com');
     }
     return url;
   }
@@ -75,12 +74,88 @@
     }
   }
 
+  let playPromise: Promise<void> | null = null;
+
+  async function safePlay() {
+    if (!videoElement) return;
+    if (hlsInstance) {
+      hlsInstance.startLoad();
+    }
+    try {
+      const p = videoElement.play();
+      if (p !== undefined) {
+        playPromise = p;
+        await p;
+        playPromise = null;
+        isPlaying = true;
+        isBuffering = false;
+      }
+    } catch (err: any) {
+      playPromise = null;
+      if (err?.name === 'AbortError') {
+        // Play was aborted intentionally by pause() or source change - do not retry
+        isPlaying = false;
+        return;
+      }
+      if (err?.name === 'NotAllowedError') {
+        // Autoplay policy prevented playback with audio; retry muted once
+        if (videoElement) {
+          videoElement.muted = true;
+          isMuted = true;
+          try {
+            const p2 = videoElement.play();
+            if (p2 !== undefined) {
+              playPromise = p2;
+              await p2;
+              playPromise = null;
+              isPlaying = true;
+              isBuffering = false;
+            }
+          } catch (err2: any) {
+            playPromise = null;
+            if (err2?.name !== 'AbortError') {
+              hasError = true;
+              errorMessage = 'Не удалось воспроизвести видео';
+            }
+            isPlaying = false;
+            isBuffering = false;
+          }
+        }
+        return;
+      }
+      console.warn('[VideoPlayer] Playback error:', err);
+      hasError = true;
+      errorMessage = 'Не удалось воспроизвести видео';
+      isPlaying = false;
+      isBuffering = false;
+    }
+  }
+
+  async function safePause() {
+    if (!videoElement) return;
+    if (playPromise) {
+      try {
+        await playPromise;
+      } catch {
+        // Ignored, user intended to pause
+      }
+      playPromise = null;
+    }
+    if (videoElement) {
+      videoElement.pause();
+      isPlaying = false;
+    }
+  }
+
   function loadMediaSource(targetUrl: string) {
     if (!videoElement) return;
     if (!targetUrl) {
       destroyHls();
-      videoElement.removeAttribute('src');
-      videoElement.load();
+      if (videoElement) {
+        videoElement.pause();
+        videoElement.removeAttribute('src');
+        videoElement.load();
+      }
       lastLoadedSource = '';
       isPlaying = false;
       isBuffering = false;
@@ -116,7 +191,7 @@
           hasError = false;
           isBuffering = false;
           if (autoplay) {
-            videoElement?.play().catch(() => {});
+            safePlay();
           }
         });
 
@@ -142,13 +217,13 @@
         });
       } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
         videoElement.src = targetUrl;
-        if (autoplay) videoElement.play().catch(() => {});
+        if (autoplay) safePlay();
       } else {
         videoElement.src = targetUrl;
       }
     } else {
       videoElement.src = targetUrl;
-      if (autoplay) videoElement.play().catch(() => {});
+      if (autoplay) safePlay();
     }
   }
 
@@ -197,34 +272,9 @@
     }
 
     if (videoElement.paused) {
-      if (hlsInstance) {
-        hlsInstance.startLoad();
-      }
-      const p = videoElement.play();
-      if (p !== undefined) {
-        p.then(() => {
-          isPlaying = true;
-          isBuffering = false;
-        }).catch((err) => {
-          console.warn('Standard play failed, retrying muted:', err);
-          if (videoElement) {
-            videoElement.muted = true;
-            isMuted = true;
-            videoElement.play().then(() => {
-              isPlaying = true;
-              isBuffering = false;
-            }).catch((err2) => {
-              console.error('Playback error:', err2);
-              hasError = true;
-              errorMessage = 'Не удалось воспроизвести видео';
-              isBuffering = false;
-            });
-          }
-        });
-      }
+      safePlay();
     } else {
-      videoElement.pause();
-      isPlaying = false;
+      safePause();
     }
   }
 
@@ -308,14 +358,21 @@
         }
       }
 
-      // Fallback 2: If Fastly CDN failed, try Akamai fallback
-      if (videoElement && lastLoadedSource && lastLoadedSource.includes('fastly.steamstatic.com')) {
-        const akamaiUrl = lastLoadedSource.replace('video.fastly.steamstatic.com', 'video.akamai.steamstatic.com');
-        lastLoadedSource = akamaiUrl;
-        destroyHls();
-        videoElement.src = akamaiUrl;
-        videoElement.load();
-        return;
+      // Fallback 2: Alternate CDN fallback (e.g. video.akamai -> video.steamstatic)
+      if (videoElement && lastLoadedSource) {
+        let altUrl = '';
+        if (lastLoadedSource.includes('video.fastly.steamstatic.com')) {
+          altUrl = lastLoadedSource.replace('video.fastly.steamstatic.com', 'video.akamai.steamstatic.com');
+        } else if (lastLoadedSource.includes('video.akamai.steamstatic.com')) {
+          altUrl = lastLoadedSource.replace('video.akamai.steamstatic.com', 'video.steamstatic.com');
+        }
+        if (altUrl && altUrl !== lastLoadedSource) {
+          lastLoadedSource = altUrl;
+          destroyHls();
+          videoElement.src = altUrl;
+          videoElement.load();
+          return;
+        }
       }
 
       hasError = true;

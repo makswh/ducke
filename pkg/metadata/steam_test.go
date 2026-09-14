@@ -142,13 +142,13 @@ func TestVerifyCDNAsset(t *testing.T) {
 	service := NewSteamService(nil)
 
 	// Existing asset on CDN
-	validURL := "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/50300/header.jpg"
+	validURL := "https://shared.steamstatic.com/store_item_assets/steam/apps/50300/header.jpg"
 	if !service.verifyCDNAsset(validURL) {
 		t.Errorf("expected CDN asset %s to exist", validURL)
 	}
 
 	// Non-existent asset on CDN
-	invalidURL := "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/999999999999/header.jpg"
+	invalidURL := "https://shared.steamstatic.com/store_item_assets/steam/apps/999999999999/header.jpg"
 	if service.verifyCDNAsset(invalidURL) {
 		t.Errorf("expected non-existent CDN asset %s to return false", invalidURL)
 	}
@@ -166,10 +166,10 @@ func TestCommunityGameTitleScraping(t *testing.T) {
 func TestIsHorizontalAsset(t *testing.T) {
 	horizontalURLs := []string{
 		"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3596700/capsule_231x87.jpg",
-		"https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3596700/capsule_616x353.jpg",
-		"https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3596700/capsule_467x181.jpg",
-		"https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3596700/header.jpg",
-		"https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3596700/header_alt_assets_3_russian.jpg",
+		"https://shared.steamstatic.com/store_item_assets/steam/apps/3596700/capsule_616x353.jpg",
+		"https://shared.steamstatic.com/store_item_assets/steam/apps/3596700/capsule_467x181.jpg",
+		"https://shared.steamstatic.com/store_item_assets/steam/apps/3596700/header.jpg",
+		"https://shared.steamstatic.com/store_item_assets/steam/apps/3596700/header_alt_assets_3_russian.jpg",
 	}
 	for _, u := range horizontalURLs {
 		if !IsHorizontalAsset(u) {
@@ -243,5 +243,26 @@ func TestSteamGridDB_Logo(t *testing.T) {
 		t.Fatalf("empty logo for Cyberpunk 2077")
 	}
 	t.Logf("Cyberpunk 2077 -> SGDB Logo: %s", logoWk)
+}
+
+func TestFetchAppTags(t *testing.T) {
+	service := NewSteamService(nil)
+	// Cyberpunk 2077 (AppID 1091500)
+	tags := service.FetchAppTags(1091500)
+	if len(tags) == 0 {
+		t.Fatalf("expected tags for AppID 1091500, got 0")
+	}
+	t.Logf("AppID 1091500 tags: %v", tags)
+	foundKnownTag := false
+	for _, tag := range tags {
+		lower := strings.ToLower(tag)
+		if strings.Contains(lower, "киберпанк") || strings.Contains(lower, "cyberpunk") || strings.Contains(lower, "ролев") || strings.Contains(lower, "rpg") || strings.Contains(lower, "открытый мир") || strings.Contains(lower, "open world") {
+			foundKnownTag = true
+			break
+		}
+	}
+	if !foundKnownTag {
+		t.Errorf("expected to find known tag in %v", tags)
+	}
 }
 

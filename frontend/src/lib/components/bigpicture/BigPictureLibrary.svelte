@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import {
     Search,
     Download,
@@ -35,10 +35,54 @@
   let selectedGenre = $state<string>('all');
   let isSortDropdownOpen = $state<boolean>(false);
 
-  // Derive top genres from loaded games
+  // Debounced search query (150ms) to eliminate keystroke lag
+  let debouncedSearchQuery = $state<string>('');
+  let debounceTimer: any = null;
+
+  $effect(() => {
+    const raw = searchQuery;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (!raw) {
+      debouncedSearchQuery = '';
+    } else {
+      debounceTimer = setTimeout(() => {
+        debouncedSearchQuery = raw;
+      }, 150);
+    }
+  });
+
+  onDestroy(() => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+  });
+
+  // Deduplicate once per games array reference change and precalculate search corpus & metadata flags
+  let deduplicatedList = $derived.by(() => {
+    const list = deduplicateGames(games || []);
+    return list.map((g) => {
+      const glist = (g.genres || g.steamGenres || []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
+      const title = (g.cleanTitle || g.displayTitle || g.folderName || '').toLowerCase();
+      const steamTitle = (g.steamTitle || '').toLowerCase();
+      const vList = (g.variants || []).map((v: any) => `${v.rawName || ''} ${v.torrentSource || ''}`.toLowerCase().trim()).filter(Boolean);
+      const searchCorpus = `${title} ${steamTitle} ${glist.join(' ')} ${vList.join(' ')}`;
+
+      const hasSteam = !!((g.steamAppId && g.steamAppId !== 0) || g.capsuleImage || g.steamSynced);
+
+      return {
+        ...g,
+        _searchCorpus: searchCorpus,
+        _genreLowerSet: new Set(glist),
+        _hasSteam: hasSteam
+      };
+    });
+  });
+
+  // Derive top genres from deduplicated games
   let availableGenres = $derived.by(() => {
     const counts = new Map<string, number>();
-    for (const g of games || []) {
+    for (const g of deduplicatedList) {
       const genresList = g.genres || g.steamGenres;
       if (genresList && Array.isArray(genresList)) {
         for (const raw of genresList) {
@@ -65,60 +109,57 @@
   const GAP = 24; // gap-6 = 1.5rem = 24px
   const OVERSCAN_ROWS = 3; // 3 rows buffer above and below for smooth gamepad and analog stick scrolling
 
+  // Single-pass filter over deduplicated list
   let filteredGames = $derived.by(() => {
-    let list = deduplicateGames(games || []);
+    const q = debouncedSearchQuery.trim().toLowerCase();
+    const selGenre = selectedGenre !== 'all' ? selectedGenre.toLowerCase() : null;
+    const filter = activeFilter;
+    const activeIds = filter === 'downloading' ? new Set((activeDownloads || []).map((d) => d && d.gameId)) : null;
 
-    // Filter by category
-    if (activeFilter === 'downloading') {
-      const activeIds = new Set((activeDownloads || []).map((d) => d && d.gameId));
-      list = list.filter((g) => activeIds.has(g.id));
-    } else if (activeFilter === 'has_steam') {
-      list = list.filter((g) => (g.steamAppId && g.steamAppId !== 0) || g.capsuleImage || g.steamSynced);
-    }
+    let result = deduplicatedList.filter((g) => {
+      // 1. Filter by category
+      if (filter === 'downloading') {
+        if (!activeIds || !activeIds.has(g.id)) return false;
+      } else if (filter === 'has_steam') {
+        if (!g._hasSteam) return false;
+      }
 
-    // Filter by genre
-    if (selectedGenre !== 'all') {
-      list = list.filter((g) => {
-        const glist = g.genres || g.steamGenres || [];
-        return glist.some((gen: string) => typeof gen === 'string' && gen.toLowerCase() === selectedGenre.toLowerCase());
-      });
-    }
+      // 2. Filter by genre via Set O(1)
+      if (selGenre && !g._genreLowerSet.has(selGenre)) {
+        return false;
+      }
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      list = list.filter((g) => {
-        const title = (g.cleanTitle || g.displayTitle || g.folderName || '').toLowerCase();
-        const steamTitle = (g.steamTitle || '').toLowerCase();
-        const variantMatch = (g.variants || []).some((v: any) => (v.rawName || '').toLowerCase().includes(q) || (v.torrentSource || '').toLowerCase().includes(q));
-        return title.includes(q) || steamTitle.includes(q) || variantMatch;
-      });
-    }
+      // 3. Filter by search query via precalculated corpus
+      if (q && !g._searchCorpus.includes(q)) {
+        return false;
+      }
+
+      return true;
+    });
 
     // Sort
-    const sorted = list.slice();
     if (selectedSort === 'rating_desc') {
-      sorted.sort((a, b) => {
+      result.sort((a, b) => {
         const diff = (b.reviewPercent || 0) - (a.reviewPercent || 0);
         if (diff !== 0) return diff;
         return (b.totalReviews || 0) - (a.totalReviews || 0);
       });
     } else if (selectedSort === 'popular_desc') {
-      sorted.sort((a, b) => {
+      result.sort((a, b) => {
         const scoreA = Math.log10((a.totalReviews || 0) + 1) * ((a.reviewPercent || 0) / 100);
         const scoreB = Math.log10((b.totalReviews || 0) + 1) * ((b.reviewPercent || 0) / 100);
         return scoreB - scoreA;
       });
     } else if (selectedSort === 'name') {
-      sorted.sort((a, b) => (a.cleanTitle || a.displayTitle || a.folderName || '').localeCompare(b.cleanTitle || b.displayTitle || b.folderName || ''));
+      result.sort((a, b) => (a.cleanTitle || a.displayTitle || a.folderName || '').localeCompare(b.cleanTitle || b.displayTitle || b.folderName || ''));
     } else if (selectedSort === 'size_desc') {
-      sorted.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0));
+      result.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0));
     } else {
       // Default: date_desc (newest added first)
-      sorted.sort((a, b) => (b.id || 0) - (a.id || 0));
+      result.sort((a, b) => (b.id || 0) - (a.id || 0));
     }
 
-    return sorted;
+    return result;
   });
 
   // Calculate dynamic column count based on container width matching Tailwind breakpoints
@@ -183,7 +224,7 @@
 
   // Reset scroll when filter, genre, sort, or search changes
   $effect(() => {
-    const _ = [activeFilter, searchQuery, selectedGenre, selectedSort];
+    const _ = [activeFilter, debouncedSearchQuery, selectedGenre, selectedSort];
     if (scrollContainer) {
       scrollContainer.scrollTop = 0;
       scrollTop = 0;
@@ -286,7 +327,7 @@
         return;
       }
       if (currentSrc.includes('cdn.cloudflare.steamstatic.com')) {
-        target.src = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appId}/library_600x900_2x.jpg`;
+        target.src = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/library_600x900_2x.jpg`;
         return;
       }
     }
@@ -334,7 +375,7 @@
           activeFilter = 'all';
         }}
       >
-        Все игры ({games.length})
+        Все игры ({deduplicatedList.length})
       </button>
 
       <button
@@ -443,7 +484,7 @@
           selectedGenre = 'all';
         }}
       >
-        Все ({games.length})
+        Все ({deduplicatedList.length})
       </button>
       {#each availableGenres as item}
         <button
@@ -537,6 +578,7 @@
                   <img
                     src={cover}
                     alt={game.cleanTitle || game.folderName}
+                    decoding="async"
                     referrerpolicy="no-referrer"
                     class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-103"
                     onerror={(e) => handleImageError(e, game)}

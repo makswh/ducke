@@ -13,6 +13,7 @@
     Layers,
     Building2,
     Tag,
+    Tags,
     Monitor,
     Play,
     Server,
@@ -59,7 +60,8 @@
     loadingStatusText = '',
     onStartDownload = (gameId: number, targetPath: string) => {},
     onSelectFolder = async (): Promise<string> => '',
-    onSelectGenre = (genre: string) => {}
+    onSelectGenre = (genre: string) => {},
+    onSelectTag = (tag: string) => {}
   } = $props();
 
   const STEAM_DEFAULT_ACCENT = '#66c0f4';
@@ -73,6 +75,7 @@
   let dynamicAccentColor = $state<string>(STEAM_DEFAULT_ACCENT);
   let coverColorCache = new Map<string, string>();
   let enrichingGameIds = new Set<number>();
+  let isEnrichingCurrentGame = $state<boolean>(false);
   let movieOverrides = $state<Record<number, SteamMovie[]>>({});
   let screenshotViewport = $state<HTMLDivElement | null>(null);
   let isScreenshotFullscreen = $state<boolean>(false);
@@ -241,6 +244,7 @@
     }
 
     if (curId !== lastGameId) {
+      const prevId = lastGameId;
       lastGameId = curId;
       const seq = ++switchSequence;
 
@@ -248,7 +252,19 @@
       activeMediaIndex = 0;
       activeTab = 'description';
       coverAspectRatio = null;
-      selectedVariantId = game.variants && game.variants.length > 0 ? game.variants[0].id : curId;
+
+      // Retain previously selected variant if present in the new variants list (e.g. after release merge)
+      if (game.variants && game.variants.length > 0) {
+        if (selectedVariantId && game.variants.some((v) => v.id === selectedVariantId)) {
+          // Keep current selectedVariantId
+        } else if (prevId && game.variants.some((v) => v.id === prevId)) {
+          selectedVariantId = prevId;
+        } else {
+          selectedVariantId = game.variants[0].id;
+        }
+      } else {
+        selectedVariantId = curId;
+      }
       isVariantDropdownOpen = false;
       isFavoriteDropdownOpen = false;
 
@@ -322,6 +338,17 @@
       if (res) {
         pageDetailsCache.set(gameId, res);
         pageDetails = res;
+        if (res.game) {
+          if (res.game.screenshots && res.game.screenshots.length > 0) {
+            game.screenshots = res.game.screenshots;
+          }
+          if (res.game.detailedDescription) {
+            game.detailedDescription = res.game.detailedDescription;
+          }
+          if (res.game.genres && res.game.genres.length > 0) {
+            game.genres = res.game.genres;
+          }
+        }
       }
     } catch (err) {
       console.error('[GameDetailView] Failed to get game page details:', err);
@@ -374,7 +401,6 @@
   }
 
   function triggerPriorityEnrichmentIfNeeded(g: GameEntity, curId: number, seq: number) {
-    if (enrichingGameIds.has(curId)) return;
     const hasRich = !!(
       (g.screenshots && g.screenshots.length > 0) ||
       (g.movies && g.movies.length > 0) ||
@@ -382,16 +408,37 @@
       g.detailedDescription ||
       (g.genres && g.genres.length > 0)
     );
-    if (hasRich) return;
+    if (hasRich) {
+      isEnrichingCurrentGame = false;
+      return;
+    }
+
+    if (enrichingGameIds.has(curId)) {
+      isEnrichingCurrentGame = true;
+      return;
+    }
 
     enrichingGameIds.add(curId);
+    isEnrichingCurrentGame = true;
+
     const app = typeof window !== 'undefined' ? (window as any)?.go?.main?.App : null;
     if (app && app.EnrichGameNow) {
       app.EnrichGameNow(curId).then((enriched: any) => {
-        if (isMounted && seq === switchSequence && enriched) {
-          fetchGamePageDetails(curId, seq);
+        enrichingGameIds.delete(curId);
+        if (isMounted && seq === switchSequence) {
+          isEnrichingCurrentGame = false;
+          if (enriched) {
+            fetchGamePageDetails(curId, seq);
+          }
         }
-      }).catch(() => {});
+      }).catch(() => {
+        enrichingGameIds.delete(curId);
+        if (isMounted && seq === switchSequence) {
+          isEnrichingCurrentGame = false;
+        }
+      });
+    } else {
+      isEnrichingCurrentGame = false;
     }
   }
 
@@ -462,9 +509,9 @@
       return g.backgroundImage;
     }
     if (g.steamAppId && g.steamAppId > 0) {
-      const v6b = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/page_bg_generated_v6b.jpg`;
+      const v6b = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/page_bg_generated_v6b.jpg`;
       if (!imageLoadFailed[v6b]) return v6b;
-      const pageBg = `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/page.bg.jpg`;
+      const pageBg = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/page.bg.jpg`;
       if (!imageLoadFailed[pageBg]) return pageBg;
     }
     if (g.screenshots && g.screenshots.length > 0 && !imageLoadFailed[g.screenshots[0]]) {
@@ -488,22 +535,26 @@
 
         if (hls) {
           hls = hls.replace(/^http:\/\//i, 'https://')
-                   .replace(/video\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com');
+                   .replace(/video\.fastly\.steamstatic\.com/gi, 'video.akamai.steamstatic.com');
         }
         if (mp4) {
           mp4 = mp4.replace(/^http:\/\//i, 'https://')
-                   .replace(/video\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com')
-                   .replace(/shared\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com');
+                   .replace(/video\.fastly\.steamstatic\.com/gi, 'video.akamai.steamstatic.com');
           if (mp4.includes('/apps/') && mp4.includes('movie_max.mp4')) mp4 = '';
         }
         if (webm) {
           webm = webm.replace(/^http:\/\//i, 'https://')
-                     .replace(/video\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com')
-                     .replace(/shared\.akamai\.steamstatic\.com/gi, 'video.fastly.steamstatic.com');
+                     .replace(/video\.fastly\.steamstatic\.com/gi, 'video.akamai.steamstatic.com');
         }
         if (thumb) {
-          thumb = thumb.replace(/^http:\/\//i, 'https://')
-                       .replace(/shared\.akamai\.steamstatic\.com/gi, 'shared.fastly.steamstatic.com');
+          thumb = thumb.trim().replace(/^http:\/\//i, 'https://');
+          if (thumb.startsWith('//')) {
+            thumb = 'https:' + thumb;
+          } else if (!thumb.startsWith('https://')) {
+            thumb = `https://shared.steamstatic.com/store_item_assets/steam/apps/${game.steamAppId || ''}/${thumb.replace(/^\//, '')}`;
+          }
+          thumb = thumb.replace(/shared\.fastly\.steamstatic\.com/gi, 'shared.steamstatic.com')
+                       .replace(/shared\.akamai\.steamstatic\.com/gi, 'shared.steamstatic.com');
         }
 
         if (hls || mp4 || webm || thumb) {
@@ -520,9 +571,13 @@
       }
     }
 
-    if (game.screenshots && game.screenshots.length > 0) {
-      for (let i = 0; i < game.screenshots.length; i++) {
-        const rawUrl = typeof game.screenshots[i] === 'string' ? game.screenshots[i] : (game.screenshots[i] as any)?.url;
+    const currentScreenshots = (pageDetails?.game?.screenshots && pageDetails.game.screenshots.length > 0)
+      ? pageDetails.game.screenshots
+      : (game.screenshots || []);
+
+    if (currentScreenshots && currentScreenshots.length > 0) {
+      for (let i = 0; i < currentScreenshots.length; i++) {
+        const rawUrl = typeof currentScreenshots[i] === 'string' ? currentScreenshots[i] : (currentScreenshots[i] as any)?.url;
         if (rawUrl) {
           items.push({
             type: 'image',
@@ -883,7 +938,15 @@
     const unsubEnriched = EventsOn('game:enriched', (enrichedGame: any) => {
       if (!isMounted || !enrichedGame) return;
       const targetId = game?.id;
-      if (targetId && (enrichedGame.id === targetId || (enrichedGame.steamAppId > 0 && enrichedGame.steamAppId === game?.steamAppId))) {
+      if (
+        targetId &&
+        (enrichedGame.id === targetId ||
+         (enrichedGame.steamAppId > 0 && enrichedGame.steamAppId === game?.steamAppId) ||
+         (game?.variants && game.variants.some((v: any) => v.id === enrichedGame.id)))
+      ) {
+        enrichingGameIds.delete(targetId);
+        enrichingGameIds.delete(enrichedGame.id);
+        isEnrichingCurrentGame = false;
         if (pageDetails) {
           pageDetails.game = { ...pageDetails.game, ...enrichedGame };
           pageDetailsCache.set(targetId, pageDetails);
@@ -941,114 +1004,73 @@
 >
   {#if game}
     {#if isSwitching}
-      <!-- Atmospheric Skeleton Backdrop -->
-      <div class="absolute top-0 left-0 right-0 h-[650px] overflow-hidden pointer-events-none z-0 select-none">
-        <div class="w-full h-full bg-white/[0.02] animate-pulse"></div>
-        <div class="absolute inset-0 bg-gradient-to-b from-[#090a0d]/30 via-[#090a0d]/65 to-[#090a0d]"></div>
-      </div>
+      <!-- Minimal Skeleton: hairline blocks, single shimmer sweep, no decorative cards -->
+      <div class="relative z-10 w-full max-w-[1280px] mx-auto flex flex-col flex-1 p-6 lg:p-10 pb-28 select-none" aria-hidden="true">
 
-      <!-- EXACT GAME PAGE SKELETON (Pixel-perfect replica of page layout) -->
-      <div class="relative z-10 w-full max-w-[1280px] mx-auto flex flex-col flex-1 p-6 lg:p-10 space-y-8 pb-28">
-        
-        <!-- Top Hero Section Skeleton (12 Cols) -->
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
-          
-          <!-- Left: Box-Art Poster Skeleton -->
+        <!-- Hero row: cover placeholder + info lines -->
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-start mb-10">
+
+          <!-- Cover: plain rectangle, no border/icon -->
           <div class="md:col-span-4 lg:col-span-3 flex justify-center md:justify-start">
-            <div class="w-full max-w-[280px] aspect-[2/3] rounded-2xl bg-white/[0.04] border border-white/[0.08] overflow-hidden relative flex items-center justify-center animate-pulse shadow-lg">
-              <div class="w-16 h-16 rounded-2xl bg-white/[0.05] border border-white/[0.06] flex items-center justify-center">
-                <Gamepad2 class="w-7 h-7 text-white/20" />
-              </div>
-            </div>
+            <div class="w-full max-w-[220px] aspect-[2/3] rounded-xl sk-block"></div>
           </div>
 
-          <!-- Right: Info, Chips & Actions Skeleton -->
-          <div class="md:col-span-8 lg:col-span-9 space-y-5">
-            
-            <!-- Title & Rating Header Skeleton -->
-            <div class="flex flex-col sm:flex-row items-start justify-between gap-4 border-b border-white/[0.06] pb-4">
-              <div class="space-y-2.5 w-full max-w-xl">
-                <div class="h-9 sm:h-10 w-3/4 rounded-xl bg-white/[0.06] animate-pulse"></div>
-                <div class="h-4 w-1/3 rounded-lg bg-white/[0.03] animate-pulse"></div>
-              </div>
-
-              <!-- Rating Score Card Skeleton -->
-              <div class="flex items-center gap-3 bg-black/40 border border-white/[0.06] p-2.5 px-4 rounded-2xl flex-shrink-0 animate-pulse">
-                <div class="w-11 h-11 rounded-xl bg-white/[0.06]"></div>
-                <div class="space-y-1.5">
-                  <div class="h-3.5 w-24 rounded bg-white/[0.05]"></div>
-                  <div class="h-2.5 w-20 rounded bg-white/[0.03]"></div>
-                </div>
-              </div>
+          <!-- Info column: lines only -->
+          <div class="md:col-span-8 lg:col-span-9 pt-2 flex flex-col gap-5">
+            <!-- Title -->
+            <div class="space-y-2.5">
+              <div class="sk-line h-7 w-2/3"></div>
+              <div class="sk-line h-3.5 w-1/4"></div>
             </div>
 
-            <!-- Minimalist Metadata Chips Skeleton -->
-            <div class="flex flex-wrap items-center gap-2">
-              <div class="h-7 w-16 rounded-xl bg-white/[0.04] border border-white/[0.06] animate-pulse"></div>
-              <div class="h-7 w-28 rounded-xl bg-white/[0.04] border border-white/[0.06] animate-pulse"></div>
-              <div class="h-7 w-24 rounded-xl bg-white/[0.04] border border-white/[0.06] animate-pulse"></div>
-              <div class="h-7 w-20 rounded-xl bg-white/[0.04] border border-white/[0.06] animate-pulse"></div>
-              <div class="h-7 w-36 rounded-xl bg-white/[0.04] border border-white/[0.06] animate-pulse"></div>
-              <div class="h-7 w-24 rounded-xl bg-white/[0.04] border border-white/[0.06] animate-pulse"></div>
-              <div class="h-7 w-20 rounded-xl bg-white/[0.04] border border-white/[0.06] animate-pulse"></div>
+            <!-- Chips row -->
+            <div class="flex flex-wrap gap-2 pt-1">
+              <div class="sk-line h-5 w-14 rounded-md"></div>
+              <div class="sk-line h-5 w-20 rounded-md"></div>
+              <div class="sk-line h-5 w-16 rounded-md"></div>
+              <div class="sk-line h-5 w-24 rounded-md"></div>
+              <div class="sk-line h-5 w-14 rounded-md"></div>
             </div>
 
-            <!-- Short Synopsis Skeleton -->
+            <!-- Synopsis -->
             <div class="space-y-2 pt-1">
-              <div class="h-4 w-full max-w-2xl rounded bg-white/[0.04] animate-pulse"></div>
-              <div class="h-4 w-11/12 max-w-xl rounded bg-white/[0.04] animate-pulse"></div>
-              <div class="h-4 w-4/5 max-w-lg rounded bg-white/[0.03] animate-pulse"></div>
+              <div class="sk-line h-3.5 w-full max-w-xl"></div>
+              <div class="sk-line h-3.5 w-5/6 max-w-lg"></div>
+              <div class="sk-line h-3.5 w-3/4 max-w-md"></div>
             </div>
 
-            <!-- Action Deck Skeleton -->
-            <div class="space-y-3 pt-2">
-              <div class="flex flex-wrap items-center gap-4">
-                <div class="h-10 w-24 rounded-xl bg-white/[0.05] animate-pulse"></div>
-                <div class="h-12 w-64 rounded-full bg-white/[0.08] border border-white/10 animate-pulse"></div>
-                <div class="w-12 h-12 rounded-full bg-white/[0.04] border border-white/10 animate-pulse"></div>
-              </div>
-
-              <!-- Path Info Bar Skeleton -->
-              <div class="h-8 w-72 rounded-xl bg-white/[0.02] border border-white/[0.04] animate-pulse"></div>
+            <!-- Action area -->
+            <div class="flex items-center gap-3 pt-2">
+              <div class="sk-block h-9 w-28 rounded-xl"></div>
+              <div class="sk-block h-9 w-20 rounded-xl"></div>
             </div>
-
           </div>
         </div>
 
-        <!-- Bottom Tabs & Media Skeleton -->
-        <div class="space-y-6 pt-4">
-          <!-- Tabs Header Bar Skeleton -->
-          <div class="w-full border-b border-white/[0.08] flex items-center gap-8 pb-3.5 pt-1">
-            <div class="h-5 w-24 rounded bg-white/[0.08] animate-pulse"></div>
-            <div class="h-5 w-36 rounded bg-white/[0.03] animate-pulse"></div>
-            <div class="h-5 w-36 rounded bg-white/[0.03] animate-pulse"></div>
-          </div>
+        <!-- Tabs bar -->
+        <div class="border-b border-white/[0.05] pb-3 mb-6 flex gap-8">
+          <div class="sk-line h-4 w-20"></div>
+          <div class="sk-line h-4 w-28 opacity-50"></div>
+          <div class="sk-line h-4 w-28 opacity-30"></div>
+        </div>
 
-          <!-- Unified Media Showcase Skeleton -->
-          <div class="space-y-3">
-            <!-- Main 16:9 Viewport Skeleton -->
-            <div class="relative w-full aspect-video rounded-xl overflow-hidden bg-black/60 border border-white/10 flex items-center justify-center animate-pulse">
-              <div class="w-14 h-14 rounded-full bg-white/[0.05] border border-white/10 flex items-center justify-center">
-                <Play class="w-5 h-5 ml-0.5 text-white/20" />
-              </div>
-            </div>
+        <!-- Media viewport -->
+        <div class="sk-block w-full aspect-video rounded-xl mb-3"></div>
 
-            <!-- Thumbnails Strip Skeleton -->
-            <div class="flex items-center gap-2.5 overflow-x-hidden pb-1">
-              {#each [1, 2, 3, 4, 5] as _}
-                <div class="w-32 sm:w-36 aspect-video rounded-lg bg-white/[0.04] border border-white/[0.08] flex-shrink-0 animate-pulse"></div>
-              {/each}
-            </div>
-          </div>
+        <!-- Thumbnail strip -->
+        <div class="flex gap-2 mb-8">
+          {#each [1,2,3,4] as _}
+            <div class="sk-block flex-shrink-0 w-32 aspect-video rounded-lg"></div>
+          {/each}
+        </div>
 
-          <!-- Description Paragraphs Skeleton -->
-          <div class="space-y-3 pt-2">
-            <div class="h-4 w-full rounded bg-white/[0.04] animate-pulse"></div>
-            <div class="h-4 w-11/12 rounded bg-white/[0.04] animate-pulse"></div>
-            <div class="h-4 w-5/6 rounded bg-white/[0.04] animate-pulse"></div>
-            <div class="h-4 w-3/4 rounded bg-white/[0.03] animate-pulse"></div>
-            <div class="h-4 w-2/3 rounded bg-white/[0.03] animate-pulse"></div>
-          </div>
+        <!-- Description lines -->
+        <div class="space-y-2.5 max-w-2xl">
+          <div class="sk-line h-3.5 w-full"></div>
+          <div class="sk-line h-3.5 w-11/12"></div>
+          <div class="sk-line h-3.5 w-5/6"></div>
+          <div class="sk-line h-3.5 w-3/4 opacity-60"></div>
+          <div class="sk-line h-3.5 w-2/3 opacity-40"></div>
         </div>
 
       </div>
@@ -1123,7 +1145,7 @@
                   <img
                     src={logoUrl}
                     alt={getDisplayTitle(g)}
-                    class="max-h-24 sm:max-h-28 max-w-[340px] sm:max-w-[460px] object-contain object-left select-none filter drop-shadow-md"
+                    class="max-h-36 sm:max-h-44 md:max-h-48 max-w-[440px] sm:max-w-[580px] object-contain object-left select-none filter drop-shadow-md"
                     onerror={() => {
                       if (logoUrl) imageLoadFailed[logoUrl] = true;
                     }}
@@ -1174,6 +1196,13 @@
 
           <!-- Minimalist Metadata Chips (Uniform neutral slate, ascetic styling) -->
           <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+            {#if isEnrichingCurrentGame}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--game-accent)]/10 border border-[var(--game-accent)]/20 text-[var(--game-accent)] font-mono font-medium animate-pulse">
+                <RefreshCw class="w-3 h-3 animate-spin flex-shrink-0" />
+                <span>Очистка названия и поиск данных об игре...</span>
+              </span>
+            {/if}
+
             <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06] text-[#9ca3af]">
               <Gamepad2 class="w-3 h-3 text-[#9ca3af]" />
               <span class="font-medium">PC</span>
@@ -1184,20 +1213,6 @@
                 <Calendar class="w-3 h-3 text-[#9ca3af]" />
                 <span>{g.releaseDate}</span>
               </span>
-            {/if}
-
-            {#if g.genres && g.genres.length > 0}
-              {#each g.genres as genre}
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-[#9ca3af] hover:text-white transition-colors cursor-pointer"
-                  onclick={() => onSelectGenre(genre)}
-                  title="Фильтровать по жанру {genre}"
-                >
-                  <Tag class="w-3 h-3 text-[var(--game-accent)]" />
-                  <span>{genre}</span>
-                </button>
-              {/each}
             {/if}
 
             {#if g.developers && g.developers.length > 0}
@@ -1229,10 +1244,59 @@
             </button>
           </div>
 
+          <!-- Dedicated Genres List -->
+          {#if g.genres && g.genres.length > 0}
+            <div class="flex items-center gap-2 flex-wrap pt-0.5">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5 mr-0.5 select-none">
+                <Tag class="w-3.5 h-3.5 text-[#8e95a2]" />
+                Жанры:
+              </span>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                {#each g.genres as genre}
+                  <button
+                    type="button"
+                    class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-xs font-medium text-[#d1d5db] hover:text-white transition-colors cursor-pointer"
+                    onclick={() => onSelectGenre(genre)}
+                    title="Фильтровать по жанру {genre}"
+                  >
+                    <span>{genre}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          <!-- Popular Tags List -->
+          {#if g.tags && g.tags.length > 0}
+            <div class="flex items-center gap-2 flex-wrap pt-0.5">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5 mr-0.5 select-none">
+                <Tags class="w-3.5 h-3.5 text-[#8e95a2]" />
+                Метки:
+              </span>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                {#each g.tags as tag}
+                  <button
+                    type="button"
+                    class="inline-flex items-center px-2 py-0.5 rounded-md bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 text-[11px] font-normal text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
+                    onclick={() => onSelectTag(tag)}
+                    title="Искать игры с меткой {tag}"
+                  >
+                    <span>{tag}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
           <!-- Short Synopsis -->
           {#if g.shortDescription}
             <div class="text-sm sm:text-base text-[#cbd5e1] leading-relaxed font-normal">
               {@html g.shortDescription}
+            </div>
+          {:else if isEnrichingCurrentGame}
+            <div class="flex items-center gap-2 text-xs font-mono text-[#8e95a2] py-2">
+              <span class="inline-block w-2 h-2 rounded-full bg-[var(--game-accent)] animate-ping"></span>
+              <span>Идет автоматический поиск описания, скриншотов и трейлеров...</span>
             </div>
           {/if}
 
@@ -1365,6 +1429,19 @@
                 </div>
               {/if}
 
+              {#if (activeVariant?.rawName || g.rawName)}
+                <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b]">
+                  <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
+                  <span class="text-[#64748b] flex-shrink-0">Оригинальный релиз:</span>
+                  <span
+                    class="text-[#cbd5e1] font-medium truncate max-w-2xl select-all"
+                    title={activeVariant?.rawName || g.rawName}
+                  >
+                    {activeVariant?.rawName || g.rawName}
+                  </span>
+                </div>
+              {/if}
+
             {:else if isDownloading}
               <!-- ACTIVE DOWNLOADING / QUEUED STATE -->
               {@const prog = pageDetails?.downloadProgress}
@@ -1397,6 +1474,19 @@
                   {@render favoriteButton()}
                 </div>
               </div>
+
+              {#if (activeVariant?.rawName || g.rawName)}
+                <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b]">
+                  <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
+                  <span class="text-[#64748b] flex-shrink-0">Оригинальный релиз:</span>
+                  <span
+                    class="text-[#cbd5e1] font-medium truncate max-w-2xl select-all"
+                    title={activeVariant?.rawName || g.rawName}
+                  >
+                    {activeVariant?.rawName || g.rawName}
+                  </span>
+                </div>
+              {/if}
 
             {:else}
               <!-- NOT INSTALLED / READY TO DOWNLOAD STATE -->
@@ -1487,22 +1577,29 @@
                   {@render favoriteButton()}
                 </div>
 
-                <!-- Release Subtitle when variants exist -->
-                {#if g.variants && g.variants.length > 1}
-                  <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b]">
-                    <Disc class="w-3 h-3 text-[#8e95a2] flex-shrink-0" />
-                    <span>Выбран релиз:</span>
-                    <span class="text-[#cbd5e1] font-medium truncate max-w-lg">{activeVariant?.rawName || g.rawName}</span>
-                    <button
-                      type="button"
-                      class="text-[var(--game-accent)] hover:underline cursor-pointer flex items-center gap-0.5"
-                      onclick={(e) => {
-                        e.stopPropagation();
-                        isVariantDropdownOpen = true;
-                      }}
+                <!-- Release Subtitle (always shown when rawName exists) -->
+                {#if (activeVariant?.rawName || g.rawName)}
+                  <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b] pt-0.5">
+                    <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
+                    <span class="text-[#64748b] flex-shrink-0">{g.variants && g.variants.length > 1 ? 'Выбран релиз:' : 'Оригинальный релиз:'}</span>
+                    <span
+                      class="text-[#cbd5e1] font-medium truncate max-w-2xl select-all"
+                      title={activeVariant?.rawName || g.rawName}
                     >
-                      <span>(сменить)</span>
-                    </button>
+                      {activeVariant?.rawName || g.rawName}
+                    </span>
+                    {#if g.variants && g.variants.length > 1}
+                      <button
+                        type="button"
+                        class="text-[var(--game-accent)] hover:underline cursor-pointer flex items-center gap-0.5 flex-shrink-0 ml-1"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          isVariantDropdownOpen = true;
+                        }}
+                      >
+                        <span>(сменить)</span>
+                      </button>
+                    {/if}
                   </div>
                 {/if}
               </div>
@@ -1665,6 +1762,14 @@
               <span>Хранилище репозитория</span>
             </h4>
             <div class="divide-y divide-white/[0.04] space-y-2 text-[#9ca3af]">
+              {#if (activeVariant?.rawName || g.rawName)}
+                <div class="flex items-center justify-between pt-2 gap-3">
+                  <span class="flex-shrink-0">Оригинальный релиз</span>
+                  <span class="font-mono text-white truncate max-w-[240px] select-all text-right" title={activeVariant?.rawName || g.rawName}>
+                    {activeVariant?.rawName || g.rawName}
+                  </span>
+                </div>
+              {/if}
               <div class="flex items-center justify-between pt-2">
                 <span>Путь на сервере</span>
                 <span class="font-mono text-white truncate max-w-[240px]" title={g.remotePath}>{g.remotePath}</span>
@@ -1793,6 +1898,14 @@
                   <span>Имя объекта</span>
                   <span class="font-semibold text-white truncate max-w-[220px]">{getDisplayTitle(g)}</span>
                 </div>
+                {#if (activeVariant?.rawName || g.rawName)}
+                  <div class="flex items-center justify-between pt-2 gap-3">
+                    <span class="flex-shrink-0">Оригинальный релиз</span>
+                    <span class="font-mono text-white truncate max-w-[220px] select-all text-right" title={activeVariant?.rawName || g.rawName}>
+                      {activeVariant?.rawName || g.rawName}
+                    </span>
+                  </div>
+                {/if}
                 <div class="flex items-center justify-between pt-2">
                   <span>Удаленный путь</span>
                   <span class="font-mono text-white truncate max-w-[220px]" title={g.remotePath}>{g.remotePath}</span>
@@ -2034,8 +2147,20 @@
     <!-- Empty Placeholder / Loading State -->
     <div class="flex-1 flex flex-col items-center justify-center text-[#5a6170] space-y-3">
       {#if isLoading}
-        <div class="w-8 h-8 rounded-full border-2 border-sky-400 border-t-transparent animate-spin"></div>
-        <p class="text-xs font-medium text-[#8e95a2]">{loadingStatusText || 'Загрузка библиотеки игр...'}</p>
+        <!-- Minimal loading state: wordmark + slim progress pulse -->
+        <div class="flex-1 flex flex-col items-center justify-center gap-6 select-none">
+          <!-- Ducke wordmark / logo placeholder -->
+          <div class="flex flex-col items-center gap-5">
+            <!-- Ultra-thin animated progress bar -->
+            <div class="w-32 h-px bg-white/[0.06] rounded-full overflow-hidden relative">
+              <div class="absolute inset-y-0 left-0 w-1/3 bg-white/30 rounded-full animate-[loading-sweep_1.4s_ease-in-out_infinite]"></div>
+            </div>
+            <!-- Muted status text -->
+            <p class="text-[11px] text-[#525a6c] font-mono tracking-wider uppercase">
+              {loadingStatusText || 'Загрузка библиотеки...'}
+            </p>
+          </div>
+        </div>
       {:else}
         <Layers class="w-10 h-10 stroke-[1.5]" />
         <p class="text-xs font-medium">Выберите игру из библиотеки слева</p>

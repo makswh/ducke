@@ -119,11 +119,13 @@ export function deduplicateGames(list: GameEntity[]): GameEntity[] {
       if (stk) keys.push(`steam:${stk}`);
     }
 
-    const kClean = cleanCanonicalKey(g.cleanTitle);
+    const kClean = g.canonicalKey || cleanCanonicalKey(g.cleanTitle);
     if (kClean) keys.push(`title:${kClean}`);
 
-    const kSearch = cleanCanonicalKey(g.searchTitle);
-    if (kSearch && kSearch !== kClean) keys.push(`title:${kSearch}`);
+    if (!g.canonicalKey) {
+      const kSearch = cleanCanonicalKey(g.searchTitle);
+      if (kSearch && kSearch !== kClean) keys.push(`title:${kSearch}`);
+    }
 
     for (const k of keys) {
       const root = keyToRoot.get(k);
@@ -185,6 +187,7 @@ export function deduplicateGames(list: GameEntity[]): GameEntity[] {
         primary.screenshots = item.screenshots;
         primary.movies = item.movies;
         primary.genres = item.genres;
+        primary.tags = item.tags;
         primary.developers = item.developers;
         primary.publishers = item.publishers;
         primary.releaseDate = item.releaseDate;

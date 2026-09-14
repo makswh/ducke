@@ -1,3 +1,171 @@
+export namespace collections {
+	
+	export class CompilationGame {
+	    stopGameId: string;
+	    title: string;
+	    url: string;
+	    posterUrl: string;
+	    stopGameScore: string;
+	    inLibrary: boolean;
+	    duckeGame?: database.GameEntity;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompilationGame(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stopGameId = source["stopGameId"];
+	        this.title = source["title"];
+	        this.url = source["url"];
+	        this.posterUrl = source["posterUrl"];
+	        this.stopGameScore = source["stopGameScore"];
+	        this.inLibrary = source["inLibrary"];
+	        this.duckeGame = this.convertValues(source["duckeGame"], database.GameEntity);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CompilationDetail {
+	    id: string;
+	    title: string;
+	    authorName: string;
+	    authorAvatar: string;
+	    authorUrl: string;
+	    gamesCount: number;
+	    rating: string;
+	    description: string;
+	    lastUpdated: string;
+	    matchedCount: number;
+	    games: CompilationGame[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CompilationDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.authorName = source["authorName"];
+	        this.authorAvatar = source["authorAvatar"];
+	        this.authorUrl = source["authorUrl"];
+	        this.gamesCount = source["gamesCount"];
+	        this.rating = source["rating"];
+	        this.description = source["description"];
+	        this.lastUpdated = source["lastUpdated"];
+	        this.matchedCount = source["matchedCount"];
+	        this.games = this.convertValues(source["games"], CompilationGame);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class CompilationSummary {
+	    id: string;
+	    title: string;
+	    url: string;
+	    authorName: string;
+	    authorAvatar: string;
+	    authorUrl: string;
+	    gamesCount: number;
+	    commentsCount: number;
+	    rating: string;
+	    description: string;
+	    previewImages: string[];
+	    matchedCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompilationSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.url = source["url"];
+	        this.authorName = source["authorName"];
+	        this.authorAvatar = source["authorAvatar"];
+	        this.authorUrl = source["authorUrl"];
+	        this.gamesCount = source["gamesCount"];
+	        this.commentsCount = source["commentsCount"];
+	        this.rating = source["rating"];
+	        this.description = source["description"];
+	        this.previewImages = source["previewImages"];
+	        this.matchedCount = source["matchedCount"];
+	    }
+	}
+	export class CompilationsResponse {
+	    items: CompilationSummary[];
+	    totalPages: number;
+	    currentPage: number;
+	    sort: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompilationsResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], CompilationSummary);
+	        this.totalPages = source["totalPages"];
+	        this.currentPage = source["currentPage"];
+	        this.sort = source["sort"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace config {
 	
 	export class TorrentSourceConfig {
@@ -201,6 +369,7 @@ export namespace database {
 	    rawName: string;
 	    cleanTitle: string;
 	    searchTitle: string;
+	    canonicalKey?: string;
 	    remotePath: string;
 	    sizeBytes: number;
 	    sizeDisplay: string;
@@ -219,6 +388,7 @@ export namespace database {
 	    screenshots?: string[];
 	    movies?: SteamMovie[];
 	    genres?: string[];
+	    tags?: string[];
 	    developers?: string[];
 	    publishers?: string[];
 	    releaseDate?: string;
@@ -245,6 +415,7 @@ export namespace database {
 	        this.rawName = source["rawName"];
 	        this.cleanTitle = source["cleanTitle"];
 	        this.searchTitle = source["searchTitle"];
+	        this.canonicalKey = source["canonicalKey"];
 	        this.remotePath = source["remotePath"];
 	        this.sizeBytes = source["sizeBytes"];
 	        this.sizeDisplay = source["sizeDisplay"];
@@ -263,6 +434,7 @@ export namespace database {
 	        this.screenshots = source["screenshots"];
 	        this.movies = this.convertValues(source["movies"], SteamMovie);
 	        this.genres = source["genres"];
+	        this.tags = source["tags"];
 	        this.developers = source["developers"];
 	        this.publishers = source["publishers"];
 	        this.releaseDate = source["releaseDate"];

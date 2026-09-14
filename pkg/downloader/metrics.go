@@ -5,8 +5,9 @@ import (
 	"time"
 )
 
-// UpdateTaskMetrics updates the throughput and smoothed speed for an active task
-func UpdateTaskMetrics(task *DownloadTask, now time.Time) {
+// UpdateTaskMetrics updates the throughput and smoothed speed for an active task.
+// If overrideDelta >= 0 is provided, it is used directly as the byte delta for this sample interval.
+func UpdateTaskMetrics(task *DownloadTask, now time.Time, overrideDelta ...int64) {
 	task.mu.Lock()
 	defer task.mu.Unlock()
 
@@ -14,23 +15,28 @@ func UpdateTaskMetrics(task *DownloadTask, now time.Time) {
 		return
 	}
 
-	currentDownloaded := task.DownloadedBytes.Load()
-	delta := currentDownloaded - task.lastBytes
-	if delta < 0 {
-		delta = 0
+	var delta int64
+	if len(overrideDelta) > 0 && overrideDelta[0] >= 0 {
+		delta = overrideDelta[0]
+	} else {
+		currentDownloaded := task.DownloadedBytes.Load()
+		delta = currentDownloaded - task.lastBytes
+		if delta < 0 {
+			delta = 0
+		}
+		task.lastBytes = currentDownloaded
 	}
 
-	// Exponential Moving Average (EMA) for butter-smooth speed & stable ETA
+	// Exponential Moving Average (EMA) for responsive and butter-smooth speed & stable ETA
 	instantSpeed := float64(delta)
 	if task.smoothedSpeed <= 0 {
 		task.smoothedSpeed = instantSpeed
 	} else {
-		task.smoothedSpeed = (0.25 * instantSpeed) + (0.75 * task.smoothedSpeed)
+		task.smoothedSpeed = (0.35 * instantSpeed) + (0.65 * task.smoothedSpeed)
 	}
 	currentSpeed := int64(task.smoothedSpeed)
 	task.speedBytesPerSec.Store(currentSpeed)
 
-	task.lastBytes = currentDownloaded
 	task.lastSampleTime = now
 }
 

@@ -68,6 +68,7 @@ type DownloadTask struct {
 	speedBytesPerSec atomic.Int64
 	smoothedSpeed    float64
 	lastBytes        int64
+	lastWireBytes    int64
 	lastSampleTime   time.Time
 	currentFile      string
 	fileIndex        atomic.Int32
