@@ -28,49 +28,49 @@ type SteamMovie struct {
 
 // GameEntity represents a game entry with remote and steam metadata joined
 type GameEntity struct {
-	ID                int64        `json:"id"`
-	RawName           string       `json:"rawName"`
-	CleanTitle        string       `json:"cleanTitle"`
-	SearchTitle       string       `json:"searchTitle"`
-	CanonicalKey      string       `json:"canonicalKey,omitempty"`
-	RemotePath        string       `json:"remotePath"`
-	SizeBytes         int64        `json:"sizeBytes"`
-	SizeDisplay       string       `json:"sizeDisplay"`
-	IsDirectory       bool         `json:"isDirectory"`
-	IsCollection      bool         `json:"isCollection"`
-	ParentPath        string       `json:"parentPath"`
-	SteamAppID        int          `json:"steamAppId"`
-	SteamSynced       bool         `json:"steamSynced"`
+	ID           int64  `json:"id"`
+	RawName      string `json:"rawName"`
+	CleanTitle   string `json:"cleanTitle"`
+	SearchTitle  string `json:"searchTitle"`
+	CanonicalKey string `json:"canonicalKey,omitempty"`
+	RemotePath   string `json:"remotePath"`
+	SizeBytes    int64  `json:"sizeBytes"`
+	SizeDisplay  string `json:"sizeDisplay"`
+	IsDirectory  bool   `json:"isDirectory"`
+	IsCollection bool   `json:"isCollection"`
+	ParentPath   string `json:"parentPath"`
+	SteamAppID   int    `json:"steamAppId"`
+	SteamSynced  bool   `json:"steamSynced"`
 	// Joined Steam Metadata
-	SteamTitle        string       `json:"steamTitle,omitempty"`
-	ShortDescription  string       `json:"shortDescription,omitempty"`
-	DetailedDescription string     `json:"detailedDescription,omitempty"`
-	HeaderImage       string       `json:"headerImage,omitempty"`
-	CapsuleImage      string       `json:"capsuleImage,omitempty"`
-	BackgroundImage   string       `json:"backgroundImage,omitempty"`
-	IconURL           string       `json:"iconUrl,omitempty"`
-	Screenshots       []string     `json:"screenshots,omitempty"`
-	Movies            []SteamMovie `json:"movies,omitempty"`
-	Genres            []string     `json:"genres,omitempty"`
-	Tags              []string     `json:"tags,omitempty"`
-	Developers        []string     `json:"developers,omitempty"`
-	Publishers        []string     `json:"publishers,omitempty"`
-	ReleaseDate       string       `json:"releaseDate,omitempty"`
-	ControllerSupport string       `json:"controllerSupport,omitempty"`
-	PCRequirements    string       `json:"pcRequirements,omitempty"`
-	MetacriticScore   int          `json:"metacriticScore,omitempty"`
-	ReviewScoreDesc   string       `json:"reviewScoreDesc,omitempty"`
-	ReviewPercent     int          `json:"reviewPercent,omitempty"`
-	TotalReviews      int          `json:"totalReviews,omitempty"`
+	SteamTitle          string       `json:"steamTitle,omitempty"`
+	ShortDescription    string       `json:"shortDescription,omitempty"`
+	DetailedDescription string       `json:"detailedDescription,omitempty"`
+	HeaderImage         string       `json:"headerImage,omitempty"`
+	CapsuleImage        string       `json:"capsuleImage,omitempty"`
+	BackgroundImage     string       `json:"backgroundImage,omitempty"`
+	IconURL             string       `json:"iconUrl,omitempty"`
+	Screenshots         []string     `json:"screenshots,omitempty"`
+	Movies              []SteamMovie `json:"movies,omitempty"`
+	Genres              []string     `json:"genres,omitempty"`
+	Tags                []string     `json:"tags,omitempty"`
+	Developers          []string     `json:"developers,omitempty"`
+	Publishers          []string     `json:"publishers,omitempty"`
+	ReleaseDate         string       `json:"releaseDate,omitempty"`
+	ControllerSupport   string       `json:"controllerSupport,omitempty"`
+	PCRequirements      string       `json:"pcRequirements,omitempty"`
+	MetacriticScore     int          `json:"metacriticScore,omitempty"`
+	ReviewScoreDesc     string       `json:"reviewScoreDesc,omitempty"`
+	ReviewPercent       int          `json:"reviewPercent,omitempty"`
+	TotalReviews        int          `json:"totalReviews,omitempty"`
 	// Torrent Source Metadata
-	SourceType        string       `json:"sourceType,omitempty"` // "ftp" or "torrent"
-	TorrentSource     string       `json:"torrentSource,omitempty"`
-	MagnetURI         string       `json:"magnetUri,omitempty"`
-	UploadDate        string       `json:"uploadDate,omitempty"`
+	SourceType    string `json:"sourceType,omitempty"` // "ftp" or "torrent"
+	TorrentSource string `json:"torrentSource,omitempty"`
+	MagnetURI     string `json:"magnetUri,omitempty"`
+	UploadDate    string `json:"uploadDate,omitempty"`
 	// Favorites Metadata
-	FavoriteStatus    string       `json:"favoriteStatus,omitempty"` // "planned", "playing", "completed"
+	FavoriteStatus string `json:"favoriteStatus,omitempty"` // "planned", "playing", "completed"
 	// Release variants / duplicates
-	Variants          []GameVariant `json:"variants,omitempty"`
+	Variants []GameVariant `json:"variants,omitempty"`
 }
 
 // FavoriteItem represents a game saved to user's favorites / backlog
@@ -561,7 +561,11 @@ func (d *Database) scanGame(scanner rowScanner) (GameEntity, error) {
 	_ = json.Unmarshal([]byte(pubsJSON), &g.Publishers)
 
 	if g.CapsuleImage == "" && g.SteamAppID > 0 {
-		g.CapsuleImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", g.SteamAppID)
+		if g.HeaderImage != "" {
+			g.CapsuleImage = g.HeaderImage
+		} else {
+			g.CapsuleImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", g.SteamAppID)
+		}
 	}
 	if g.HeaderImage == "" && g.SteamAppID > 0 {
 		g.HeaderImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", g.SteamAppID)
@@ -646,7 +650,11 @@ func (d *Database) scanGameLite(scanner rowScanner) (GameEntity, error) {
 	_ = json.Unmarshal([]byte(pubsJSON), &g.Publishers)
 
 	if g.CapsuleImage == "" && g.SteamAppID > 0 {
-		g.CapsuleImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", g.SteamAppID)
+		if g.HeaderImage != "" {
+			g.CapsuleImage = g.HeaderImage
+		} else {
+			g.CapsuleImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900.jpg", g.SteamAppID)
+		}
 	}
 	if g.HeaderImage == "" && g.SteamAppID > 0 {
 		g.HeaderImage = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", g.SteamAppID)
@@ -1189,7 +1197,6 @@ func (d *Database) DeleteTorrentGamesBySource(sourceID string) error {
 	return err
 }
 
-
 // GetUnsyncedGames returns list of games needing Steam metadata (skipping duplicate releases to optimize API requests)
 func (d *Database) GetUnsyncedGames() ([]GameEntity, error) {
 	d.mu.RLock()
@@ -1200,7 +1207,7 @@ func (d *Database) GetUnsyncedGames() ([]GameEntity, error) {
 		FROM games g
 		LEFT JOIN steam_metadata s ON g.steam_appid = s.appid
 		WHERE g.steam_synced = 0
-		   OR (g.steam_appid > 0 AND (s.appid IS NULL OR s.title = '' OR (s.short_description = '' AND s.detailed_description = '')))
+		   OR (g.steam_appid > 0 AND s.appid IS NULL)
 		ORDER BY g.id ASC
 	`
 	rows, err := d.db.Query(query)
@@ -1653,7 +1660,6 @@ func (d *Database) UpdateSteamReviewSummary(appID int, desc string, percent, tot
 	return err
 }
 
-
 // ==========================================
 // Downloads Storage
 // ==========================================
@@ -1945,5 +1951,3 @@ func (d *Database) MatchLibraryGame(title string) *GameEntity {
 
 	return nil
 }
-
-

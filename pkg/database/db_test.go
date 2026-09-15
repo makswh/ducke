@@ -184,4 +184,3 @@ func TestMatchLibraryGame(t *testing.T) {
 		t.Fatalf("expected Half-Life 3 to not match")
 	}
 }
-

@@ -213,13 +213,14 @@ type MetadataProgress struct {
 	CurrentGame string `json:"currentGame"`
 }
 
-// TokenBucket implements a thread-safe token bucket rate limiter for concurrent HTTP workers
+// TokenBucket implements a thread-safe token bucket rate limiter with global cooldown support
 type TokenBucket struct {
-	tokens     float64
-	capacity   float64
-	refillRate float64 // tokens per second
-	lastRefill time.Time
-	mu         sync.Mutex
+	tokens        float64
+	capacity      float64
+	refillRate    float64 // tokens per second
+	lastRefill    time.Time
+	cooldownUntil time.Time
+	mu            sync.Mutex
 }
 
 func NewTokenBucket(capacity float64, refillRate float64) *TokenBucket {
@@ -231,10 +232,37 @@ func NewTokenBucket(capacity float64, refillRate float64) *TokenBucket {
 	}
 }
 
+// TriggerCooldown suspends all Take() calls for the given duration (used on HTTP 429)
+func (tb *TokenBucket) TriggerCooldown(d time.Duration) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	until := time.Now().Add(d)
+	if until.After(tb.cooldownUntil) {
+		tb.cooldownUntil = until
+		tb.tokens = 0 // drain bucket so burst doesn't immediately fire after cooldown
+	}
+}
+
+// InCooldown reports whether the rate limiter is currently cooling down
+func (tb *TokenBucket) InCooldown() bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	return time.Now().Before(tb.cooldownUntil)
+}
+
 func (tb *TokenBucket) Take() {
 	for {
 		tb.mu.Lock()
 		now := time.Now()
+
+		// Wait out any active cooldown period
+		if now.Before(tb.cooldownUntil) {
+			waitDur := tb.cooldownUntil.Sub(now)
+			tb.mu.Unlock()
+			time.Sleep(waitDur)
+			continue
+		}
+
 		elapsed := now.Sub(tb.lastRefill).Seconds()
 		tb.tokens = math.Min(tb.capacity, tb.tokens+elapsed*tb.refillRate)
 		tb.lastRefill = now
@@ -288,8 +316,9 @@ func NewSteamService(db *database.Database) *SteamService {
 			Timeout:   8 * time.Second,
 			Transport: tr,
 		},
-		// Smooth token bucket: burst of 5, refilled at 14 tokens/sec (~71ms/req)
-		rateLimiter: NewTokenBucket(5.0, 14.0),
+		// Conservative token bucket: burst of 3, refilled at 2 tokens/sec (~500ms/req)
+		// Keeps us well under Steam's anti-abuse thresholds
+		rateLimiter: NewTokenBucket(3.0, 2.0),
 		sgdb:        NewSteamGridDBService(""),
 	}
 }
@@ -759,7 +788,12 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 				}
 				return cached, nil
 			}
-			// Cached entry lacks rich store metadata (incomplete stub). Fall through to fetch full details!
+			// Cached entry lacks rich store metadata (stub). Only retry network after 24h.
+			const stubTTL = 24 * 60 * 60 // seconds
+			if cached.CachedAt > 0 && time.Now().Unix()-cached.CachedAt < stubTTL {
+				return nil, fmt.Errorf("steam app details not found or unlisted for appid %d (cached stub, retry after 24h)", appID)
+			}
+			// Stub is stale — fall through to fetch full details
 		}
 	}
 
@@ -789,6 +823,9 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 			resp.Body.Close()
 			lastErr = fmt.Errorf("steam appdetails returned HTTP %d for cc=%s", resp.StatusCode, cc)
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
+				// Back off all workers globally: Steam has rate-limited our IP
+				s.rateLimiter.TriggerCooldown(90 * time.Second)
+				log.Printf("[Steam] HTTP %d received — triggering 90s global cooldown", resp.StatusCode)
 				break
 			}
 			continue
@@ -910,6 +947,14 @@ func (s *SteamService) FetchAppDetails(appID int) (*database.SteamMetadata, erro
 		}
 		if headerImg == "" {
 			headerImg = fmt.Sprintf("https://shared.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", appID)
+		}
+
+		if capsuleImg == "" {
+			if headerImg != "" {
+				capsuleImg = headerImg
+			} else if data.CapsuleImage != "" {
+				capsuleImg = data.CapsuleImage
+			}
 		}
 
 		// Fetch authentic Steam user reviews
@@ -1421,6 +1466,10 @@ func (s *SteamService) EnrichGame(gameID int64) (*database.GameEntity, error) {
 				}
 			}
 		}
+		if meta != nil && meta.CapsuleImage == "" && meta.HeaderImage != "" {
+			meta.CapsuleImage = meta.HeaderImage
+			_ = s.db.SaveSteamMetadata(*meta)
+		}
 		_ = s.db.SetGameAppID(gameID, targetAppID)
 	} else {
 		// Game not found on Steam (e.g. Need for Speed Carbon, non-Steam games).
@@ -1604,14 +1653,11 @@ func (s *SteamService) StartBackgroundEnrichment(onGameUpdated func(gameID int64
 							searchTerm = game.CleanTitle
 						}
 
-						// Check if game was already enriched by on-demand user action or another sibling in pool
+						// Check if game was already enriched by on-demand user action or a sibling worker
 						if cur, err := s.db.GetGameByID(game.ID); err == nil && cur.SteamSynced {
-							hasRich := cur.SteamTitle != "" && (cur.ShortDescription != "" || cur.DetailedDescription != "" || len(cur.Screenshots) > 0)
-							if hasRich {
-								c := int(current.Add(1))
-								s.updateProgress(MetadataProgress{IsSyncing: true, Current: c, Total: total, CurrentGame: searchTerm})
-								continue
-							}
+							c := int(current.Add(1))
+							s.updateProgress(MetadataProgress{IsSyncing: true, Current: c, Total: total, CurrentGame: searchTerm})
+							continue
 						}
 
 						s.updateProgress(MetadataProgress{IsSyncing: true, Current: int(current.Load()), Total: total, CurrentGame: searchTerm})
@@ -1627,6 +1673,13 @@ func (s *SteamService) StartBackgroundEnrichment(onGameUpdated func(gameID int64
 			wg.Wait()
 
 			s.updateProgress(MetadataProgress{IsSyncing: false, Current: total, Total: total, CurrentGame: ""})
+
+			// Pause between sync batches to avoid hammering Steam API immediately on next iteration
+			select {
+			case <-s.workerCtx.Done():
+				return
+			case <-time.After(3 * time.Second):
+			}
 		}
 	}()
 }
@@ -1784,4 +1837,3 @@ func (s *SteamService) GetSteamGridLogo(title string) (string, error) {
 	}
 	return assets.LogoURL, nil
 }
-

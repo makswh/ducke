@@ -55,7 +55,7 @@ func isJunkWord(w string) bool {
 	}
 	return false
 }
-	
+
 var (
 	// Regex for letter-digit boundaries
 	reDigitLetter = regexp.MustCompile(`(\d)([a-zA-Z])`)

@@ -69,7 +69,7 @@
   let customDownloadPath = $state<string>('');
   let pageDetails = $state<GamePageDetails | null>(null);
   let isLoadingDetails = $state<boolean>(false);
-  let activeTab = $state<'description' | 'requirements' | 'specs'>('description');
+  let activeTab = $state<'description' | 'info' | 'requirements' | 'specs'>('description');
   let activeMediaIndex = $state<number>(0);
   let imageLoadFailed = $state<Record<string, boolean>>({});
   let dynamicAccentColor = $state<string>(STEAM_DEFAULT_ACCENT);
@@ -118,6 +118,28 @@
     const vg = pageDetails?.game || game;
     if (!vg?.variants || vg.variants.length === 0) return null;
     return vg.variants.find((v) => v.id === selectedVariantId) || vg.variants[0];
+  });
+
+  let downloadSourceInfo = $derived.by(() => {
+    const vg = pageDetails?.game || game;
+    const v = activeVariant || vg;
+    if (!v) return null;
+    const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
+    const srcName = (v.torrentSource || '').trim();
+    if (isTorrent) {
+      return {
+        type: 'torrent',
+        name: srcName ? `Торрент (${srcName})` : 'Торрент',
+        shortName: srcName || 'Торрент',
+        badgeClass: 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+      };
+    }
+    return {
+      type: 'ftp',
+      name: 'FTP-сервер',
+      shortName: 'FTP',
+      badgeClass: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+    };
   });
 
   $effect(() => {
@@ -810,7 +832,8 @@
         await app.UpdateSteamAppID(game.id, appId);
       }
       closeSteamModal();
-      loadGameDetails(game.id);
+      switchSequence++;
+      fetchGamePageDetails(game.id, switchSequence);
     } catch (err) {
       console.error('Failed to link steam AppID:', err);
     } finally {
@@ -838,7 +861,8 @@
         await app.UpdateSteamAppID(game.id, 0);
       }
       isSteamModalOpen = false;
-      loadGameDetails(game.id);
+      switchSequence++;
+      fetchGamePageDetails(game.id, switchSequence);
     } catch (err) {
       console.error('Failed to unlink metadata:', err);
     } finally {
@@ -861,13 +885,27 @@
     }
   }
 
-  const subTabs: ('description' | 'requirements' | 'specs')[] = ['description', 'requirements', 'specs'];
+  let availableSubTabs = $derived.by<('description' | 'info' | 'requirements' | 'specs')[]>(() => {
+    const g = pageDetails?.game || game;
+    const tabs: ('description' | 'info' | 'requirements' | 'specs')[] = ['description', 'info'];
+    if (g?.pcRequirements) {
+      tabs.push('requirements');
+    }
+    tabs.push('specs');
+    return tabs;
+  });
+
   function cycleSubTab(direction: 'PREV' | 'NEXT') {
-    const idx = subTabs.indexOf(activeTab);
+    const tabs = availableSubTabs;
+    const idx = tabs.indexOf(activeTab);
+    if (idx === -1) {
+      activeTab = tabs[0];
+      return;
+    }
     if (direction === 'NEXT') {
-      activeTab = subTabs[(idx + 1) % subTabs.length];
+      activeTab = tabs[(idx + 1) % tabs.length];
     } else {
-      activeTab = subTabs[(idx - 1 + subTabs.length) % subTabs.length];
+      activeTab = tabs[(idx - 1 + tabs.length) % tabs.length];
     }
   }
 
@@ -1023,15 +1061,6 @@
               <div class="sk-line h-3.5 w-1/4"></div>
             </div>
 
-            <!-- Chips row -->
-            <div class="flex flex-wrap gap-2 pt-1">
-              <div class="sk-line h-5 w-14 rounded-md"></div>
-              <div class="sk-line h-5 w-20 rounded-md"></div>
-              <div class="sk-line h-5 w-16 rounded-md"></div>
-              <div class="sk-line h-5 w-24 rounded-md"></div>
-              <div class="sk-line h-5 w-14 rounded-md"></div>
-            </div>
-
             <!-- Synopsis -->
             <div class="space-y-2 pt-1">
               <div class="sk-line h-3.5 w-full max-w-xl"></div>
@@ -1113,7 +1142,7 @@
         {#if hasCover}
           <div class="{isCoverLandscape ? 'md:col-span-5 lg:col-span-5' : 'md:col-span-4 lg:col-span-3'} flex justify-center md:justify-start">
             <div
-              class="relative rounded-2xl overflow-hidden bg-[#0d1017] group w-full {isCoverLandscape ? '' : 'max-w-[280px]'} transition-all duration-300 flex items-center justify-center border border-white/10"
+              class="relative rounded-2xl overflow-hidden bg-[#07080a] group w-full {isCoverLandscape ? '' : 'max-w-[280px]'} transition-all duration-300 flex items-center justify-center border border-white/[0.08]"
               style={coverAspectRatio ? `aspect-ratio: ${coverAspectRatio};` : (isCoverLandscape ? 'aspect-ratio: 16/9;' : 'aspect-ratio: 2/3;')}
             >
               <img
@@ -1194,97 +1223,10 @@
             {/if}
           </div>
 
-          <!-- Minimalist Metadata Chips (Uniform neutral slate, ascetic styling) -->
-          <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
-            {#if isEnrichingCurrentGame}
-              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--game-accent)]/10 border border-[var(--game-accent)]/20 text-[var(--game-accent)] font-mono font-medium animate-pulse">
-                <RefreshCw class="w-3 h-3 animate-spin flex-shrink-0" />
-                <span>Очистка названия и поиск данных об игре...</span>
-              </span>
-            {/if}
-
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06] text-[#9ca3af]">
-              <Gamepad2 class="w-3 h-3 text-[#9ca3af]" />
-              <span class="font-medium">PC</span>
-            </span>
-
-            {#if g.releaseDate}
-              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06] text-[#9ca3af]">
-                <Calendar class="w-3 h-3 text-[#9ca3af]" />
-                <span>{g.releaseDate}</span>
-              </span>
-            {/if}
-
-            {#if g.developers && g.developers.length > 0}
-              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06] text-[#9ca3af]">
-                <Building2 class="w-3 h-3 text-[#9ca3af]" />
-                <span class="truncate max-w-[200px]">{g.developers.join(', ')}</span>
-              </span>
-            {/if}
-
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06] text-[#9ca3af]">
-              {#if g.controllerSupport === 'full'}
-                <Gamepad2 class="w-3 h-3 text-[#9ca3af]" />
-                <span>Геймпад</span>
-              {:else}
-                <Monitor class="w-3 h-3 text-[#9ca3af]" />
-                <span>Клавиатура</span>
-              {/if}
-            </span>
-
-            <!-- AppID Matcher trigger button -->
-            <button
-              data-nav-item
-              class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-[#9ca3af] hover:text-white transition-colors cursor-pointer"
-              onclick={() => openSteamModal(g)}
-              title="Найти в Steam / Изменить метаданные"
-            >
-              <span class="font-mono">{g.steamAppId > 0 ? `AppID: ${g.steamAppId}` : (g.steamAppId < 0 ? `SGDB: ${-g.steamAppId}` : '—')}</span>
-              <Edit3 class="w-2.5 h-2.5 text-[#9ca3af] ml-0.5" />
-            </button>
-          </div>
-
-          <!-- Dedicated Genres List -->
-          {#if g.genres && g.genres.length > 0}
-            <div class="flex items-center gap-2 flex-wrap pt-0.5">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5 mr-0.5 select-none">
-                <Tag class="w-3.5 h-3.5 text-[#8e95a2]" />
-                Жанры:
-              </span>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                {#each g.genres as genre}
-                  <button
-                    type="button"
-                    class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-xs font-medium text-[#d1d5db] hover:text-white transition-colors cursor-pointer"
-                    onclick={() => onSelectGenre(genre)}
-                    title="Фильтровать по жанру {genre}"
-                  >
-                    <span>{genre}</span>
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
-
-          <!-- Popular Tags List -->
-          {#if g.tags && g.tags.length > 0}
-            <div class="flex items-center gap-2 flex-wrap pt-0.5">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5 mr-0.5 select-none">
-                <Tags class="w-3.5 h-3.5 text-[#8e95a2]" />
-                Метки:
-              </span>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                {#each g.tags as tag}
-                  <button
-                    type="button"
-                    class="inline-flex items-center px-2 py-0.5 rounded-md bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 text-[11px] font-normal text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
-                    onclick={() => onSelectTag(tag)}
-                    title="Искать игры с меткой {tag}"
-                  >
-                    <span>{tag}</span>
-                  </button>
-                {/each}
-              </div>
+          {#if isEnrichingCurrentGame}
+            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--game-accent)]/10 border border-[var(--game-accent)]/20 text-[var(--game-accent)] font-mono text-[11px] font-medium animate-pulse w-fit">
+              <RefreshCw class="w-3 h-3 animate-spin flex-shrink-0" />
+              <span>Очистка названия и поиск данных об игре...</span>
             </div>
           {/if}
 
@@ -1445,7 +1387,7 @@
             {:else if isDownloading}
               <!-- ACTIVE DOWNLOADING / QUEUED STATE -->
               {@const prog = pageDetails?.downloadProgress}
-              <div class="space-y-3 max-w-md bg-[#11141c] p-4 rounded-2xl border border-white/10">
+              <div class="space-y-3 max-w-md bg-[#07080a] p-4 rounded-xl border border-white/[0.06]">
                 <div class="flex items-center justify-between text-xs font-bold text-white">
                   <div class="flex items-center gap-2">
                     <Download class="w-4 h-4 text-[var(--game-accent)] animate-bounce" />
@@ -1544,7 +1486,7 @@
                               <div class="min-w-0 flex-1 pointer-events-none">
                                 <div class="truncate text-white text-xs">{variant.rawName}</div>
                                 <div class="text-[10px] text-[#6b7280] font-mono">
-                                  {variant.sourceType === 'torrent' ? 'Торрент' : 'FTP'}
+                                  Источник: {variant.sourceType === 'torrent' ? (variant.torrentSource ? `Торрент (${variant.torrentSource})` : 'Торрент') : 'FTP-сервер'}
                                 </div>
                               </div>
                               <div class="flex items-center gap-2 flex-shrink-0 font-mono text-[11px] pointer-events-none {isSelected ? 'text-[var(--game-accent)] font-bold' : 'text-[#6b7280]'}">
@@ -1559,6 +1501,19 @@
                       {/if}
                     {/if}
                   </div>
+
+                  <!-- Download Source Chip -->
+                  {#if downloadSourceInfo}
+                    <div
+                      class="inline-flex items-center gap-2 text-xs text-[#8e95a2] bg-white/[0.04] border border-white/[0.06] px-3.5 py-2.5 rounded-xl"
+                      title="Источник, с которого будет производиться скачивание"
+                    >
+                      <span class="text-[#6b7280]">Источник:</span>
+                      <span class="font-bold {downloadSourceInfo.type === 'torrent' ? 'text-sky-400' : 'text-emerald-400'}">
+                        {downloadSourceInfo.name}
+                      </span>
+                    </div>
+                  {/if}
 
                   <!-- Folder Destination Chip (Clickable to browse) -->
                   <button
@@ -1579,15 +1534,21 @@
 
                 <!-- Release Subtitle (always shown when rawName exists) -->
                 {#if (activeVariant?.rawName || g.rawName)}
-                  <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b] pt-0.5">
+                  <div class="flex flex-wrap items-center gap-2 text-[11px] font-mono text-[#64748b] pt-0.5">
                     <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
                     <span class="text-[#64748b] flex-shrink-0">{g.variants && g.variants.length > 1 ? 'Выбран релиз:' : 'Оригинальный релиз:'}</span>
                     <span
-                      class="text-[#cbd5e1] font-medium truncate max-w-2xl select-all"
+                      class="text-[#cbd5e1] font-medium truncate max-w-xl select-all"
                       title={activeVariant?.rawName || g.rawName}
                     >
                       {activeVariant?.rawName || g.rawName}
                     </span>
+                    {#if downloadSourceInfo}
+                      <span class="text-white/20">•</span>
+                      <span class="px-1.5 py-0.5 rounded border text-[10px] font-bold {downloadSourceInfo.badgeClass}">
+                        {downloadSourceInfo.name}
+                      </span>
+                    {/if}
                     {#if g.variants && g.variants.length > 1}
                       <button
                         type="button"
@@ -1742,68 +1703,206 @@
         </div>
       {/snippet}
 
+      {#snippet genresAndTagsCard()}
+        {@const hasGenres = g.genres && g.genres.length > 0}
+        {@const hasTags = g.tags && g.tags.length > 0}
+        {#if hasGenres || hasTags}
+          <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-4 text-xs">
+            {#if hasGenres}
+              <div class="space-y-2">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5">
+                  <Tag class="w-3.5 h-3.5 text-[#8e95a2]" />
+                  <span>Жанры</span>
+                </div>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  {#each g.genres as genre}
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.06] hover:border-white/15 text-xs font-medium text-[#cbd5e1] hover:text-white transition-colors cursor-pointer"
+                      onclick={() => onSelectGenre(genre)}
+                      title="Фильтровать по жанру {genre}"
+                    >
+                      <span>{genre}</span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            {#if hasGenres && hasTags}
+              <div class="h-px bg-white/[0.04]"></div>
+            {/if}
+
+            {#if hasTags}
+              <div class="space-y-2">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5">
+                  <Tags class="w-3.5 h-3.5 text-[#8e95a2]" />
+                  <span>Популярные метки</span>
+                </div>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  {#each g.tags as tag}
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="inline-flex items-center px-2 py-0.5 rounded-md bg-white/[0.02] hover:bg-white/[0.06] active:bg-white/[0.1] border border-white/[0.04] hover:border-white/10 text-[11px] font-normal text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
+                      onclick={() => onSelectTag(tag)}
+                      title="Искать игры с меткой {tag}"
+                    >
+                      <span>{tag}</span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      {/snippet}
+
+      {#snippet gameInfoCard()}
+        <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+          <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
+            <Monitor class="w-3.5 h-3.5 text-[#8e95a2]" />
+            <span>Сведения об игре</span>
+          </h4>
+          <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
+            <div class="flex items-center justify-between py-2">
+              <span class="text-[#8e95a2]">Платформа</span>
+              <span class="text-white font-medium flex items-center gap-1.5">
+                <Gamepad2 class="w-3.5 h-3.5 text-[#8e95a2]" />
+                <span>PC (Windows)</span>
+              </span>
+            </div>
+
+            {#if g.releaseDate}
+              <div class="flex items-center justify-between py-2">
+                <span class="text-[#8e95a2]">Дата выхода</span>
+                <span class="text-white font-medium flex items-center gap-1.5">
+                  <Calendar class="w-3.5 h-3.5 text-[#8e95a2]" />
+                  <span>{g.releaseDate}</span>
+                </span>
+              </div>
+            {/if}
+
+            {#if g.developers && g.developers.length > 0}
+              <div class="flex items-center justify-between py-2 gap-3">
+                <span class="text-[#8e95a2] flex-shrink-0">Разработчик</span>
+                <span class="text-white font-medium truncate max-w-[220px] text-right" title={g.developers.join(', ')}>
+                  {g.developers.join(', ')}
+                </span>
+              </div>
+            {/if}
+
+            {#if g.publishers && g.publishers.length > 0}
+              <div class="flex items-center justify-between py-2 gap-3">
+                <span class="text-[#8e95a2] flex-shrink-0">Издатель</span>
+                <span class="text-white font-medium truncate max-w-[220px] text-right" title={g.publishers.join(', ')}>
+                  {g.publishers.join(', ')}
+                </span>
+              </div>
+            {/if}
+
+            {#if downloadSourceInfo}
+              <div class="flex items-center justify-between py-2">
+                <span class="text-[#8e95a2]">Источник скачивания</span>
+                <span class="font-medium {downloadSourceInfo.type === 'torrent' ? 'text-sky-400' : 'text-emerald-400'}">
+                  {downloadSourceInfo.name}
+                </span>
+              </div>
+            {/if}
+
+            <div class="flex items-center justify-between py-2">
+              <span class="text-[#8e95a2]">Управление</span>
+              <span class="text-white font-medium flex items-center gap-1.5">
+                {#if g.controllerSupport === 'full'}
+                  <Gamepad2 class="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Геймпад (Полная)</span>
+                {:else}
+                  <Monitor class="w-3.5 h-3.5 text-[#8e95a2]" />
+                  <span>Клавиатура и мышь</span>
+                {/if}
+              </span>
+            </div>
+
+            <div class="flex items-center justify-between py-2">
+              <span class="text-[#8e95a2]">Метаданные Steam</span>
+              <button
+                data-nav-item
+                type="button"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 text-[#cbd5e1] hover:text-white transition-colors cursor-pointer text-xs"
+                onclick={() => openSteamModal(g)}
+                title="Найти в Steam / Изменить метаданные"
+              >
+                <span class="font-mono">{g.steamAppId > 0 ? `AppID: ${g.steamAppId}` : (g.steamAppId < 0 ? `SGDB: ${-g.steamAppId}` : 'Привязать')}</span>
+                <Edit3 class="w-3 h-3 text-[#8e95a2]" />
+              </button>
+            </div>
+          </div>
+        </div>
+      {/snippet}
+
       {#snippet requirementsCard()}
-        <div class="p-6 rounded-2xl bg-[#11141a] border border-white/[0.06] space-y-3">
-          <h4 class="font-bold uppercase text-white flex items-center gap-2 text-xs">
-            <Cpu class="w-4 h-4 text-[var(--game-accent)]" />
+        <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3.5 text-xs">
+          <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
+            <Cpu class="w-3.5 h-3.5 text-[#8e95a2]" />
             <span>Системные требования</span>
           </h4>
-          <div class="steam-html-content text-xs text-[#9ca3af]">
+          <div class="steam-html-content text-xs text-[#9ca3af] leading-relaxed">
             {@html g.pcRequirements}
           </div>
         </div>
       {/snippet}
 
       {#snippet specsCard()}
-        <div class="space-y-4">
-          <div class="p-6 rounded-2xl bg-[#11141a] border border-white/[0.06] space-y-3 text-xs">
-            <h4 class="font-bold uppercase text-white flex items-center gap-2">
-              <Server class="w-4 h-4 text-[var(--game-accent)]" />
+        <div class="space-y-5">
+          <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+            <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
+              <Server class="w-3.5 h-3.5 text-[#8e95a2]" />
               <span>Хранилище репозитория</span>
             </h4>
-            <div class="divide-y divide-white/[0.04] space-y-2 text-[#9ca3af]">
+            <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
               {#if (activeVariant?.rawName || g.rawName)}
-                <div class="flex items-center justify-between pt-2 gap-3">
-                  <span class="flex-shrink-0">Оригинальный релиз</span>
+                <div class="flex items-center justify-between py-2 gap-3">
+                  <span class="text-[#8e95a2] flex-shrink-0">Оригинальный релиз</span>
                   <span class="font-mono text-white truncate max-w-[240px] select-all text-right" title={activeVariant?.rawName || g.rawName}>
                     {activeVariant?.rawName || g.rawName}
                   </span>
                 </div>
               {/if}
-              <div class="flex items-center justify-between pt-2">
-                <span>Путь на сервере</span>
-                <span class="font-mono text-white truncate max-w-[240px]" title={g.remotePath}>{g.remotePath}</span>
+              <div class="flex items-center justify-between py-2 gap-3">
+                <span class="text-[#8e95a2] flex-shrink-0">Путь на сервере</span>
+                <span class="font-mono text-white truncate max-w-[240px] select-all text-right" title={g.remotePath}>{g.remotePath}</span>
               </div>
-              <div class="flex items-center justify-between pt-2">
-                <span>Общий размер данных</span>
-                <span class="font-bold text-white">{g.sizeDisplay || '—'}</span>
+              <div class="flex items-center justify-between py-2">
+                <span class="text-[#8e95a2]">Общий размер данных</span>
+                <span class="font-bold text-white font-mono">{g.sizeDisplay || '—'}</span>
               </div>
-              <div class="flex items-center justify-between pt-2">
-                <span>Формат релиза</span>
+              <div class="flex items-center justify-between py-2">
+                <span class="text-[#8e95a2]">Формат релиза</span>
                 <span class="text-white">{g.isDirectory ? 'Папка с файлами' : 'Архив'}</span>
               </div>
             </div>
           </div>
 
-          <div class="p-6 rounded-2xl bg-[#11141a] border border-white/[0.06] space-y-3 text-xs">
-            <h4 class="font-bold uppercase text-white flex items-center gap-2">
-              <Folder class="w-4 h-4 text-[var(--game-accent)]" />
+          <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+            <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
+              <Folder class="w-3.5 h-3.5 text-[#8e95a2]" />
               <span>Локальная конфигурация</span>
             </h4>
-            <div class="divide-y divide-white/[0.04] space-y-2 text-[#9ca3af]">
-              <div class="flex items-center justify-between pt-2">
-                <span>Директория сохранения</span>
-                <span class="font-mono text-white truncate max-w-[240px]">{customDownloadPath}</span>
+            <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
+              <div class="flex items-center justify-between py-2 gap-3">
+                <span class="text-[#8e95a2] flex-shrink-0">Директория сохранения</span>
+                <span class="font-mono text-white truncate max-w-[240px] text-right" title={customDownloadPath}>{customDownloadPath}</span>
               </div>
-              <div class="flex items-center justify-between pt-2">
-                <span>Статус установки</span>
+              <div class="flex items-center justify-between py-2">
+                <span class="text-[#8e95a2]">Статус установки</span>
                 <span class="font-semibold {pageDetails?.isInstalled ? 'text-emerald-400' : 'text-[#8e95a2]'}">
                   {pageDetails?.isInstalled ? 'Установлено' : 'Не установлено'}
                 </span>
               </div>
-              <div class="flex items-center justify-between pt-2">
-                <span>Поддержка контроллера</span>
-                <span class="font-semibold text-[var(--game-accent)]">{g.controllerSupport === 'full' ? 'Полная (XInput/DirectInput)' : 'Клавиатура / Мышь'}</span>
+              <div class="flex items-center justify-between py-2">
+                <span class="text-[#8e95a2]">Поддержка контроллера</span>
+                <span class="font-medium text-[#cbd5e1]">{g.controllerSupport === 'full' ? 'Полная (XInput/DirectInput)' : 'Клавиатура / Мышь'}</span>
               </div>
             </div>
           </div>
@@ -1815,7 +1914,7 @@
         
         {#if hasSteamMetadata}
           <!-- Navigation Tabs: Visible only on smaller screens (<xl) -->
-          <div class="xl:hidden w-full border-b border-white/[0.08] flex items-center gap-2 sm:gap-8 overflow-x-auto no-scrollbar">
+          <div class="xl:hidden w-full border-b border-white/[0.08] flex items-center gap-2 sm:gap-6 overflow-x-auto no-scrollbar">
             <button
               data-nav-item
               class="relative py-3.5 px-1 text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer flex-shrink-0 {activeTab === 'description' ? 'text-white' : 'text-[#8e95a2] hover:text-[#d1d5db]'}"
@@ -1823,6 +1922,20 @@
             >
               <span>Описание</span>
               {#if activeTab === 'description'}
+                <span
+                  class="absolute bottom-0 left-0 right-0 h-[2px] rounded-full transition-all duration-300"
+                  style="background-color: var(--game-accent);"
+                ></span>
+              {/if}
+            </button>
+
+            <button
+              data-nav-item
+              class="relative py-3.5 px-1 text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer flex-shrink-0 {activeTab === 'info' ? 'text-white' : 'text-[#8e95a2] hover:text-[#d1d5db]'}"
+              onclick={() => (activeTab = 'info')}
+            >
+              <span>Об игре</span>
+              {#if activeTab === 'info'}
                 <span
                   class="absolute bottom-0 left-0 right-0 h-[2px] rounded-full transition-all duration-300"
                   style="background-color: var(--game-accent);"
@@ -1862,9 +1975,14 @@
           </div>
 
           <!-- Small screens view (<xl): Tab-switched -->
-          <div class="xl:hidden space-y-6">
+          <div class="xl:hidden space-y-5">
             {#if activeTab === 'description'}
               {@render mediaAndDescription()}
+            {:else if activeTab === 'info'}
+              <div class="space-y-5">
+                {@render genresAndTagsCard()}
+                {@render gameInfoCard()}
+              </div>
             {:else if activeTab === 'requirements' && g.pcRequirements}
               {@render requirementsCard()}
             {:else if activeTab === 'specs'}
@@ -1877,7 +1995,9 @@
             <div class="xl:col-span-7 2xl:col-span-8 space-y-6 min-w-0">
               {@render mediaAndDescription()}
             </div>
-            <div class="xl:col-span-5 2xl:col-span-4 space-y-6 min-w-0">
+            <div class="xl:col-span-5 2xl:col-span-4 space-y-5 min-w-0">
+              {@render genresAndTagsCard()}
+              {@render gameInfoCard()}
               {#if g.pcRequirements}
                 {@render requirementsCard()}
               {/if}
@@ -1888,57 +2008,57 @@
         {:else}
           <!-- RAW / UNENRICHED RELEASES COMPACT VIEW -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="p-6 rounded-2xl bg-[#11141a] border border-white/[0.06] space-y-3 text-xs">
-              <h4 class="font-bold uppercase text-white flex items-center gap-2">
-                <Server class="w-4 h-4 text-[var(--game-accent)]" />
+            <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+              <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
+                <Server class="w-3.5 h-3.5 text-[#8e95a2]" />
                 <span>Сведения о релизе в репозитории</span>
               </h4>
-              <div class="divide-y divide-white/[0.04] space-y-2.5 text-[#9ca3af] pt-1">
-                <div class="flex items-center justify-between pt-2">
-                  <span>Имя объекта</span>
+              <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
+                <div class="flex items-center justify-between py-2">
+                  <span class="text-[#8e95a2]">Имя объекта</span>
                   <span class="font-semibold text-white truncate max-w-[220px]">{getDisplayTitle(g)}</span>
                 </div>
                 {#if (activeVariant?.rawName || g.rawName)}
-                  <div class="flex items-center justify-between pt-2 gap-3">
-                    <span class="flex-shrink-0">Оригинальный релиз</span>
+                  <div class="flex items-center justify-between py-2 gap-3">
+                    <span class="text-[#8e95a2] flex-shrink-0">Оригинальный релиз</span>
                     <span class="font-mono text-white truncate max-w-[220px] select-all text-right" title={activeVariant?.rawName || g.rawName}>
                       {activeVariant?.rawName || g.rawName}
                     </span>
                   </div>
                 {/if}
-                <div class="flex items-center justify-between pt-2">
-                  <span>Удаленный путь</span>
-                  <span class="font-mono text-white truncate max-w-[220px]" title={g.remotePath}>{g.remotePath}</span>
+                <div class="flex items-center justify-between py-2 gap-3">
+                  <span class="text-[#8e95a2] flex-shrink-0">Удаленный путь</span>
+                  <span class="font-mono text-white truncate max-w-[220px] select-all text-right" title={g.remotePath}>{g.remotePath}</span>
                 </div>
-                <div class="flex items-center justify-between pt-2">
-                  <span>Размер данных</span>
-                  <span class="font-bold text-white">{formatSizeDisplay(g) || '—'}</span>
+                <div class="flex items-center justify-between py-2">
+                  <span class="text-[#8e95a2]">Размер данных</span>
+                  <span class="font-bold text-white font-mono">{formatSizeDisplay(g) || '—'}</span>
                 </div>
-                <div class="flex items-center justify-between pt-2">
-                  <span>Тип содержимого</span>
-                  <span class="text-white">{g.isDirectory ? 'Папка с файлами' : 'Файл / Архив'}</span>
+                <div class="flex items-center justify-between py-2">
+                  <span class="text-[#8e95a2]">Тип содержимого</span>
+                  <span class="text-white">{g.isDirectory ? 'Папка с файлами' : 'Архив'}</span>
                 </div>
               </div>
             </div>
 
-            <div class="p-6 rounded-2xl bg-[#11141a] border border-white/[0.06] space-y-3 text-xs">
-              <h4 class="font-bold uppercase text-white flex items-center gap-2">
-                <Folder class="w-4 h-4 text-[var(--game-accent)]" />
+            <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+              <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
+                <Folder class="w-3.5 h-3.5 text-[#8e95a2]" />
                 <span>Параметры сохранения</span>
               </h4>
-              <div class="divide-y divide-white/[0.04] space-y-2.5 text-[#9ca3af] pt-1">
-                <div class="flex items-center justify-between pt-2">
-                  <span>Целевая папка</span>
-                  <span class="font-mono text-white truncate max-w-[220px]">{customDownloadPath}</span>
+              <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
+                <div class="flex items-center justify-between py-2 gap-3">
+                  <span class="text-[#8e95a2] flex-shrink-0">Целевая папка</span>
+                  <span class="font-mono text-white truncate max-w-[220px] text-right">{customDownloadPath}</span>
                 </div>
-                <div class="flex items-center justify-between pt-2">
-                  <span>Статус</span>
+                <div class="flex items-center justify-between py-2">
+                  <span class="text-[#8e95a2]">Статус</span>
                   <span class="font-semibold text-[var(--game-accent)]">
                     {pageDetails?.isInstalled ? 'Установлено' : 'Готово к загрузке'}
                   </span>
                 </div>
-                <div class="flex items-center justify-between pt-2">
-                  <span>Метаданные Steam</span>
+                <div class="flex items-center justify-between py-2">
+                  <span class="text-[#8e95a2]">Метаданные Steam</span>
                   <button
                     data-nav-item
                     class="text-xs text-[var(--game-accent)] hover:underline flex items-center gap-1 cursor-pointer font-medium"

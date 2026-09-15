@@ -22,6 +22,8 @@
   import type { GameEntity } from '../../types/game';
 
   let {
+    games = [] as any[],
+    torrentGames = [] as any[],
     activeDownloads = [] as any[],
     onSelectGame = (game: GameEntity) => {},
     onGoToCatalog = () => {}
@@ -34,6 +36,126 @@
   let isLoading = $state<boolean>(true);
   let isMounted = true;
   let unsubFavorites: any = null;
+
+  let brokenCovers = $state<Record<string, boolean>>({});
+
+  function sanitizeMediaUrl(raw: string | undefined | null): string {
+    if (!raw) return '';
+    let url = raw.trim().replace(/^http:\/\//i, 'https://');
+    url = url.replace(/video\.fastly\.steamstatic\.com/gi, 'video.akamai.steamstatic.com');
+    url = url.replace(/shared\.fastly\.steamstatic\.com/gi, 'shared.steamstatic.com');
+    url = url.replace(/cdn\.fastly\.steamstatic\.com/gi, 'cdn.akamai.steamstatic.com');
+    if (url.startsWith('//')) {
+      url = 'https:' + url;
+    }
+    return url;
+  }
+
+  // Resolves the best working cover image for a game, gracefully falling back if an asset returns 404
+  function getGameCover(item: any): string {
+    if (!item) return '';
+    const candidates = [
+      item.capsuleImage,
+      item.headerImage,
+      item.backgroundImage,
+      ...(Array.isArray(item.screenshots) && item.screenshots.length > 0 ? [item.screenshots[0]] : [])
+    ];
+    for (const raw of candidates) {
+      if (!raw || typeof raw !== 'string') continue;
+      const url = sanitizeMediaUrl(raw);
+      if (url && !brokenCovers[url]) {
+        return url;
+      }
+    }
+    return '';
+  }
+
+  // Fast single-pass catalog lookup for favorites enrichment
+  let catalogLookup = $derived.by(() => {
+    if (!Array.isArray(favorites) || favorites.length === 0) {
+      return { byId: new Map<number, any>(), byAppId: new Map<number, any>(), byTitle: new Map<string, any>() };
+    }
+
+    const idSet = new Set<number>();
+    const appIdSet = new Set<number>();
+    const titleSet = new Set<string>();
+
+    for (const item of favorites) {
+      if (!item) continue;
+      const g = item.game || (item.cleanTitle ? item : {});
+      const gId = Number(g.id || item.gameId || item.id || 0);
+      const sId = Number(g.steamAppId || item.steamAppId || 0);
+      const title = (g.cleanTitle || item.cleanTitle || g.rawName || g.steamTitle || '').toLowerCase().trim();
+      if (gId) idSet.add(gId);
+      if (sId) appIdSet.add(sId);
+      if (title) titleSet.add(title);
+    }
+
+    const byId = new Map<number, any>();
+    const byAppId = new Map<number, any>();
+    const byTitle = new Map<string, any>();
+
+    const scanCatalog = (list: any[]) => {
+      for (const g of list || []) {
+        if (!g) continue;
+        const gId = Number(g.id);
+        const sId = Number(g.steamAppId);
+        const t = (g.cleanTitle || '').toLowerCase().trim();
+        if (gId && idSet.has(gId) && !byId.has(gId)) byId.set(gId, g);
+        if (sId && appIdSet.has(sId) && !byAppId.has(sId)) byAppId.set(sId, g);
+        if (t && titleSet.has(t) && !byTitle.has(t)) byTitle.set(t, g);
+      }
+    };
+
+    scanCatalog(games);
+    scanCatalog(torrentGames);
+
+    return { byId, byAppId, byTitle };
+  });
+
+  function resolveFavoriteGame(f: any): GameEntity {
+    const g = f?.game || (f?.cleanTitle ? f : {});
+    const gameId = Number(g.id || f?.gameId || f?.id || 0);
+    const steamAppId = Number(g.steamAppId || f?.steamAppId || 0);
+    const cleanTitle = g.cleanTitle || f?.cleanTitle || g.rawName || g.steamTitle || '';
+
+    const { byId, byAppId, byTitle } = catalogLookup;
+    const match = (gameId ? byId.get(gameId) : null) ||
+                  (steamAppId ? byAppId.get(steamAppId) : null) ||
+                  (cleanTitle ? byTitle.get(cleanTitle.toLowerCase().trim()) : null);
+
+    const cap = sanitizeMediaUrl(g.capsuleImage || match?.capsuleImage || g.headerImage || match?.headerImage || g.backgroundImage || match?.backgroundImage || '');
+    const hdr = sanitizeMediaUrl(g.headerImage || match?.headerImage || g.capsuleImage || match?.capsuleImage || g.backgroundImage || match?.backgroundImage || '');
+    const bg = sanitizeMediaUrl(g.backgroundImage || match?.backgroundImage || g.headerImage || match?.headerImage || g.capsuleImage || match?.capsuleImage || '');
+
+    return {
+      ...(match || {}),
+      ...g,
+      id: gameId || match?.id || 0,
+      steamAppId: steamAppId || match?.steamAppId || 0,
+      cleanTitle: cleanTitle || match?.cleanTitle || 'Игра',
+      rawName: g.rawName || f?.rawName || match?.rawName || cleanTitle,
+      capsuleImage: cap,
+      headerImage: hdr,
+      backgroundImage: bg,
+      shortDescription: g.shortDescription || match?.shortDescription || '',
+      detailedDescription: g.detailedDescription || match?.detailedDescription || '',
+      genres: g.genres || match?.genres || '',
+      releaseDate: g.releaseDate || match?.releaseDate || '',
+      developer: g.developer || match?.developer || '',
+      publisher: g.publisher || match?.publisher || '',
+      reviewPercent: g.reviewPercent ?? match?.reviewPercent ?? 0,
+      reviewScore: g.reviewScore ?? match?.reviewScore ?? 0,
+      reviewCount: g.reviewCount ?? match?.reviewCount ?? 0,
+      sizeBytes: g.sizeBytes || match?.sizeBytes || 0,
+      sizeDisplay: g.sizeDisplay || match?.sizeDisplay || '',
+      movies: (g.movies && g.movies.length > 0) ? g.movies : (match?.movies || []),
+      screenshots: (g.screenshots && g.screenshots.length > 0) ? g.screenshots : (match?.screenshots || []),
+      sourceType: g.sourceType || match?.sourceType || 'favorite',
+      favoriteStatus: f?.status || g.favoriteStatus || 'planned',
+      isFavorite: true
+    };
+  }
 
   async function loadFavorites() {
     try {
@@ -87,9 +209,8 @@
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       list = list.filter((f) => {
-        const g = f.game;
-        if (!g) return false;
-        const title = (g.cleanTitle || g.displayTitle || g.folderName || '').toLowerCase();
+        const g = resolveFavoriteGame(f);
+        const title = (g.cleanTitle || g.rawName || '').toLowerCase();
         const steamTitle = (g.steamTitle || '').toLowerCase();
         return title.includes(q) || steamTitle.includes(q);
       });
@@ -275,9 +396,9 @@
       </div>
     {:else}
       <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6 w-full">
-        {#each filteredFavorites as item (item.gameId)}
-          {@const game = item.game}
-          {@const cover = game?.capsuleImage || game?.headerImage || game?.backgroundImage}
+        {#each filteredFavorites as item, idx (item?.gameId || item?.id || idx)}
+          {@const game = resolveFavoriteGame(item)}
+          {@const cover = getGameCover(game)}
           {@const isDownloading = (activeDownloads || []).some((d: any) => d && d.gameId === item.gameId && d.status === 'downloading')}
 
           <button
@@ -298,6 +419,9 @@
                   alt={getCleanTitle(game)}
                   referrerpolicy="no-referrer"
                   class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-103"
+                  onerror={() => {
+                    brokenCovers[cover] = true;
+                  }}
                 />
               {:else}
                 <div class="w-full h-full flex flex-col items-center justify-between p-4 text-center bg-gradient-to-b from-[#181d28] via-[#10141d] to-[#0a0c12]">

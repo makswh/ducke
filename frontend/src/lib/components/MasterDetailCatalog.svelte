@@ -25,11 +25,51 @@
     onSelectFolder = async (): Promise<string> => ''
   } = $props();
 
-  let selectedFilter = $state<string>('all');
-  let selectedGenre = $state<string>('all');
+  const SAVED_FILTER_KEY = 'ducke_catalog_selected_filter';
+  const SAVED_GENRE_KEY = 'ducke_catalog_selected_genre';
+  const SAVED_SORT_KEY = 'ducke_catalog_selected_sort';
+
+  function getStoredFilter(key: string, fallback: string): string {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const v = localStorage.getItem(key);
+        if (v) return v;
+      }
+    } catch {}
+    return fallback;
+  }
+
+  let selectedFilter = $state<string>(getStoredFilter(SAVED_FILTER_KEY, 'all'));
+  let selectedGenre = $state<string>(getStoredFilter(SAVED_GENRE_KEY, 'all'));
   let genreSearchQuery = $state<string>('');
   let isGenreMenuOpen = $state<boolean>(false);
-  let selectedSort = $state<'date_desc' | 'name' | 'size_desc' | 'size_asc' | 'rating_desc' | 'popular_desc'>('date_desc');
+  let selectedSort = $state<'date_desc' | 'name' | 'size_desc' | 'size_asc' | 'rating_desc' | 'popular_desc'>(
+    getStoredFilter(SAVED_SORT_KEY, 'date_desc') as any
+  );
+
+  $effect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SAVED_FILTER_KEY, selectedFilter);
+      }
+    } catch {}
+  });
+
+  $effect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SAVED_GENRE_KEY, selectedGenre);
+      }
+    } catch {}
+  });
+
+  $effect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SAVED_SORT_KEY, selectedSort);
+      }
+    } catch {}
+  });
   let selectedGameId = $state<number | null>(null);
   let imageLoadFailed = $state<Record<string, boolean>>({});
 

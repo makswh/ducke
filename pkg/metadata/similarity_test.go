@@ -99,5 +99,3 @@ func TestUserLogCases(t *testing.T) {
 		}
 	}
 }
-
-

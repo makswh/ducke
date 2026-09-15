@@ -265,4 +265,3 @@ func TestFetchAppTags(t *testing.T) {
 		t.Errorf("expected to find known tag in %v", tags)
 	}
 }
-

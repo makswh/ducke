@@ -62,8 +62,8 @@
   let deduplicatedList = $derived.by(() => {
     const list = deduplicateGames(games || []);
     return list.map((g) => {
-      const glist = (g.genres || g.steamGenres || []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
-      const title = (g.cleanTitle || g.displayTitle || g.folderName || '').toLowerCase();
+      const glist = (g.genres || []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
+      const title = (g.cleanTitle || g.rawName || '').toLowerCase();
       const steamTitle = (g.steamTitle || '').toLowerCase();
       const vList = (g.variants || []).map((v: any) => `${v.rawName || ''} ${v.torrentSource || ''}`.toLowerCase().trim()).filter(Boolean);
       const searchCorpus = `${title} ${steamTitle} ${glist.join(' ')} ${vList.join(' ')}`;
@@ -83,7 +83,7 @@
   let availableGenres = $derived.by(() => {
     const counts = new Map<string, number>();
     for (const g of deduplicatedList) {
-      const genresList = g.genres || g.steamGenres;
+      const genresList = g.genres;
       if (genresList && Array.isArray(genresList)) {
         for (const raw of genresList) {
           const genre = typeof raw === 'string' ? raw.trim() : '';
@@ -151,7 +151,7 @@
         return scoreB - scoreA;
       });
     } else if (selectedSort === 'name') {
-      result.sort((a, b) => (a.cleanTitle || a.displayTitle || a.folderName || '').localeCompare(b.cleanTitle || b.displayTitle || b.folderName || ''));
+      result.sort((a, b) => (a.cleanTitle || a.rawName || '').localeCompare(b.cleanTitle || b.rawName || ''));
     } else if (selectedSort === 'size_desc') {
       result.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0));
     } else {
@@ -357,7 +357,16 @@
       }
     }
 
-    // Strictly portrait: do NOT fall back to landscape banners; render clean Steam Deck card
+    // Graceful fallback to header image or background before giving up
+    if (game.headerImage && target.src !== game.headerImage) {
+      target.src = game.headerImage;
+      return;
+    }
+    if (game.backgroundImage && target.src !== game.backgroundImage) {
+      target.src = game.backgroundImage;
+      return;
+    }
+
     imageFailedMap[gameKey] = true;
   }
 </script>
@@ -522,7 +531,7 @@
         <button
           data-nav-item
           class="px-4 py-2 rounded-xl text-xs font-bold bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-          onclick={onCloseSearch}
+          onclick={() => onCloseSearch()}
         >
           Готово
         </button>
@@ -557,8 +566,8 @@
           style="transform: translateY({offsetY}px); will-change: transform; grid-template-columns: repeat({columnCount}, minmax(0, 1fr));"
           class="grid gap-6 w-full"
         >
-          {#each visibleGames as game, idx (game.id || game.folderName)}
-            {@const gameKey = game.id || game.folderName}
+          {#each visibleGames as game, idx (game.id || game.rawName || idx)}
+            {@const gameKey = game.id || game.rawName || idx}
             {@const cover = getVerticalCover(game)}
             {@const isDownloading = (activeDownloads || []).some((d) => d && d.gameId === game.id && d.status === 'downloading')}
             {@const isFailed = !!imageFailedMap[gameKey]}
@@ -577,7 +586,7 @@
                 {#if cover && !isFailed}
                   <img
                     src={cover}
-                    alt={game.cleanTitle || game.folderName}
+                    alt={game.cleanTitle || game.rawName}
                     decoding="async"
                     referrerpolicy="no-referrer"
                     class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-103"
@@ -592,10 +601,10 @@
 
                     <div class="my-auto flex flex-col items-center space-y-2">
                       <div class="w-12 h-12 rounded-2xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-base font-black text-white/80 shadow-inner">
-                        {getInitials(game.cleanTitle || game.folderName)}
+                        {getInitials(game.cleanTitle || game.rawName)}
                       </div>
                       <span class="text-xs font-bold text-[#e2e8f0] line-clamp-3 leading-snug px-1">
-                        {game.cleanTitle || game.folderName}
+                        {game.cleanTitle || game.rawName}
                       </span>
                     </div>
 
@@ -621,9 +630,9 @@
                 {/if}
 
                 <!-- Size badge bottom right -->
-                {#if game.sizeDisplay || game.sizeStr}
+                {#if game.sizeDisplay}
                   <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono text-white/90 border border-white/10 z-20">
-                    {game.sizeDisplay || game.sizeStr}
+                    {game.sizeDisplay}
                   </div>
                 {/if}
               </div>
@@ -631,12 +640,12 @@
               <!-- Title & Steam Rating -->
               <div class="p-3 bg-[#07080a] flex flex-col space-y-1">
                 <span class="text-xs font-bold text-white truncate group-hover:text-sky-400 transition-colors">
-                  {game.cleanTitle || game.displayTitle || game.folderName}
+                  {game.cleanTitle || game.rawName}
                 </span>
 
-                {#if (game.genres && game.genres.length > 0) || game.steamGenres}
+                {#if game.genres && game.genres.length > 0}
                   <span class="text-[10px] text-[#64748b] truncate">
-                    {(game.genres || game.steamGenres || []).slice(0, 2).join(' • ')}
+                    {game.genres.slice(0, 2).join(' • ')}
                   </span>
                 {/if}
               </div>

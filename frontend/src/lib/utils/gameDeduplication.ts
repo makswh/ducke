@@ -23,7 +23,7 @@ export function cleanCanonicalKey(raw: string | undefined | null): string {
   s = s.replace(/\b(v+[._\s]*\d+([._\s\-/]\d+)*[a-z]?|ver[._\s]*\d+|build\s*\d+|patch\s*\d+|update\s*\d*|hotfix)\b/gi, ' ');
 
   // Strip editions: complete edition, deluxe edition, repack, etc.
-  s = s.replace(/\b(deluxe(\s+edition)?|ultimate(\s+edition)?|goty(\s+edition)?|game\s+of\s+the\s+year(\s+edition)?|collector('s)?\s+edition|remastered|enhanced(\s+edition)?|gold\s+edition|director('s)?\s+cut|complete(\s+edition)?|definitive(\s+edition)?|special\s+edition|anniversary(\s+edition)?|repack|portable|multi\d*|selective\s+download|unpacked|rip|steamrip|bundle|bonus|digital|legacy)\b/gi, ' ');
+  s = s.replace(/\b(remake|deluxe(\s+edition)?|ultimate(\s+edition)?|goty(\s+edition)?|game\s+of\s+the\s+year(\s+edition)?|collector('s)?\s+edition|remastered|enhanced(\s+edition)?|gold\s+edition|director('s)?\s+cut|complete(\s+edition)?|definitive(\s+edition)?|special\s+edition|anniversary(\s+edition)?|repack|portable|multi\d*|selective\s+download|unpacked|rip|steamrip|bundle|bonus|digital|legacy)\b/gi, ' ');
 
   // Strip release groups & junk words
   const junkWords = new Set([
@@ -33,7 +33,7 @@ export function cleanCanonicalKey(raw: string | undefined | null): string {
     'native', 'portable', 'unpacked', 'лицензия', 'пиратка', 'сборка', 'папка', 'игры',
     'таблетка', 'вшита', 'русификатор', 'озвучка', 'текст', 'от', 'by', 'версия',
     'dlc', 'dlcs', 'fix', 'hotfix', 'pack', 'bundle', 'bonus', 'update', 'patch',
-    'v', 'vv', 'ver', 'legacy'
+    'v', 'vv', 'ver', 'legacy', 'remake'
   ]);
 
   // Replace punctuation with spaces

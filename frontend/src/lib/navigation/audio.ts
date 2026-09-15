@@ -24,6 +24,11 @@ class SoundEngine {
     this.playSelect();
   }
 
+  // Alias to playFocus for directional navigation
+  public playMove() {
+    this.playFocus();
+  }
+
   // Soft console blip on focus move
   public playFocus() {
     if (this.isMuted) return;

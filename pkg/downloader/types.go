@@ -141,4 +141,3 @@ func (t *DownloadTask) ToEvent() DownloadProgressEvent {
 		TorrentPeers:     t.TorrentPeers,
 	}
 }
-

@@ -15,7 +15,7 @@ var (
 	fixTagPattern     = regexp.MustCompile(`(?i)((\+\s*)?(windows|win)\s*\d*\s*fix|\bfix\b|\bhotfix\b)`)
 	editionTagPattern = regexp.MustCompile(`(?i)\b(deluxe(\s+edition)?|ultimate(\s+edition)?|goty(\s+edition)?|game\s+of\s+the\s+year(\s+edition)?|collector('s)?\s+edition|remastered|enhanced\s+edition|gold\s+edition|director('s)?\s+cut|complete\s+edition|definitive\s+edition|special\s+edition|anniversary(\s+edition)?|repack|portable|multi\d*|selective\s+download|unpacked|rip|steamrip|bundle|scooby\s+bundle|bonus|digital)\b`)
 	reDigLetter       = regexp.MustCompile(`(\d)([a-zA-Z])`)
-	reLetDigit       = regexp.MustCompile(`([a-zA-Z])(\d)`)
+	reLetDigit        = regexp.MustCompile(`([a-zA-Z])(\d)`)
 	possessiveRegex   = regexp.MustCompile(`(?i)['’]s\b`)
 )
 

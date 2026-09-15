@@ -204,7 +204,7 @@ func stripCJKIfLatinOrCyrillic(s string) string {
 			unicode.Is(unicode.Katakana, r) ||
 			unicode.Is(unicode.Hangul, r) ||
 			(r >= 0x3000 && r <= 0x303F) || // CJK symbols and punctuation (e.g. 『 』 〜)
-			(r >= 0xFF00 && r <= 0xFFEF) {  // Halfwidth and fullwidth forms (e.g. ！ ？)
+			(r >= 0xFF00 && r <= 0xFFEF) { // Halfwidth and fullwidth forms (e.g. ！ ？)
 			continue
 		}
 		sb.WriteRune(r)
@@ -353,4 +353,3 @@ func ParseFileSize(fileSizeStr string) int64 {
 	}
 	return 0
 }
-

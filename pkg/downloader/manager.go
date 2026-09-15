@@ -987,4 +987,3 @@ func (dm *DownloadManager) Shutdown() {
 		_ = dm.torrentEngine.Close()
 	}
 }
-

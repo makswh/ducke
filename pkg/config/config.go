@@ -15,7 +15,7 @@ import (
 
 // FileZillaXML represents the root structure of FileZilla3.xml export
 type FileZillaXML struct {
-	XMLName xml.Name         `xml:"FileZilla3"`
+	XMLName xml.Name          `xml:"FileZilla3"`
 	Servers []FileZillaServer `xml:"Servers>Server"`
 }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import BigPictureHeader from './BigPictureHeader.svelte';
+  import BigPictureHomeShelves from './BigPictureHomeShelves.svelte';
   import BigPictureLibrary from './BigPictureLibrary.svelte';
   import BigPictureGameDetail from './BigPictureGameDetail.svelte';
   import BigPictureFavorites from './BigPictureFavorites.svelte';
@@ -7,10 +8,10 @@
   import BigPictureSettings from './BigPictureSettings.svelte';
   import { sound } from '../../navigation/audio';
 
-  type TabType = 'catalog' | 'torrents' | 'favorites' | 'downloads' | 'settings';
+  type TabType = 'home' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings';
 
   let {
-    activeTab = $bindable<TabType>('catalog'),
+    activeTab = $bindable<TabType>('home'),
     games = [] as any[],
     torrentGames = [] as any[],
     hasFtpServers = false,
@@ -71,9 +72,8 @@
         e.preventDefault();
         return;
       }
-      const defaultTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings');
-      if (activeTab !== defaultTab && activeTab !== 'torrents' && activeTab !== 'favorites') {
-        activeTab = defaultTab;
+      if (activeTab !== 'home') {
+        activeTab = 'home';
         e.preventDefault();
         setTimeout(() => {
           gamepad.focusFirstInZone('grid');
@@ -83,9 +83,8 @@
     };
 
     const handleToggleMenu = () => {
-      const defaultTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings');
       if (activeTab === 'settings') {
-        activeTab = defaultTab;
+        activeTab = 'home';
       } else {
         selectedGame = null;
         isSearchOpen = false;
@@ -97,7 +96,9 @@
     };
 
     const handleToggleSearch = () => {
-      if ((!hasFtpServers || activeTab !== 'catalog') && activeTab !== 'torrents') {
+      if (activeTab === 'home') {
+        activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'catalog');
+      } else if ((!hasFtpServers || activeTab !== 'catalog') && activeTab !== 'torrents') {
         activeTab = hasFtpServers ? 'catalog' : 'torrents';
       }
       selectedGame = null;
@@ -120,10 +121,10 @@
   
   <!-- SteamOS Top Header -->
   <BigPictureHeader
-    {activeTab}
+    activeTab={activeTab as TabType}
     {hasFtpServers}
     {hasTorrentSources}
-    onTabChange={(t) => {
+    onTabChange={(t: TabType) => {
       activeTab = t;
       selectedGame = null;
     }}
@@ -142,7 +143,47 @@
 
   <!-- Main Stage -->
   <div class="flex-1 flex overflow-hidden min-h-0 relative">
-    {#if activeTab === 'catalog'}
+    {#if activeTab === 'home'}
+      <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
+        <BigPictureHomeShelves
+          {games}
+          {torrentGames}
+          {activeDownloads}
+          {hasFtpServers}
+          {hasTorrentSources}
+          {downloadHistory}
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onSelectGame={handleSelectGame}
+          {onStartDownload}
+          onGoToCatalog={() => {
+            activeTab = 'catalog';
+            selectedGame = null;
+          }}
+          onGoToTorrents={() => {
+            activeTab = 'torrents';
+            selectedGame = null;
+          }}
+          onGoToFavorites={() => {
+            activeTab = 'favorites';
+            selectedGame = null;
+          }}
+          onGoToDownloads={() => {
+            activeTab = 'downloads';
+            selectedGame = null;
+          }}
+        />
+      </div>
+      {#if selectedGame}
+        <BigPictureGameDetail
+          game={selectedGame}
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onBack={handleBackToLibrary}
+          {onStartDownload}
+          {onSelectFolder}
+          {activeDownloads}
+        />
+      {/if}
+    {:else if activeTab === 'catalog'}
       <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
         <BigPictureLibrary
           {games}
@@ -189,9 +230,12 @@
     {:else if activeTab === 'favorites'}
       <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
         <BigPictureFavorites
+          {games}
+          {torrentGames}
+          {activeDownloads}
           onSelectGame={handleSelectGame}
-          onExploreCatalog={() => {
-            activeTab = hasFtpServers ? 'catalog' : 'torrents';
+          onGoToCatalog={() => {
+            activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'home');
             selectedGame = null;
           }}
         />
@@ -221,7 +265,7 @@
         {onDeleteRecord}
         {onOpenFolder}
         onGoToCatalog={() => {
-          activeTab = hasFtpServers ? 'catalog' : 'torrents';
+          activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'home');
           selectedGame = null;
         }}
       />
@@ -252,7 +296,16 @@
         <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
         <span>Назад</span>
       </div>
-      {#if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
+      {#if activeTab === 'home'}
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
+          <span>Действие</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
+          <span>Избранное</span>
+        </div>
+      {:else if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
         <div class="flex items-center gap-1.5">
           <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
           <span>Поиск</span>

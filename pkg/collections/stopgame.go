@@ -30,13 +30,13 @@ var (
 	rePageLink      = regexp.MustCompile(`page=(\d+)`)
 
 	// Detail regexes
-	reDetailH1      = regexp.MustCompile(`(?s)<h1[^>]*>\s*([\s\S]*?)\s*<span class="_count_[^"]*">\s*\((\d+)\)\s*</span>\s*</h1>`)
-	reDetailDesc    = regexp.MustCompile(`(?s)<p class="_description_[^"]*">([\s\S]*?)</p>`)
-	reDetailUpdate  = regexp.MustCompile(`(?s)<span class="_last-update_[^"]*">([^<]+)</span>`)
-	reGameCard      = regexp.MustCompile(`(?s)<div data-key="(\d+)">\s*<a\s+class="_card_[^"]*"[^>]*href="(/game/[^"]+)"[^>]*title="([^"]+)"[^>]*>(.*?)</a>\s*</div>`)
-	reGameImg       = regexp.MustCompile(`<img class="_image_[^"]*"\s+src="([^"]+)"`)
-	reGameRating    = regexp.MustCompile(`<button type="button" class="_rating_[^"]*"[^>]*>([^<]+)</button>`)
-	reHTMLTags      = regexp.MustCompile(`<[^>]+>`)
+	reDetailH1     = regexp.MustCompile(`(?s)<h1[^>]*>\s*([\s\S]*?)\s*<span class="_count_[^"]*">\s*\((\d+)\)\s*</span>\s*</h1>`)
+	reDetailDesc   = regexp.MustCompile(`(?s)<p class="_description_[^"]*">([\s\S]*?)</p>`)
+	reDetailUpdate = regexp.MustCompile(`(?s)<span class="_last-update_[^"]*">([^<]+)</span>`)
+	reGameCard     = regexp.MustCompile(`(?s)<div data-key="(\d+)">\s*<a\s+class="_card_[^"]*"[^>]*href="(/game/[^"]+)"[^>]*title="([^"]+)"[^>]*>(.*?)</a>\s*</div>`)
+	reGameImg      = regexp.MustCompile(`<img class="_image_[^"]*"\s+src="([^"]+)"`)
+	reGameRating   = regexp.MustCompile(`<button type="button" class="_rating_[^"]*"[^>]*>([^<]+)</button>`)
+	reHTMLTags     = regexp.MustCompile(`<[^>]+>`)
 )
 
 type StopGameService struct {

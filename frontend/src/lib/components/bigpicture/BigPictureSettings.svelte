@@ -271,18 +271,20 @@
     }
   }
 
-  onMount(async () => {
-    try {
-      if (typeof (AppAPI as any)?.GetAppInfo === 'function') {
-        const info = await (AppAPI as any).GetAppInfo();
-        if (info) appInfo = info;
-      } else if (typeof (window as any)?.go?.main?.App?.GetAppInfo === 'function') {
-        const info = await (window as any).go.main.App.GetAppInfo();
-        if (info) appInfo = info;
+  onMount(() => {
+    (async () => {
+      try {
+        if (typeof (AppAPI as any)?.GetAppInfo === 'function') {
+          const info = await (AppAPI as any).GetAppInfo();
+          if (info) appInfo = info;
+        } else if (typeof (window as any)?.go?.main?.App?.GetAppInfo === 'function') {
+          const info = await (window as any).go.main.App.GetAppInfo();
+          if (info) appInfo = info;
+        }
+      } catch (e) {
+        console.warn('[BigPictureSettings] Failed to get app info:', e);
       }
-    } catch (e) {
-      console.warn('[BigPictureSettings] Failed to get app info:', e);
-    }
+    })();
 
     loadStorageDrives();
 
@@ -963,7 +965,7 @@
       <TorrentSourcesManager
         isBigPicture={true}
         torrentSources={localSettings.torrentSources || []}
-        onSourcesChanged={(sources) => {
+        onSourcesChanged={(sources: any) => {
           localSettings.torrentSources = sources;
         }}
       />

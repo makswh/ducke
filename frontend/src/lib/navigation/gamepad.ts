@@ -192,6 +192,7 @@ export class GamepadEngine {
         this.heldDirection = currentDir;
         this.heldStartTime = now;
         this.lastStepTime = now;
+        window.dispatchEvent(new CustomEvent('app:gamepad-dir', { detail: { dir: currentDir } }));
         this.navigateSpatial(currentDir);
       } else {
         // Sustained hold: wait initial repeat delay, then tick at repeat interval

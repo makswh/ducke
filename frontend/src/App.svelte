@@ -42,10 +42,11 @@
 
   // Application State (Svelte 5 Runes)
   let displayMode = $state<'desktop' | 'bigpicture'>('desktop');
-  let activeTab = $state<'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('catalog');
+  let activeTab = $state<'home' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('catalog');
 
   function switchToBigPicture() {
     displayMode = 'bigpicture';
+    activeTab = 'home';
     try {
       WindowFullscreen();
     } catch (e) {
@@ -55,6 +56,9 @@
 
   function switchToDesktop() {
     displayMode = 'desktop';
+    if (activeTab === 'home') {
+      activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings');
+    }
     try {
       WindowUnfullscreen();
     } catch (e) {
@@ -610,10 +614,16 @@
 
     // Setup Gamepad Navigation
     gamepad.onTabChange = (dir) => {
-      const tabs: ('catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings')[] = [];
+      const tabs: ('home' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings')[] = [];
+      if (displayMode === 'bigpicture') {
+        tabs.push('home');
+      }
       if (hasFtpServers) tabs.push('catalog');
       if (hasTorrentSources) tabs.push('torrents');
-      tabs.push('collections', 'favorites', 'downloads', 'settings');
+      if (displayMode !== 'bigpicture') {
+        tabs.push('collections');
+      }
+      tabs.push('favorites', 'downloads', 'settings');
       const curIdx = tabs.indexOf(activeTab);
       if (curIdx === -1) {
         activeTab = tabs[0] || 'settings';
@@ -637,7 +647,7 @@
     };
 
     gamepad.onBack = () => {
-      const defaultTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings');
+      const defaultTab = displayMode === 'bigpicture' ? 'home' : (hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings'));
       if (activeTab !== defaultTab) {
         activeTab = defaultTab;
         setTimeout(() => {

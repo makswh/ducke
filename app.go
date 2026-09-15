@@ -1123,9 +1123,9 @@ func (a *App) ImportFileZillaFile() ([]config.ServerConfig, error) {
 }
 
 type ConnectionTestResult struct {
-	Success       bool   `json:"success"`
-	ProtocolUsed  string `json:"protocolUsed"`
-	ErrorMessage  string `json:"errorMessage"`
+	Success      bool   `json:"success"`
+	ProtocolUsed string `json:"protocolUsed"`
+	ErrorMessage string `json:"errorMessage"`
 }
 
 func (a *App) TestConnection(cfg config.ServerConfig) ConnectionTestResult {
@@ -1525,6 +1525,3 @@ func (a *App) GetStopGameCompilationDetail(id string, forceRefresh bool) (*colle
 	}
 	return a.collectionsService.FetchCompilationDetail(id, forceRefresh)
 }
-
-
-
