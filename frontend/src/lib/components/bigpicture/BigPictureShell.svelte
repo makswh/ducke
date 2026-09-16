@@ -48,6 +48,13 @@
   let selectedGame = $state<any | null>(null);
   let isSearchOpen = $state<boolean>(false);
   let searchQuery = $state<string>('');
+  let isTheaterActive = $state<boolean>(false);
+
+  $effect(() => {
+    if (!selectedGame && isTheaterActive) {
+      isTheaterActive = false;
+    }
+  });
 
   function handleSelectGame(game: any) {
     selectedGame = game;
@@ -55,13 +62,14 @@
 
   function handleBackToLibrary() {
     selectedGame = null;
-    setTimeout(() => {
-      gamepad.focusFirstInZone('grid');
-    }, 60);
+    isTheaterActive = false;
+    gamepad.retryFocusZone('grid');
   }
 
   onMount(() => {
     const handleGoBack = (e: CustomEvent) => {
+      if (e.defaultPrevented) return;
+
       if (isSearchOpen) {
         isSearchOpen = false;
         e.preventDefault();
@@ -75,10 +83,21 @@
       if (activeTab !== 'home') {
         activeTab = 'home';
         e.preventDefault();
-        setTimeout(() => {
-          gamepad.focusFirstInZone('grid');
-        }, 60);
+        gamepad.retryFocusZone('grid');
         return;
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+      if (isInput) return;
+
+      if (e.key === 'Escape' || e.key === 'Backspace') {
+        const ev = new CustomEvent('app:go-back', { cancelable: true });
+        window.dispatchEvent(ev);
+        e.preventDefault();
       }
     };
 
@@ -90,9 +109,7 @@
         isSearchOpen = false;
         activeTab = 'settings';
       }
-      setTimeout(() => {
-        gamepad.focusFirstInZone('list') || gamepad.focusFirstInZone('grid');
-      }, 60);
+      gamepad.retryFocusZone('list');
     };
 
     const handleToggleSearch = () => {
@@ -105,14 +122,22 @@
       isSearchOpen = !isSearchOpen;
     };
 
+    const handleTheaterMode = (e: CustomEvent) => {
+      isTheaterActive = !!e.detail?.active;
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('app:go-back', handleGoBack as EventListener);
     window.addEventListener('app:toggle-menu', handleToggleMenu);
     window.addEventListener('app:toggle-search', handleToggleSearch);
+    window.addEventListener('app:theater-mode', handleTheaterMode as EventListener);
 
     return () => {
+      window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('app:go-back', handleGoBack as EventListener);
       window.removeEventListener('app:toggle-menu', handleToggleMenu);
       window.removeEventListener('app:toggle-search', handleToggleSearch);
+      window.removeEventListener('app:theater-mode', handleTheaterMode as EventListener);
     };
   });
 </script>
@@ -120,136 +145,99 @@
 <div class="h-screen w-screen flex flex-col overflow-hidden bg-[#07080a] text-white selection:bg-[#38bdf8] selection:text-black font-sans-ui select-none">
   
   <!-- SteamOS Top Header -->
-  <BigPictureHeader
-    activeTab={activeTab as TabType}
-    {hasFtpServers}
-    {hasTorrentSources}
-    onTabChange={(t: TabType) => {
-      activeTab = t;
-      selectedGame = null;
-    }}
-    activeDownloadsCount={(activeDownloads || []).filter((d) => d && (d.status === 'downloading' || d.status === 'queued')).length}
-    {isGamepadConnected}
-    onToggleSearch={() => {
-      if ((!hasFtpServers || activeTab !== 'catalog') && activeTab !== 'torrents') {
-        activeTab = hasFtpServers ? 'catalog' : 'torrents';
-      }
-      selectedGame = null;
-      isSearchOpen = !isSearchOpen;
-    }}
-    {onSwitchToDesktop}
-    {onCloseApp}
-  />
+  {#if !isTheaterActive}
+    <BigPictureHeader
+      activeTab={activeTab as TabType}
+      {hasFtpServers}
+      {hasTorrentSources}
+      onTabChange={(t: TabType) => {
+        activeTab = t;
+        selectedGame = null;
+      }}
+      activeDownloadsCount={(activeDownloads || []).filter((d) => d && (d.status === 'downloading' || d.status === 'queued')).length}
+      {isGamepadConnected}
+      onToggleSearch={() => {
+        if ((!hasFtpServers || activeTab !== 'catalog') && activeTab !== 'torrents') {
+          activeTab = hasFtpServers ? 'catalog' : 'torrents';
+        }
+        selectedGame = null;
+        isSearchOpen = !isSearchOpen;
+      }}
+      {onSwitchToDesktop}
+      {onCloseApp}
+    />
+  {/if}
 
   <!-- Main Stage -->
   <div class="flex-1 flex overflow-hidden min-h-0 relative">
-    {#if activeTab === 'home'}
-      <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
-        <BigPictureHomeShelves
-          {games}
-          {torrentGames}
-          {activeDownloads}
-          {hasFtpServers}
-          {hasTorrentSources}
-          {downloadHistory}
-          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
-          onSelectGame={handleSelectGame}
-          {onStartDownload}
-          onGoToCatalog={() => {
-            activeTab = 'catalog';
-            selectedGame = null;
-          }}
-          onGoToTorrents={() => {
-            activeTab = 'torrents';
-            selectedGame = null;
-          }}
-          onGoToFavorites={() => {
-            activeTab = 'favorites';
-            selectedGame = null;
-          }}
-          onGoToDownloads={() => {
-            activeTab = 'downloads';
-            selectedGame = null;
-          }}
-        />
-      </div>
-      {#if selectedGame}
-        <BigPictureGameDetail
-          game={selectedGame}
-          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
-          onBack={handleBackToLibrary}
-          {onStartDownload}
-          {onSelectFolder}
-          {activeDownloads}
-        />
-      {/if}
+    {#if selectedGame}
+      <BigPictureGameDetail
+        game={selectedGame}
+        downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+        onBack={handleBackToLibrary}
+        {onStartDownload}
+        {onSelectFolder}
+        {activeDownloads}
+      />
+    {:else if activeTab === 'home'}
+      <BigPictureHomeShelves
+        {games}
+        {torrentGames}
+        {activeDownloads}
+        {hasFtpServers}
+        {hasTorrentSources}
+        {downloadHistory}
+        downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+        onSelectGame={handleSelectGame}
+        {onStartDownload}
+        onGoToCatalog={() => {
+          activeTab = 'catalog';
+          selectedGame = null;
+        }}
+        onGoToTorrents={() => {
+          activeTab = 'torrents';
+          selectedGame = null;
+        }}
+        onGoToFavorites={() => {
+          activeTab = 'favorites';
+          selectedGame = null;
+        }}
+        onGoToDownloads={() => {
+          activeTab = 'downloads';
+          selectedGame = null;
+        }}
+      />
     {:else if activeTab === 'catalog'}
-      <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
-        <BigPictureLibrary
-          {games}
-          isLoading={isCatalogLoading}
-          {activeDownloads}
-          bind:searchQuery
-          onSelectGame={handleSelectGame}
-          {isSearchOpen}
-          onCloseSearch={() => (isSearchOpen = false)}
-        />
-      </div>
-      {#if selectedGame}
-        <BigPictureGameDetail
-          game={selectedGame}
-          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
-          onBack={handleBackToLibrary}
-          {onStartDownload}
-          {onSelectFolder}
-          {activeDownloads}
-        />
-      {/if}
+      <BigPictureLibrary
+        {games}
+        isLoading={isCatalogLoading}
+        {activeDownloads}
+        bind:searchQuery
+        onSelectGame={handleSelectGame}
+        {isSearchOpen}
+        onCloseSearch={() => (isSearchOpen = false)}
+      />
     {:else if activeTab === 'torrents'}
-      <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
-        <BigPictureLibrary
-          games={torrentGames}
-          isLoading={isTorrentsLoading}
-          {activeDownloads}
-          bind:searchQuery
-          onSelectGame={handleSelectGame}
-          {isSearchOpen}
-          onCloseSearch={() => (isSearchOpen = false)}
-        />
-      </div>
-      {#if selectedGame}
-        <BigPictureGameDetail
-          game={selectedGame}
-          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
-          onBack={handleBackToLibrary}
-          {onStartDownload}
-          {onSelectFolder}
-          {activeDownloads}
-        />
-      {/if}
+      <BigPictureLibrary
+        games={torrentGames}
+        isLoading={isTorrentsLoading}
+        {activeDownloads}
+        bind:searchQuery
+        onSelectGame={handleSelectGame}
+        {isSearchOpen}
+        onCloseSearch={() => (isSearchOpen = false)}
+      />
     {:else if activeTab === 'favorites'}
-      <div class="w-full h-full flex flex-col {selectedGame ? 'hidden' : ''}">
-        <BigPictureFavorites
-          {games}
-          {torrentGames}
-          {activeDownloads}
-          onSelectGame={handleSelectGame}
-          onGoToCatalog={() => {
-            activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'home');
-            selectedGame = null;
-          }}
-        />
-      </div>
-      {#if selectedGame}
-        <BigPictureGameDetail
-          game={selectedGame}
-          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
-          onBack={handleBackToLibrary}
-          {onStartDownload}
-          {onSelectFolder}
-          {activeDownloads}
-        />
-      {/if}
+      <BigPictureFavorites
+        {games}
+        {torrentGames}
+        {activeDownloads}
+        onSelectGame={handleSelectGame}
+        onGoToCatalog={() => {
+          activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'home');
+          selectedGame = null;
+        }}
+      />
     {:else if activeTab === 'downloads'}
       <BigPictureDownloads
         {games}
@@ -286,45 +274,47 @@
   </div>
 
   <!-- SteamOS Gamepad Footer HUD -->
-  <footer class="h-10 px-8 flex items-center justify-between bg-[#050608] border-t border-white/[0.06] text-[#8e95a2] text-xs font-medium z-30 select-none flex-shrink-0">
-    <div class="flex items-center gap-6">
-      <div class="flex items-center gap-1.5">
-        <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
-        <span>Выбрать</span>
-      </div>
-      <div class="flex items-center gap-1.5">
-        <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-        <span>Назад</span>
-      </div>
-      {#if activeTab === 'home'}
+  {#if !isTheaterActive}
+    <footer class="h-10 px-8 flex items-center justify-between bg-[#050608] border-t border-white/[0.06] text-[#8e95a2] text-xs font-medium z-30 select-none flex-shrink-0">
+      <div class="flex items-center gap-6">
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
-          <span>Действие</span>
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
+          <span>Выбрать</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
-          <span>Избранное</span>
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
+          <span>Назад</span>
         </div>
-      {:else if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
+        {#if activeTab === 'home'}
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
+            <span>Действие</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
+            <span>Избранное</span>
+          </div>
+        {:else if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
+            <span>Поиск</span>
+          </div>
+        {/if}
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
-          <span>Поиск</span>
+          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span>Вкладки</span>
         </div>
-      {/if}
-      <div class="flex items-center gap-1.5">
-        <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
-        <span>Вкладки</span>
       </div>
-    </div>
-    
-    <div class="flex items-center gap-4 text-[11px] text-[#64748b]">
-      <span>Ducke Console</span>
-      {#if isGamepadConnected}
-        <span class="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          Геймпад подключен
-        </span>
-      {/if}
-    </div>
-  </footer>
+      
+      <div class="flex items-center gap-4 text-[11px] text-[#64748b]">
+        <span>Ducke Console</span>
+        {#if isGamepadConnected}
+          <span class="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Геймпад подключен
+          </span>
+        {/if}
+      </div>
+    </footer>
+  {/if}
 </div>

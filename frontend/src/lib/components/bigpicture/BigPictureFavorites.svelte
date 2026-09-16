@@ -229,10 +229,10 @@
 
   function getStatusBadgeStyle(status: string): string {
     switch (status) {
-      case 'playing': return 'bg-sky-500 text-black font-black';
-      case 'completed': return 'bg-emerald-500 text-black font-black';
-      case 'planned': return 'bg-amber-400 text-black font-black';
-      default: return 'bg-white/20 text-white font-bold';
+      case 'playing': return 'bg-[#07080a]/90 text-sky-400 border border-sky-500/30 font-bold';
+      case 'completed': return 'bg-[#07080a]/90 text-emerald-400 border border-emerald-500/30 font-bold';
+      case 'planned': return 'bg-[#07080a]/90 text-amber-400 border border-amber-500/30 font-bold';
+      default: return 'bg-[#07080a]/90 text-white border border-white/20 font-bold';
     }
   }
 
@@ -446,22 +446,22 @@
 
               <!-- Downloading Badge Overlay Top Right -->
               {#if isDownloading}
-                <div class="absolute top-2.5 right-2.5 px-2 py-1 rounded-lg bg-sky-500 text-black text-[9px] font-black tracking-wider flex items-center gap-1 shadow-lg z-20">
-                  <Download class="w-3 h-3 animate-bounce" />
+                <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
+                  <Download class="w-3 h-3" />
                   <span>СКАЧИВАЕТСЯ</span>
                 </div>
               {/if}
 
               <!-- Review score bottom left -->
               {#if game?.reviewPercent && game.reviewPercent > 0}
-                <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
+                <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-[#07080a]/95 text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
                   <span>★ {game.reviewPercent}%</span>
                 </div>
               {/if}
 
               <!-- Size badge bottom right -->
               {#if game?.sizeDisplay}
-                <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono text-white/90 border border-white/10 z-20">
+                <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-[#07080a]/95 text-[10px] font-mono text-white/90 border border-white/10 z-20">
                   {game.sizeDisplay}
                 </div>
               {/if}

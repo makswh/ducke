@@ -387,7 +387,7 @@
                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') openCompilation(comp.id); }}
                 class="group relative overflow-hidden bg-[#0d1117] hover:bg-[#121620] border border-white/[0.06] hover:border-white/15 rounded-xl p-4 flex flex-col justify-between transition-all duration-200 cursor-pointer shadow-sm hover:shadow-md"
               >
-                <!-- Ambient blurred collection cover backdrop -->
+                <!-- Ambient collection cover backdrop -->
                 {#if backdrop}
                   <div class="absolute inset-0 overflow-hidden pointer-events-none z-0 select-none">
                     <img
@@ -396,7 +396,7 @@
                       aria-hidden="true"
                       loading="lazy"
                       decoding="async"
-                      class="w-full h-full object-cover scale-125 blur-2xl brightness-[0.2] contrast-125 transition-transform duration-500 group-hover:scale-135 opacity-75"
+                      class="w-full h-full object-cover brightness-[0.2] contrast-125 transition-transform duration-500 group-hover:scale-105 opacity-40"
                       onerror={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
                     />
                     <div class="absolute inset-0 bg-gradient-to-t from-[#0d1117] via-[#0d1117]/85 to-[#0d1117]/50"></div>
@@ -757,7 +757,7 @@
                             const fullUrl = game.url.startsWith('http') ? game.url : `https://stopgame.ru${game.url}`;
                             openExternalUrl(fullUrl);
                           }}
-                          class="pointer-events-auto p-1 rounded-md bg-black/75 hover:bg-black/95 backdrop-blur-sm border border-white/10 text-[#8e95a2] hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                          class="pointer-events-auto p-1 rounded-md bg-[#07080a]/90 hover:bg-black border border-white/10 text-[#8e95a2] hover:text-white transition-all opacity-0 group-hover:opacity-100"
                           title="Открыть статью об игре на StopGame.ru"
                         >
                           <ExternalLink class="w-3 h-3" />
@@ -768,7 +768,7 @@
 
                       <!-- Right: StopGame score chip -->
                       {#if game.stopGameScore && game.stopGameScore !== '-'}
-                        <div class="px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-sm border border-white/10 text-white font-mono font-bold text-[10px] flex items-center gap-1 shadow">
+                        <div class="px-1.5 py-0.5 rounded-md bg-[#07080a]/95 border border-white/10 text-white font-mono font-bold text-[10px] flex items-center gap-1 shadow">
                           <Star class="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
                           <span>{game.stopGameScore}</span>
                         </div>

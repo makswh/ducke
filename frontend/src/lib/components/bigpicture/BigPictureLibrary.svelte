@@ -232,21 +232,38 @@
   });
 
   onMount(() => {
-    if (!scrollContainer) return;
-    containerWidth = scrollContainer.clientWidth || 1280;
-    containerHeight = scrollContainer.clientHeight || 800;
+    if (scrollContainer) {
+      containerWidth = scrollContainer.clientWidth || 1280;
+      containerHeight = scrollContainer.clientHeight || 800;
 
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.target === scrollContainer) {
-          containerWidth = scrollContainer.clientWidth;
-          containerHeight = scrollContainer.clientHeight;
+      const ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.target === scrollContainer) {
+            containerWidth = scrollContainer.clientWidth;
+            containerHeight = scrollContainer.clientHeight;
+          }
         }
-      }
-    });
-    ro.observe(scrollContainer);
+      });
+      ro.observe(scrollContainer);
+    }
 
-    return () => ro.disconnect();
+    const handleGoBack = (e: CustomEvent) => {
+      if (isSortDropdownOpen) {
+        isSortDropdownOpen = false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (isSearchOpen) {
+        onCloseSearch();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+
+    window.addEventListener('app:go-back', handleGoBack as EventListener, true);
+
+    return () => {
+      window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
+    };
   });
 
   function measureCard(node: HTMLElement) {
@@ -448,7 +465,7 @@
 
         {#if isSortDropdownOpen}
           <div
-            class="absolute right-0 top-full mt-2 z-50 w-48 rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1 space-y-0.5 backdrop-blur-md"
+            class="absolute right-0 top-full mt-2 z-50 w-48 rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1 space-y-0.5"
           >
             {#each [
               { id: 'date_desc', label: 'По дате' },
@@ -512,7 +529,7 @@
 
   <!-- Search Modal Overlay (when X is pressed) -->
   {#if isSearchOpen}
-    <div data-nav-zone="modal" class="absolute inset-x-0 top-0 z-50 bg-[#07080a]/95 backdrop-blur-xl border-b border-white/10 p-6 flex items-center justify-center animate-fade-in shadow-2xl">
+    <div data-nav-zone="modal" class="absolute inset-x-0 top-0 z-50 bg-[#07080a] border-b border-white/10 p-6 flex items-center justify-center animate-fade-in shadow-2xl">
       <div class="w-full max-w-2xl flex items-center gap-3">
         <Search class="w-5 h-5 text-sky-400 flex-shrink-0" />
         <input
@@ -616,22 +633,22 @@
 
                 <!-- Downloading / Queued Badge Overlay -->
                 {#if isDownloading}
-                  <div class="absolute top-2.5 right-2.5 px-2 py-1 rounded-lg bg-sky-500 text-black text-[10px] font-black tracking-wider flex items-center gap-1 shadow-lg z-20">
-                    <Download class="w-3 h-3 animate-bounce" />
+                  <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
+                    <Download class="w-3 h-3" />
                     <span>СКАЧИВАЕТСЯ</span>
                   </div>
                 {/if}
 
                 <!-- Steam rating badge bottom left -->
                 {#if game.reviewPercent && game.reviewPercent > 0}
-                  <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
+                  <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-[#07080a]/95 text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
                     <span>★ {game.reviewPercent}%</span>
                   </div>
                 {/if}
 
                 <!-- Size badge bottom right -->
                 {#if game.sizeDisplay}
-                  <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono text-white/90 border border-white/10 z-20">
+                  <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-[#07080a]/95 text-[10px] font-mono text-white/90 border border-white/10 z-20">
                     {game.sizeDisplay}
                   </div>
                 {/if}

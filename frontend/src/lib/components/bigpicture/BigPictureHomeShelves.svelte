@@ -41,6 +41,7 @@
   } from '../../../../wailsjs/go/main/App';
   import { EventsOn } from '../../../../wailsjs/runtime/runtime';
   import type { GameEntity, SteamMovie } from '../../types/game';
+  import { formatTorrentSourceName } from '../../utils/sourceFormatter';
 
   let {
     games = [] as any[],
@@ -80,6 +81,7 @@
   let isTheaterMode = $state<boolean>(false);
   let isVideoMuted = $state<boolean>(true);
   let isVideoPlaying = $state<boolean>(true);
+  let videoHasRenderedFrame = $state<boolean>(false);
   let currentMovieIndex = $state<number>(0);
   let videoBgEl: HTMLVideoElement | null = $state(null);
 
@@ -210,28 +212,34 @@
     };
 
     const handleGoBack = (e: CustomEvent) => {
-      if (isTheaterMode) {
-        exitTheaterMode();
-        e.preventDefault();
-      } else if (lightboxImage) {
+      if (lightboxImage) {
         closeLightbox();
         e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (isTheaterMode) {
+        exitTheaterMode();
+        e.preventDefault();
+        e.stopImmediatePropagation();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('app:gamepad-dir', handleGamepadDir as EventListener);
-    window.addEventListener('app:go-back', handleGoBack as EventListener);
+    window.addEventListener('app:go-back', handleGoBack as EventListener, true);
 
     return () => {
       isMounted = false;
-      destroyHls();
+      if (isTheaterMode) {
+        window.dispatchEvent(new CustomEvent('app:theater-mode', { detail: { active: false } }));
+      }
+      stopAndUnloadVideo();
       if (typeof unsubFav === 'function') unsubFav();
       if (typeof unsubEnriched === 'function') unsubEnriched();
       if (trailerTimer) clearTimeout(trailerTimer);
+      if (detailsTimer) clearTimeout(detailsTimer);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('app:gamepad-dir', handleGamepadDir as EventListener);
-      window.removeEventListener('app:go-back', handleGoBack as EventListener);
+      window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
     };
   });
 
@@ -461,10 +469,9 @@
     if (games === lastGamesRef && torrentGames === lastTorrentsRef && cachedCatalogPool.length > 0) {
       return cachedCatalogPool;
     }
-    const pool: any[] = [];
-    if (Array.isArray(games) && games.length > 0) pool.push(...games);
-    if (Array.isArray(torrentGames) && torrentGames.length > 0) pool.push(...torrentGames);
-    cachedCatalogPool = deduplicateGames(pool);
+    const gList = Array.isArray(games) ? games : [];
+    const tList = Array.isArray(torrentGames) ? torrentGames : [];
+    cachedCatalogPool = deduplicateGames(gList.concat(tList));
     lastGamesRef = games;
     lastTorrentsRef = torrentGames;
     return cachedCatalogPool;
@@ -820,17 +827,17 @@
     return sanitizeMediaUrl(rawUrl);
   }
 
-  // Pick direct MP4 / WebM for zero-overhead hardware decoding; fallback to HLS
+  // Pick HLS (H.264 fMP4) for reliable hardware decoding, fallback to direct MP4/WebM
   function pickMovieSource(m: SteamMovie): string {
     if (!m) return '';
-    if (m.mp4 && !m.mp4.includes('/apps/')) {
+    if (m.hls) {
+      return cleanVideoUrl(m.hls);
+    }
+    if (m.mp4 && !m.mp4.includes('/apps/') && !m.mp4.includes('movie_max.mp4')) {
       return cleanVideoUrl(m.mp4);
     }
     if (m.webm) {
       return cleanVideoUrl(m.webm);
-    }
-    if (m.hls) {
-      return cleanVideoUrl(m.hls);
     }
     if (m.mp4) {
       return cleanVideoUrl(m.mp4);
@@ -943,6 +950,7 @@
     }
 
     lastLoadedSource = targetUrl;
+    videoHasRenderedFrame = false;
     destroyHls();
 
     const isHls = targetUrl.includes('.m3u8') || targetUrl.includes('hls_264');
@@ -951,8 +959,8 @@
       const hls = new Hls({
         enableWorker: false, // Prevents Blob WebWorker SecurityError in WebView2/Wails!
         lowLatencyMode: false,
-        backBufferLength: 10,
-        maxBufferLength: 15,
+        backBufferLength: 30,
+        maxBufferLength: 30,
         xhrSetup: (xhr) => {
           xhr.withCredentials = false;
         }
@@ -970,8 +978,19 @@
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (data.fatal) {
           console.warn('[Ambient Hls Fatal]', data.type, data.details);
-          destroyHls();
-          handleTrailerEnded();
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError();
+              break;
+            default:
+              destroyHls();
+              videoHasRenderedFrame = false;
+              handleTrailerEnded();
+              break;
+          }
         }
       });
     } else {
@@ -985,10 +1004,22 @@
     }
   }
 
-  function stopVideoPlayback() {
+  function stopAndUnloadVideo() {
     destroyHls();
+    if (videoBgEl) {
+      try {
+        videoBgEl.pause();
+        videoBgEl.removeAttribute('src');
+        videoBgEl.load();
+      } catch {}
+    }
     lastLoadedSource = '';
-    safePause();
+    videoHasRenderedFrame = false;
+    isVideoPlaying = false;
+  }
+
+  function stopVideoPlayback() {
+    stopAndUnloadVideo();
   }
 
   let isAmbientTimerElapsed = $state<boolean>(false);
@@ -1098,6 +1129,7 @@
       videoBgEl.muted = false;
     }
     safePlay();
+    window.dispatchEvent(new CustomEvent('app:theater-mode', { detail: { active: true } }));
   }
 
   function exitTheaterMode() {
@@ -1111,6 +1143,7 @@
     if (videoBgEl) {
       videoBgEl.muted = true;
     }
+    window.dispatchEvent(new CustomEvent('app:theater-mode', { detail: { active: false } }));
   }
 
   function togglePlayPause() {
@@ -1216,7 +1249,7 @@
     } else if (focusedDownload) {
       onGoToDownloads();
     } else {
-      onStartDownload(effectiveFocusedGame.id, downloadPath);
+      onSelectGame(effectiveFocusedGame);
     }
   }
 
@@ -1226,7 +1259,7 @@
     if (isFocusedInstalled) {
       await OpenGameFolder(effectiveFocusedGame.id);
     } else {
-      onSelectGame(effectiveFocusedGame);
+      onStartDownload(effectiveFocusedGame.id, downloadPath);
     }
   }
 
@@ -1295,13 +1328,13 @@
 <div class="w-full h-full flex flex-col relative overflow-hidden bg-[#07080a] select-none text-white">
 
   <!-- 1. Fullscreen Cinematic Background Layer: Still Art + Live Ambient Trailer Video -->
-  <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-    <!-- Static Backdrop Image -->
+  <div class="{isTheaterMode ? 'fixed inset-0 z-[90] w-screen h-screen bg-black pointer-events-auto' : 'absolute inset-0 z-0 pointer-events-none'} overflow-hidden">
+    <!-- Static Backdrop Image — always shown as fallback, fades slightly when video is rendering -->
     {#if currentBackdropUrl}
       <img
         src={currentBackdropUrl}
         alt=""
-        class="w-full h-full object-cover object-center transition-opacity duration-700 ease-out {isAmbientTrailerActive && activeMovie ? 'opacity-0' : 'opacity-60'}"
+        class="w-full h-full object-cover object-center transition-opacity duration-700 ease-out {isTheaterMode ? 'opacity-0 pointer-events-none' : (videoHasRenderedFrame ? 'opacity-20' : 'opacity-60')}"
         decoding="async"
       />
     {/if}
@@ -1310,16 +1343,29 @@
     <video
       bind:this={videoBgEl}
       poster={activeMovie?.thumbnail ? sanitizeMediaUrl(activeMovie.thumbnail) : ''}
-      class="absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ease-out {isAmbientTrailerActive && activeMovie?.src ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
+      class="absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ease-out {isTheaterMode || (isAmbientTrailerActive && activeMovie?.src && videoHasRenderedFrame) ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
       muted={isVideoMuted}
       playsinline
       preload="auto"
+      onplaying={() => {
+        isVideoPlaying = true;
+        videoHasRenderedFrame = true;
+      }}
+      ontimeupdate={() => {
+        if (videoBgEl && videoBgEl.currentTime > 0) {
+          videoHasRenderedFrame = true;
+        }
+      }}
+      onerror={() => {
+        videoHasRenderedFrame = false;
+        isVideoPlaying = false;
+      }}
       onended={handleTrailerEnded}
     ></video>
 
     <!-- Ambient vignette & falloff gradients -->
-    <div class="absolute inset-0 bg-gradient-to-t from-[#07080a] via-[#07080a]/70 to-transparent transition-opacity duration-500 {isTheaterMode ? 'opacity-20' : 'opacity-100'}"></div>
-    <div class="absolute inset-0 bg-gradient-to-r from-[#07080a]/95 via-[#07080a]/50 to-transparent transition-opacity duration-500 {isTheaterMode ? 'opacity-15' : 'opacity-100'}"></div>
+    <div class="absolute inset-0 bg-gradient-to-t from-[#07080a] via-[#07080a]/70 to-transparent transition-opacity duration-500 {isTheaterMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}"></div>
+    <div class="absolute inset-0 bg-gradient-to-r from-[#07080a]/95 via-[#07080a]/50 to-transparent transition-opacity duration-500 {isTheaterMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}"></div>
   </div>
 
   <!-- 2. Upper Dashboard Hero Stage (Smoothly fades out in Theater Mode) -->
@@ -1335,7 +1381,7 @@
           
           <!-- Background Priority Search & Enriching Status Pill -->
           {#if isEnrichingCurrentGame}
-            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-sky-400 text-xs font-medium animate-pulse w-fit">
+            <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/[0.06] border border-white/10 text-sky-400 text-xs font-medium w-fit">
               <RefreshCw class="w-3.5 h-3.5 animate-spin flex-shrink-0" />
               <span>Очистка названия и поиск данных об игре...</span>
             </div>
@@ -1366,26 +1412,26 @@
             </span>
 
             {#if isFocusedInstalled}
-              <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1.5">
+              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
                 <Check class="w-3.5 h-3.5 stroke-[3]" />
                 <span>Установлено</span>
               </span>
             {:else if focusedDownload}
-              <span class="px-2.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-500/30 text-sky-400 text-xs font-bold flex items-center gap-1.5">
+              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-sky-400 text-xs font-semibold flex items-center gap-1.5">
                 <Download class="w-3.5 h-3.5 stroke-[2.5]" />
                 <span>{focusedDownload.progressPercent || 0}%</span>
               </span>
             {/if}
 
             {#if isFocusedFavorite}
-              <span class="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-bold flex items-center gap-1.5">
+              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
                 <Star class="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                 <span>Избранное</span>
               </span>
             {/if}
 
-            <span class="px-2.5 py-0.5 rounded-full border text-xs font-bold flex items-center gap-1.5 {effectiveFocusedGame.sourceType === 'torrent' ? 'bg-sky-500/15 border-sky-500/30 text-sky-400' : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'}">
-              <span>Источник: {effectiveFocusedGame.sourceType === 'torrent' ? (effectiveFocusedGame.torrentSource ? `Торрент (${effectiveFocusedGame.torrentSource})` : 'Торрент') : 'FTP-сервер'}</span>
+            <span class="px-2.5 py-0.5 rounded-md border border-white/10 bg-white/[0.06] text-[#cbd5e1] text-xs font-semibold flex items-center gap-1.5">
+              <span>Источник: {effectiveFocusedGame.sourceType === 'torrent' || effectiveFocusedGame.magnetUri ? `Торрент (${formatTorrentSourceName(effectiveFocusedGame.torrentSource) || 'Каталог'})` : 'FTP-сервер'}</span>
             </span>
 
             {#if effectiveFocusedGame.releaseDate}
@@ -1430,7 +1476,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-7 py-3 rounded-full bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-4 focus:ring-white/40 focus:outline-none"
+              class="px-7 py-3 rounded-xl bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
               onclick={handlePrimaryAction}
             >
               {#if isFocusedInstalled}
@@ -1440,26 +1486,26 @@
                 <Download class="w-4 h-4 stroke-[2.5]" />
                 <span>В загрузки</span>
               {:else}
-                <Download class="w-4 h-4 stroke-[2.5]" />
-                <span>Загрузить</span>
+                <Info class="w-4 h-4 fill-black text-black" />
+                <span>Страница игры</span>
               {/if}
               <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center">A</span>
             </button>
 
-            <!-- Secondary Action (Folder / Details) (X) -->
+            <!-- Secondary Action (Folder / Download) (X) -->
             <button
               data-nav-item
               type="button"
-              class="px-4 py-3 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-4 focus:ring-white/40 focus:outline-none"
+              class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
               onclick={handleSecondaryAction}
-              title={isFocusedInstalled ? 'Открыть папку с игрой' : 'Открыть подробную страницу'}
+              title={isFocusedInstalled ? 'Открыть папку с игрой' : 'Начать скачивание игры'}
             >
               {#if isFocusedInstalled}
                 <Folder class="w-4 h-4 fill-current text-[#cbd5e1]" />
                 <span>Папка</span>
               {:else}
-                <Info class="w-4 h-4 fill-current text-[#cbd5e1]" />
-                <span>Подробнее</span>
+                <Download class="w-4 h-4 stroke-[2.5] text-[#cbd5e1]" />
+                <span>Скачать</span>
               {/if}
               <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">X</span>
             </button>
@@ -1468,7 +1514,7 @@
             <button
               data-nav-item
               type="button"
-              class="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-4 focus:ring-white/40 focus:outline-none"
+              class="p-3 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
               onclick={handleToggleFavorite}
               title={isFocusedFavorite ? 'В избранном' : 'Добавить в избранное'}
             >
@@ -1480,7 +1526,7 @@
               <button
                 data-nav-item
                 type="button"
-                class="px-4 py-3 rounded-full bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-4 focus:ring-white/40 focus:outline-none"
+                class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
                 onclick={enterTheaterMode}
                 title="Смотреть трейлер во весь экран [↑]"
               >
@@ -1494,7 +1540,7 @@
             <button
               data-nav-item
               type="button"
-              class="p-3 rounded-full bg-white/10 hover:bg-white/20 text-[#cbd5e1] hover:text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-4 focus:ring-white/40 focus:outline-none"
+              class="p-3 rounded-xl bg-white/10 hover:bg-white/20 text-[#cbd5e1] hover:text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
               onclick={() => onSelectGame(effectiveFocusedGame)}
               title="Все свойства и настройки"
             >
@@ -1652,11 +1698,11 @@
             type="button"
             class="my-2 w-28 sm:w-32 md:w-36 aspect-[3/4] rounded-2xl overflow-hidden relative flex-shrink-0 cursor-pointer transition-all duration-150 text-left focus:outline-none {categoryBorderClass} {isCardFocused ? 'scale-105 shadow-2xl z-20 opacity-100' : 'opacity-75 hover:opacity-100 hover:scale-[1.02] bg-[#0d1117]'}"
             onclick={() => {
-              if (focusedIndex === idx) {
-                handlePrimaryAction();
-              } else {
+              sound.playSelect();
+              if (focusedIndex !== idx) {
                 setFocus(idx);
               }
+              onSelectGame(g);
             }}
             onfocus={() => setFocus(idx)}
             onmouseenter={() => {
@@ -1713,27 +1759,28 @@
   {#if isTheaterMode}
     <div
       data-nav-zone="modal"
-      class="fixed inset-0 z-40 flex flex-col justify-between p-6 pointer-events-auto select-none"
-      onclick={(e) => {
-        if (e.target === e.currentTarget) {
-          exitTheaterMode();
-        }
-      }}
-      role="button"
-      tabindex="-1"
-      onkeydown={(e) => { if (e.key === 'Escape') exitTheaterMode(); }}
+      class="fixed inset-0 z-[100] flex flex-col justify-between p-8 pointer-events-none select-none"
+      role="presentation"
     >
-      <!-- Top Right: Minimal discreet back badge -->
-      <div class="flex items-center justify-end">
+      <!-- Top Bar: Title & Back Button -->
+      <div class="flex items-center justify-between pointer-events-none w-full">
+        <div class="pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-[#07080a]/95 text-white text-xs font-bold border border-white/15 shadow-2xl max-w-lg">
+          <Film class="w-4 h-4 text-sky-400 flex-shrink-0" />
+          <span class="truncate">{activeMovie?.name || 'Трейлер'}</span>
+          {#if movieList.length > 1}
+            <span class="text-[11px] font-mono text-[#8e95a2] flex-shrink-0">({currentMovieIndex + 1} / {movieList.length})</span>
+          {/if}
+        </div>
+
         <button
           data-nav-item
           type="button"
-          class="px-3.5 py-1.5 rounded-xl bg-black/60 hover:bg-black/80 text-white/80 hover:text-white text-xs font-semibold flex items-center gap-2 border border-white/10 backdrop-blur-md cursor-pointer transition-colors shadow-lg"
+          class="pointer-events-auto px-4 py-2 rounded-xl bg-black/85 hover:bg-black text-white/90 hover:text-white text-xs font-semibold flex items-center gap-2.5 border border-white/15 cursor-pointer transition-all shadow-2xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
           onclick={(e) => {
             e.stopPropagation();
             exitTheaterMode();
           }}
-          title="Вернуться к дашборду [↓] или [B]"
+          title="Вернуться [Esc] или [B]"
         >
           <ArrowDown class="w-3.5 h-3.5" />
           <span>Назад</span>
@@ -1742,14 +1789,14 @@
       </div>
 
       <!-- Bottom: Subtle unobtrusive bar -->
-      <div class="flex items-center justify-between pointer-events-none" role="presentation">
-        <div class="pointer-events-auto flex items-center gap-2">
+      <div class="flex items-center justify-between pointer-events-none w-full" role="presentation">
+        <div class="pointer-events-auto flex items-center gap-2.5 bg-[#07080a]/95 p-2 rounded-2xl border border-white/15 shadow-2xl">
           <button
             data-nav-item
             type="button"
-            class="p-2 rounded-xl bg-black/60 hover:bg-black/80 text-white/80 hover:text-white border border-white/10 backdrop-blur-md cursor-pointer transition-colors"
+            class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
             onclick={togglePlayPause}
-            title="Пауза / Воспроизведение [Space]"
+            title="Пауза / Воспроизведение [Пробел]"
           >
             {#if isVideoPlaying}
               <Pause class="w-4 h-4 fill-current" />
@@ -1761,7 +1808,7 @@
           <button
             data-nav-item
             type="button"
-            class="p-2 rounded-xl bg-black/60 hover:bg-black/80 text-white/80 hover:text-white border border-white/10 backdrop-blur-md cursor-pointer transition-colors"
+            class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
             onclick={toggleMute}
             title="Звук [M]"
           >
@@ -1773,10 +1820,11 @@
           </button>
 
           {#if movieList.length > 1}
+            <div class="h-4 w-[1px] bg-white/20 mx-0.5"></div>
             <button
               data-nav-item
               type="button"
-              class="p-2 rounded-xl bg-black/60 hover:bg-black/80 text-white/80 hover:text-white border border-white/10 backdrop-blur-md cursor-pointer transition-colors"
+              class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
               onclick={prevTrailer}
               title="Предыдущий [←]"
             >
@@ -1785,7 +1833,7 @@
             <button
               data-nav-item
               type="button"
-              class="p-2 rounded-xl bg-black/60 hover:bg-black/80 text-white/80 hover:text-white border border-white/10 backdrop-blur-md cursor-pointer transition-colors"
+              class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
               onclick={nextTrailer}
               title="Следующий [→]"
             >
@@ -1801,7 +1849,7 @@
   {#if lightboxImage}
     <div
       data-nav-zone="modal"
-      class="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4 select-none"
+      class="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4 select-none"
       onclick={closeLightbox}
       role="button"
       tabindex="-1"

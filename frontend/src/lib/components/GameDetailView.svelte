@@ -39,7 +39,9 @@
     Bookmark,
     BookmarkCheck,
     Clock,
-    Trash2
+    Trash2,
+    Copy,
+    Settings
   } from 'lucide-svelte';
   import VideoPlayer from './VideoPlayer.svelte';
   import type {
@@ -51,7 +53,8 @@
     GamePageDetails
   } from '../types/game';
   import { EventsOn } from '../../../wailsjs/runtime/runtime';
-  import { SetFavoriteStatus, RemoveFromFavorites } from '../../../wailsjs/go/main/App';
+  import { SetFavoriteStatus, RemoveFromFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig } from '../../../wailsjs/go/main/App';
+
 
   let {
     game = null as GameEntity | null,
@@ -61,8 +64,65 @@
     onStartDownload = (gameId: number, targetPath: string) => {},
     onSelectFolder = async (): Promise<string> => '',
     onSelectGenre = (genre: string) => {},
-    onSelectTag = (tag: string) => {}
+    onSelectTag = (tag: string) => {},
+    favoriteItem = null as any
   } = $props();
+
+  // Launch config modal state
+  let isLaunchConfigOpen = $state<boolean>(false);
+  let lcExePath = $state<string>('');
+  let lcLaunchArgs = $state<string>('');
+  let lcSaving = $state<boolean>(false);
+  let lcSaveSuccess = $state<boolean>(false);
+
+  // Sync modal fields when favoriteItem changes
+  $effect(() => {
+    if (favoriteItem) {
+      lcExePath = favoriteItem.customExePath || '';
+      lcLaunchArgs = favoriteItem.launchArguments || '';
+    }
+  });
+
+  let hasCustomExe = $derived(!!(favoriteItem?.customExePath?.trim()));
+
+  async function handleBrowseExe() {
+    const path = await SelectGameExeFile();
+    if (path) lcExePath = path;
+  }
+
+  async function handleSaveLaunchConfig() {
+    if (!game) return;
+    lcSaving = true;
+    lcSaveSuccess = false;
+    try {
+      await SetFavoriteLaunchConfig(game.id, lcExePath.trim(), lcLaunchArgs.trim());
+      // Update local favoriteItem so hasCustomExe reactivity fires
+      if (favoriteItem) {
+        favoriteItem.customExePath = lcExePath.trim();
+        favoriteItem.launchArguments = lcLaunchArgs.trim();
+      }
+      lcSaveSuccess = true;
+      setTimeout(() => {
+        lcSaveSuccess = false;
+        if (lcExePath.trim()) isLaunchConfigOpen = false;
+      }, 1200);
+    } catch (e) {
+      console.error('[GameDetailView] Failed to save launch config:', e);
+    } finally {
+      lcSaving = false;
+    }
+  }
+
+  async function handleLaunchWithCustom() {
+    if (!game) return;
+    try {
+      await LaunchGameWithCustomConfig(game.id);
+    } catch (err) {
+      console.error('[GameDetailView] Failed to launch with custom config:', err);
+    }
+  }
+
+
 
   const STEAM_DEFAULT_ACCENT = '#66c0f4';
 
@@ -89,6 +149,76 @@
   let isFavoriteDropdownOpen = $state<boolean>(false);
   let favoriteDropdownContainerEl = $state<HTMLDivElement | null>(null);
   let favoriteDropdownTriggerEl = $state<HTMLButtonElement | null>(null);
+
+  let torrentSourcesMap = $state<Record<string, string>>({});
+  let copiedTextFeedback = $state<string | null>(null);
+  let copiedTimeout: any = null;
+
+  async function loadTorrentSourcesMap() {
+    try {
+      const app = typeof window !== 'undefined' ? (window as any)?.go?.main?.App : null;
+      if (app && app.GetTorrentSources) {
+        const sources = await app.GetTorrentSources();
+        if (Array.isArray(sources)) {
+          const m: Record<string, string> = {};
+          for (const s of sources) {
+            if (s && s.id && s.name) {
+              m[s.id] = s.name;
+            }
+          }
+          torrentSourcesMap = m;
+        }
+      }
+    } catch {}
+  }
+
+  function cleanSourceDisplayName(name: string): string {
+    if (!name) return '';
+    const firstPart = name.split('|')[0].trim();
+    return firstPart || name;
+  }
+
+  function formatSourceName(rawSource: string | undefined): string {
+    if (!rawSource) return '';
+    const s = rawSource.trim();
+    if (torrentSourcesMap[s]) {
+      return cleanSourceDisplayName(torrentSourcesMap[s]);
+    }
+    if (s.startsWith('tsrc_')) {
+      return 'Каталог торрентов';
+    }
+    return cleanSourceDisplayName(s);
+  }
+
+  function extractBtih(uriOrPath: string | undefined): string {
+    if (!uriOrPath) return '';
+    const m = uriOrPath.match(/urn:btih:([a-zA-Z0-9]{32,40})/i);
+    if (m && m[1]) return m[1].toUpperCase();
+    return '';
+  }
+
+  async function copyText(text: string, label: string) {
+    if (!text) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      copiedTextFeedback = label;
+      clearTimeout(copiedTimeout);
+      copiedTimeout = setTimeout(() => {
+        copiedTextFeedback = null;
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy text:', err);
+    }
+  }
 
   async function handleToggleFavoriteStatus(status: string) {
     const targetGame = pageDetails?.game || game;
@@ -125,20 +255,21 @@
     const v = activeVariant || vg;
     if (!v) return null;
     const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
-    const srcName = (v.torrentSource || '').trim();
+    const rawSrc = (v.torrentSource || '').trim();
+    const resolvedName = formatSourceName(rawSrc);
     if (isTorrent) {
       return {
         type: 'torrent',
-        name: srcName ? `Торрент (${srcName})` : 'Торрент',
-        shortName: srcName || 'Торрент',
-        badgeClass: 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+        name: resolvedName ? `Торрент (${resolvedName})` : 'Торрент',
+        shortName: resolvedName || 'Торрент',
+        badgeClass: 'bg-white/[0.04] border-white/10 text-[#cbd5e1]'
       };
     }
     return {
       type: 'ftp',
       name: 'FTP-сервер',
       shortName: 'FTP',
-      badgeClass: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+      badgeClass: 'bg-white/[0.04] border-white/10 text-[#cbd5e1]'
     };
   });
 
@@ -470,18 +601,55 @@
     return t === '' || /^Steam App \d+$/i.test(t);
   }
 
+  function cleanTorrentTitle(raw: string): string {
+    if (!raw) return '';
+    let s = raw.trim();
+
+    // 1. Fix spaced dot abbreviations like "S T A L K E R" -> "S.T.A.L.K.E.R."
+    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.$4.$5.$6.$7.');
+    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.$4.$5.$6.');
+    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.$4.$5.');
+    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.$4.');
+    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.');
+
+    // 2. If title has a dual slash e.g. "TITLE / НАЗВАНИЕ"
+    if (s.includes(' / ')) {
+      const parts = s.split(' / ').map((p) => p.trim()).filter(Boolean);
+      if (parts.length >= 2 && parts[0].length >= 3) {
+        s = parts[0];
+      }
+    } else if (s.includes(' | ')) {
+      const parts = s.split(' | ').map((p) => p.trim()).filter(Boolean);
+      if (parts.length >= 2 && parts[0].length >= 3) {
+        s = parts[0];
+      }
+    }
+
+    // 3. Strip bracketed release tags
+    s = s.replace(/\[(?:ru|en|multi|repack|steamrip|gog|portable|rip|lic|fitgirl|xatab|dodi|decepticon|[\d.,\s/\\+-]+)[^\]]*\]/gi, '');
+    s = s.replace(/\((?:repack|rip|версия|от|by|[\d.,\s/\\+-]+)[^\)]*\)/gi, '');
+    s = s.replace(/\(\s*\d{4}(?:\s*[-–—/]\s*\d{4})?\s*\)/g, '');
+    s = s.replace(/\[.*?\]\s*$/g, '');
+    s = s.replace(/\(.*?\)\s*$/g, '');
+    s = s.replace(/\s+(?:v\s*\d+([._\s]\d+)*|build\s*\d+|patch\s*\d+|update\s*\d+)\b/gi, '');
+
+    // 4. Strip OS and packaging markers
+    s = s.replace(/^[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]\s*/gi, '');
+    s = s.replace(/\s*[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]$/gi, '');
+    s = s.replace(/[\{\}]/g, '');
+    s = s.replace(/[\s\-_]+(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб|g|m|t))(?:\)|\])?$/i, '');
+    s = s.replace(/(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб))(?:\)|\])?$/i, '');
+
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
   function getDisplayTitle(g: GameEntity | null): string {
     if (!g) return '';
-    const raw = (!isPlaceholderTitle(g.steamTitle))
-      ? g.steamTitle!
-      : (g.cleanTitle && g.cleanTitle.trim() !== '' ? g.cleanTitle : (g.rawName || ''));
-    return raw
-      .replace(/^[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]\s*/gi, '')
-      .replace(/\s*[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]$/gi, '')
-      .replace(/[\{\}]/g, '')
-      .replace(/[\s\-_]+(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб|g|m|t))(?:\)|\])?$/i, '')
-      .replace(/(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб))(?:\)|\])?$/i, '')
-      .trim();
+    if (!isPlaceholderTitle(g.steamTitle)) {
+      return g.steamTitle!.trim();
+    }
+    const raw = (g.cleanTitle && g.cleanTitle.trim() !== '') ? g.cleanTitle : (g.rawName || '');
+    return cleanTorrentTitle(raw);
   }
 
   function formatSizeDisplay(g: GameEntity | null): string {
@@ -997,9 +1165,15 @@
       }
     });
 
+    loadTorrentSourcesMap();
+    const unsubTorrents = EventsOn('torrents:updated', () => {
+      loadTorrentSourcesMap();
+    });
+
     return () => {
       isMounted = false;
       clearTimeout(switchTimeout);
+      clearTimeout(copiedTimeout);
       window.removeEventListener('keydown', handleWindowKeyDown);
       window.removeEventListener('pointerdown', handleWindowPointerDown, true);
       document.removeEventListener('fullscreenchange', onFsChange);
@@ -1011,6 +1185,7 @@
       if (typeof unsubProgress === 'function') unsubProgress();
       if (typeof unsubReviews === 'function') unsubReviews();
       if (typeof unsubEnriched === 'function') unsubEnriched();
+      if (typeof unsubTorrents === 'function') unsubTorrents();
     };
   });
 
@@ -1139,8 +1314,8 @@
       <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
         
         <!-- COVER / ART COLUMN -->
-        {#if hasCover}
-          <div class="{isCoverLandscape ? 'md:col-span-5 lg:col-span-5' : 'md:col-span-4 lg:col-span-3'} flex justify-center md:justify-start">
+        <div class="{isCoverLandscape ? 'md:col-span-5 lg:col-span-5' : 'md:col-span-4 lg:col-span-3'} flex justify-center md:justify-start">
+          {#if hasCover}
             <div
               class="relative rounded-2xl overflow-hidden bg-[#07080a] group w-full {isCoverLandscape ? '' : 'max-w-[280px]'} transition-all duration-300 flex items-center justify-center border border-white/[0.08]"
               style={coverAspectRatio ? `aspect-ratio: ${coverAspectRatio};` : (isCoverLandscape ? 'aspect-ratio: 16/9;' : 'aspect-ratio: 2/3;')}
@@ -1157,11 +1332,44 @@
               />
               <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.03] to-white/[0.08] pointer-events-none z-20"></div>
             </div>
-          </div>
-        {/if}
+          {:else}
+            <!-- Ascetic Tactile Poster Frame for Games Pending Cover / Steam Enrichment -->
+            <div
+              class="relative rounded-2xl w-full max-w-[280px] aspect-[2/3] bg-[#07080a] border border-white/[0.08] flex flex-col items-center justify-between p-6 text-center shadow-inner"
+            >
+              <div class="flex-1 flex flex-col items-center justify-center w-full space-y-3">
+                <div class="w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-[#8e95a2]">
+                  <Disc class="w-7 h-7 stroke-[1.5] text-[#8e95a2]" />
+                </div>
+                <div class="text-xs font-semibold text-white/70 line-clamp-3 px-1 leading-snug">
+                  {getDisplayTitle(g)}
+                </div>
+              </div>
+
+              <div class="pt-3 w-full border-t border-white/[0.04]">
+                {#if isEnrichingCurrentGame}
+                  <div class="inline-flex items-center gap-1.5 text-[11px] text-[#8e95a2]">
+                    <RefreshCw class="w-3 h-3 animate-spin text-[#8e95a2]" />
+                    <span>Поиск обложки...</span>
+                  </div>
+                {:else}
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="w-full py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-xs font-medium text-[#cbd5e1] hover:text-white border border-white/[0.08] hover:border-white/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    onclick={() => openSteamModal(g)}
+                  >
+                    <Search class="w-3.5 h-3.5 text-[#8e95a2]" />
+                    <span>Найти в Steam</span>
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
 
         <!-- DETAILS & ACTION COLUMN -->
-        <div class="{hasCover ? (isCoverLandscape ? 'md:col-span-7 lg:col-span-7' : 'md:col-span-8 lg:col-span-9') : 'md:col-span-12'} space-y-5">
+        <div class="{isCoverLandscape ? 'md:col-span-7 lg:col-span-7' : 'md:col-span-8 lg:col-span-9'} space-y-5">
           
           <!-- LOGO OR TITLE + REVIEWS / METACRITIC -->
           <div class="flex flex-col sm:flex-row items-start justify-between gap-4 border-b border-white/[0.06] pb-4">
@@ -1192,7 +1400,7 @@
             {#if (g.totalReviews && g.totalReviews > 0) || (g.reviewPercent && g.reviewPercent > 0)}
               {@const isPositive = (g.reviewPercent || 0) >= 70}
               {@const isMixed = (g.reviewPercent || 0) >= 40 && (g.reviewPercent || 0) < 70}
-              <div class="flex items-center gap-3 bg-black/40 backdrop-blur-md border border-white/[0.08] p-2.5 px-4 rounded-2xl flex-shrink-0">
+              <div class="flex items-center gap-3 bg-[#11141c] border border-white/10 p-2.5 px-3.5 rounded-xl flex-shrink-0">
                 <div
                   class="w-11 h-11 rounded-xl border flex items-center justify-center font-black text-sm {isPositive ? 'bg-[#66c0f4]/15 text-[#66c0f4] border-[#66c0f4]/40' : isMixed ? 'bg-amber-500/15 text-amber-400 border-amber-500/40' : 'bg-red-500/15 text-red-400 border-red-500/40'}"
                 >
@@ -1208,7 +1416,7 @@
                 </div>
               </div>
             {:else if g.metacriticScore && g.metacriticScore > 0}
-              <div class="flex items-center gap-3 bg-black/40 backdrop-blur-md border border-white/[0.08] p-2.5 px-4 rounded-2xl flex-shrink-0">
+              <div class="flex items-center gap-3 bg-[#11141c] border border-white/10 p-2.5 px-3.5 rounded-xl flex-shrink-0">
                 <div
                   class="w-11 h-11 rounded-xl border-2 flex items-center justify-center font-black text-sm"
                   style="border-color: var(--game-accent); color: var(--game-accent); background-color: color-mix(in srgb, var(--game-accent) 15%, transparent);"
@@ -1223,10 +1431,24 @@
             {/if}
           </div>
 
+          <!-- Discreet Steam Enrichment / Metadata status -->
           {#if isEnrichingCurrentGame}
-            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--game-accent)]/10 border border-[var(--game-accent)]/20 text-[var(--game-accent)] font-mono text-[11px] font-medium animate-pulse w-fit">
-              <RefreshCw class="w-3 h-3 animate-spin flex-shrink-0" />
-              <span>Очистка названия и поиск данных об игре...</span>
+            <div class="flex items-center gap-2 text-xs text-[#8e95a2] py-0.5">
+              <RefreshCw class="w-3.5 h-3.5 animate-spin text-[#8e95a2] flex-shrink-0" />
+              <span>Синхронизация данных с базой Steam...</span>
+            </div>
+          {:else if !hasSteamMetadata}
+            <div class="flex items-center gap-2 text-xs text-[#6b7280] py-0.5">
+              <span>Данные Steam не синхронизированы.</span>
+              <button
+                data-nav-item
+                type="button"
+                class="text-[#cbd5e1] hover:text-white hover:underline inline-flex items-center gap-1 cursor-pointer font-medium"
+                onclick={() => openSteamModal(g)}
+              >
+                <Edit3 class="w-3 h-3" />
+                <span>Привязать вручную</span>
+              </button>
             </div>
           {/if}
 
@@ -1234,11 +1456,6 @@
           {#if g.shortDescription}
             <div class="text-sm sm:text-base text-[#cbd5e1] leading-relaxed font-normal">
               {@html g.shortDescription}
-            </div>
-          {:else if isEnrichingCurrentGame}
-            <div class="flex items-center gap-2 text-xs font-mono text-[#8e95a2] py-2">
-              <span class="inline-block w-2 h-2 rounded-full bg-[var(--game-accent)] animate-ping"></span>
-              <span>Идет автоматический поиск описания, скриншотов и трейлеров...</span>
             </div>
           {/if}
 
@@ -1277,7 +1494,7 @@
                 {#if isFavoriteDropdownOpen}
                   <div
                     bind:this={favoriteDropdownContainerEl}
-                    class="absolute left-0 top-full mt-2 z-50 min-w-[190px] rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1 backdrop-blur-md text-xs"
+                    class="absolute left-0 top-full mt-2 z-50 min-w-[190px] rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1 text-xs"
                   >
                     <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
                       Статус в избранном
@@ -1332,12 +1549,27 @@
               </div>
             {/snippet}
 
+            {#snippet gearButton()}
+              {#if favoriteItem}
+                <button
+                  data-nav-item
+                  type="button"
+                  title="Настройки запуска"
+                  class="inline-flex items-center gap-1.5 text-xs px-3 py-2.5 rounded-xl transition-colors cursor-pointer border {hasCustomExe ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20' : 'text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.06] hover:border-white/15'}"
+                  onclick={() => { isLaunchConfigOpen = true; }}
+                >
+                  <Settings class="w-3.5 h-3.5" />
+                </button>
+              {/if}
+            {/snippet}
+
             {#if pageDetails?.isInstalled}
+
               <!-- ALREADY INSTALLED STATE: PLAY + OPEN FOLDER -->
               <div class="flex flex-wrap items-center gap-4">
                 <button
                   data-nav-item
-                  class="px-9 py-3.5 text-sm font-black rounded-full flex items-center justify-center gap-3 cursor-pointer active:scale-95 transition-all hover:brightness-110 shadow-lg"
+                  class="px-9 py-3.5 text-sm font-black rounded-xl flex items-center justify-center gap-3 cursor-pointer active:scale-95 transition-all hover:brightness-110 shadow-lg"
                   style="background-color: var(--game-accent); color: var(--game-accent-text);"
                   onclick={handleLaunchGame}
                 >
@@ -1347,7 +1579,7 @@
 
                 <button
                   data-nav-item
-                  class="px-5 py-3.5 text-xs font-bold rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-white flex items-center gap-2 cursor-pointer transition-colors"
+                  class="px-5 py-3.5 text-xs font-bold rounded-xl bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-white flex items-center gap-2 cursor-pointer transition-colors"
                   onclick={handleOpenFolder}
                 >
                   <FolderOpen class="w-4 h-4 text-[var(--game-accent)]" />
@@ -1355,6 +1587,7 @@
                 </button>
 
                 {@render favoriteButton()}
+                {@render gearButton()}
 
                 {#if formatSizeDisplay(g)}
                   <span class="text-sm font-mono text-[#8e95a2] px-3 py-1.5 rounded-lg bg-black/40 border border-white/[0.06]">
@@ -1390,7 +1623,7 @@
               <div class="space-y-3 max-w-md bg-[#07080a] p-4 rounded-xl border border-white/[0.06]">
                 <div class="flex items-center justify-between text-xs font-bold text-white">
                   <div class="flex items-center gap-2">
-                    <Download class="w-4 h-4 text-[var(--game-accent)] animate-bounce" />
+                    <Download class="w-4 h-4 text-[var(--game-accent)]" />
                     <span>{pageDetails?.downloadStatus === 'queued' ? 'В очереди загрузки...' : (pageDetails?.downloadStatus === 'scanning' ? 'Получение метаданных торрента...' : 'Скачивается...')}</span>
                   </div>
                   <span class="font-mono text-[var(--game-accent)]">{Math.round(prog?.progressPercent || 0)}%</span>
@@ -1434,133 +1667,145 @@
               <!-- NOT INSTALLED / READY TO DOWNLOAD STATE -->
               <div class="space-y-2.5 pt-1">
                 <div class="flex flex-wrap items-center gap-3">
-                  <!-- Unified Split Download Button -->
-                  <div class="relative inline-flex items-stretch rounded-xl shadow-lg border border-white/10 overflow-visible {isVariantDropdownOpen ? 'z-30' : ''}">
+
+
+                  {#if hasCustomExe}
+                    <!-- ИГРАТЬ via custom exe -->
                     <button
                       data-nav-item
-                      class="px-7 py-3 text-xs sm:text-sm font-black flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider {g.variants && g.variants.length > 1 ? 'rounded-l-xl' : 'rounded-xl'}"
+                      class="px-9 py-3 text-xs sm:text-sm font-black rounded-xl flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider shadow-lg"
                       style="background-color: var(--game-accent); color: var(--game-accent-text);"
-                      onclick={() => onStartDownload(selectedVariantId || g.id, customDownloadPath)}
+                      onclick={handleLaunchWithCustom}
                     >
-                      <Download class="w-4 h-4 stroke-[2.5]" />
-                      <span>СКАЧАТЬ В ХРАНИЛИЩЕ</span>
-                      <span class="opacity-35 font-normal">|</span>
-                      <span class="font-mono text-xs font-bold tracking-normal">{activeVariant?.sizeDisplay || formatSizeDisplay(g)}</span>
+                      <Play class="w-4 h-4 fill-current stroke-[2]" />
+                      <span>ИГРАТЬ</span>
                     </button>
-
-                    {#if g.variants && g.variants.length > 1}
+                  {:else}
+                    <!-- Unified Split Download Button -->
+                    <div class="relative inline-flex items-stretch rounded-xl shadow-lg border border-white/10 overflow-visible {isVariantDropdownOpen ? 'z-30' : ''}">
                       <button
-                        bind:this={variantDropdownTriggerEl}
                         data-nav-item
-                        type="button"
-                        class="px-3 flex items-center justify-center border-l border-black/20 hover:brightness-110 active:scale-95 cursor-pointer transition-all rounded-r-xl"
+                        class="px-7 py-3 text-xs sm:text-sm font-black flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider {g.variants && g.variants.length > 1 ? 'rounded-l-xl' : 'rounded-xl'}"
                         style="background-color: var(--game-accent); color: var(--game-accent-text);"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          isVariantDropdownOpen = !isVariantDropdownOpen;
-                        }}
-                        title="Выбрать версию ({g.variants.length} доступно)"
+                        onclick={() => onStartDownload(selectedVariantId || g.id, customDownloadPath)}
                       >
-                        <ChevronDown class="w-4 h-4 stroke-[2.5] transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
+                        <Download class="w-4 h-4 stroke-[2.5]" />
+                        <span>СКАЧАТЬ</span>
+                        <span class="opacity-35 font-normal">|</span>
+                        <span class="font-mono text-xs font-bold tracking-normal">{activeVariant?.sizeDisplay || formatSizeDisplay(g)}</span>
                       </button>
 
-                      {#if isVariantDropdownOpen}
-                        <div
-                          bind:this={variantDropdownContainerEl}
-                          class="absolute left-0 top-full mt-2 z-50 min-w-[340px] sm:min-w-[420px] max-w-[500px] max-h-72 overflow-y-auto overscroll-contain rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1 backdrop-blur-md"
+                      {#if g.variants && g.variants.length > 1}
+                        <button
+                          bind:this={variantDropdownTriggerEl}
+                          data-nav-item
+                          type="button"
+                          class="px-3 flex items-center justify-center border-l border-black/20 hover:brightness-110 active:scale-95 cursor-pointer transition-all rounded-r-xl"
+                          style="background-color: var(--game-accent); color: var(--game-accent-text);"
+                          onclick={(e) => {
+                            e.stopPropagation();
+                            isVariantDropdownOpen = !isVariantDropdownOpen;
+                          }}
+                          title="Выбрать версию ({g.variants.length} доступно)"
                         >
-                          <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
-                            Выбор версии для скачивания ({g.variants.length})
-                          </div>
-                          {#each g.variants as variant (variant.id)}
-                            {@const isSelected = (activeVariant?.id === variant.id)}
-                            <button
-                              type="button"
-                              class="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-xs transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                              onclick={(e) => {
-                                e.stopPropagation();
-                                selectedVariantId = variant.id;
-                                isVariantDropdownOpen = false;
-                              }}
-                            >
-                              <div class="min-w-0 flex-1 pointer-events-none">
-                                <div class="truncate text-white text-xs">{variant.rawName}</div>
-                                <div class="text-[10px] text-[#6b7280] font-mono">
-                                  Источник: {variant.sourceType === 'torrent' ? (variant.torrentSource ? `Торрент (${variant.torrentSource})` : 'Торрент') : 'FTP-сервер'}
+                          <ChevronDown class="w-4 h-4 stroke-[2.5] transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
+                        </button>
+
+                        {#if isVariantDropdownOpen}
+                          <div
+                            bind:this={variantDropdownContainerEl}
+                            class="absolute left-0 top-full mt-2 z-50 min-w-[340px] sm:min-w-[420px] max-w-[500px] max-h-72 overflow-y-auto overscroll-contain rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1"
+                          >
+                            <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
+                              Выбор версии для скачивания ({g.variants.length})
+                            </div>
+                            {#each g.variants as variant (variant.id)}
+                              {@const isSelected = (activeVariant?.id === variant.id)}
+                              <button
+                                type="button"
+                                class="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-xs transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                                onclick={(e) => {
+                                  e.stopPropagation();
+                                  selectedVariantId = variant.id;
+                                  isVariantDropdownOpen = false;
+                                }}
+                              >
+                                <div class="min-w-0 flex-1 pointer-events-none">
+                                  <div class="truncate text-white text-xs">{variant.rawName}</div>
+                                  <div class="text-[10px] text-[#6b7280] font-mono">
+                                    Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? `Торрент (${formatSourceName(variant.torrentSource) || 'Каталог'})` : 'FTP-сервер'}
+                                  </div>
                                 </div>
-                              </div>
-                              <div class="flex items-center gap-2 flex-shrink-0 font-mono text-[11px] pointer-events-none {isSelected ? 'text-[var(--game-accent)] font-bold' : 'text-[#6b7280]'}">
-                                <span>{variant.sizeDisplay}</span>
-                                {#if isSelected}
-                                  <Check class="w-3.5 h-3.5 stroke-[2.5]" />
-                                {/if}
-                              </div>
-                            </button>
-                          {/each}
-                        </div>
+                                <div class="flex items-center gap-2 flex-shrink-0 font-mono text-[11px] pointer-events-none {isSelected ? 'text-[var(--game-accent)] font-bold' : 'text-[#6b7280]'}">
+                                  <span>{variant.sizeDisplay}</span>
+                                  {#if isSelected}
+                                    <Check class="w-3.5 h-3.5 stroke-[2.5]" />
+                                  {/if}
+                                </div>
+                              </button>
+                            {/each}
+                          </div>
+                        {/if}
                       {/if}
-                    {/if}
-                  </div>
+                    </div>
+                  {/if}
 
                   <!-- Download Source Chip -->
-                  {#if downloadSourceInfo}
+                  {#if downloadSourceInfo && !hasCustomExe}
                     <div
                       class="inline-flex items-center gap-2 text-xs text-[#8e95a2] bg-white/[0.04] border border-white/[0.06] px-3.5 py-2.5 rounded-xl"
                       title="Источник, с которого будет производиться скачивание"
                     >
+                      <HardDrive class="w-3.5 h-3.5 text-[#8e95a2]" />
                       <span class="text-[#6b7280]">Источник:</span>
-                      <span class="font-bold {downloadSourceInfo.type === 'torrent' ? 'text-sky-400' : 'text-emerald-400'}">
-                        {downloadSourceInfo.name}
+                      <span class="font-medium text-white">
+                        {downloadSourceInfo.shortName}
                       </span>
                     </div>
                   {/if}
 
                   <!-- Folder Destination Chip (Clickable to browse) -->
-                  <button
-                    data-nav-item
-                    type="button"
-                    class="inline-flex items-center gap-2 text-xs text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer"
-                    onclick={handleBrowseFolder}
-                    title="Нажмите, чтобы изменить папку для сохранения"
-                  >
-                    <Folder class="w-3.5 h-3.5 text-[var(--game-accent)] flex-shrink-0" />
-                    <span class="text-[#6b7280]">Папка:</span>
-                    <span class="font-mono text-white truncate max-w-[220px] sm:max-w-[320px]">{customDownloadPath}</span>
-                  </button>
+                  {#if !hasCustomExe}
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="inline-flex items-center gap-2 text-xs text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer"
+                      onclick={handleBrowseFolder}
+                      title="Нажмите, чтобы изменить папку для сохранения"
+                    >
+                      <Folder class="w-3.5 h-3.5 text-[var(--game-accent)] flex-shrink-0" />
+                      <span class="text-[#6b7280]">Папка:</span>
+                      <span class="font-mono text-white truncate max-w-[220px] sm:max-w-[320px]">{customDownloadPath}</span>
+                    </button>
+                  {/if}
 
-                  <!-- Favorites Button -->
+                  <!-- Favorites + Gear Buttons -->
                   {@render favoriteButton()}
+                  {@render gearButton()}
                 </div>
 
-                <!-- Release Subtitle (always shown when rawName exists) -->
-                {#if (activeVariant?.rawName || g.rawName)}
-                  <div class="flex flex-wrap items-center gap-2 text-[11px] font-mono text-[#64748b] pt-0.5">
-                    <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
-                    <span class="text-[#64748b] flex-shrink-0">{g.variants && g.variants.length > 1 ? 'Выбран релиз:' : 'Оригинальный релиз:'}</span>
+
+                <!-- Multiple Releases Selector Info (only shown if there is choice between variants) -->
+                {#if g.variants && g.variants.length > 1}
+                  <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b] pt-1">
+                    <Layers class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
+                    <span class="text-[#64748b] flex-shrink-0">Выбран релиз:</span>
                     <span
                       class="text-[#cbd5e1] font-medium truncate max-w-xl select-all"
                       title={activeVariant?.rawName || g.rawName}
                     >
                       {activeVariant?.rawName || g.rawName}
                     </span>
-                    {#if downloadSourceInfo}
-                      <span class="text-white/20">•</span>
-                      <span class="px-1.5 py-0.5 rounded border text-[10px] font-bold {downloadSourceInfo.badgeClass}">
-                        {downloadSourceInfo.name}
-                      </span>
-                    {/if}
-                    {#if g.variants && g.variants.length > 1}
-                      <button
-                        type="button"
-                        class="text-[var(--game-accent)] hover:underline cursor-pointer flex items-center gap-0.5 flex-shrink-0 ml-1"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          isVariantDropdownOpen = true;
-                        }}
-                      >
-                        <span>(сменить)</span>
-                      </button>
-                    {/if}
+                    <button
+                      type="button"
+                      class="text-[var(--game-accent)] hover:underline cursor-pointer flex items-center gap-0.5 flex-shrink-0 ml-1 text-xs"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        isVariantDropdownOpen = true;
+                      }}
+                    >
+                      <span>(сменить версию)</span>
+                    </button>
                   </div>
                 {/if}
               </div>
@@ -1570,6 +1815,116 @@
 
         </div>
       </div>
+
+      <!-- Launch Config Modal -->
+      {#if isLaunchConfigOpen && favoriteItem}
+        <!-- Backdrop -->
+        <button
+          type="button"
+          aria-label="Закрыть настройки запуска"
+          class="fixed inset-0 z-50 bg-black/70 cursor-default border-none p-0 m-0 w-full h-full"
+          onclick={() => (isLaunchConfigOpen = false)}
+        ></button>
+
+        <!-- Modal Panel -->
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+          <div class="pointer-events-auto w-full max-w-md bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <!-- Header -->
+            <div class="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+              <div class="flex items-center gap-2.5">
+                <Settings class="w-4 h-4 text-[#94a3b8]" />
+                <span class="text-sm font-bold text-white">Настройки запуска</span>
+              </div>
+              <button
+                type="button"
+                class="w-7 h-7 flex items-center justify-center rounded-lg text-[#6b7280] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                onclick={() => (isLaunchConfigOpen = false)}
+              >
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+
+            <!-- Body -->
+            <div class="px-5 py-4 space-y-4">
+              <!-- Exe Path -->
+              <div class="space-y-1.5">
+                <label class="text-[11px] font-semibold uppercase tracking-wider text-[#8e95a2]">
+                  Исполняемый файл
+                </label>
+                <div class="flex items-center gap-2">
+                  <input
+                    type="text"
+                    bind:value={lcExePath}
+                    placeholder="C:\Games\game.exe"
+                    spellcheck="false"
+                    class="flex-1 min-w-0 bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded-xl px-3 py-2.5 border border-white/[0.08] focus:border-white/25 focus:outline-none transition-colors"
+                  />
+                  <button
+                    type="button"
+                    title="Выбрать файл"
+                    class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-white/[0.05] hover:bg-white/10 border border-white/[0.08] text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
+                    onclick={handleBrowseExe}
+                  >
+                    <Folder class="w-4 h-4" />
+                  </button>
+                </div>
+                {#if lcExePath}
+                  <p class="text-[10px] text-[#6b7280] font-mono truncate">{lcExePath}</p>
+                {/if}
+              </div>
+
+              <!-- Launch Args -->
+              <div class="space-y-1.5">
+                <label class="text-[11px] font-semibold uppercase tracking-wider text-[#8e95a2]">
+                  Параметры запуска
+                  <span class="normal-case font-normal text-[#6b7280]">(необязательно)</span>
+                </label>
+                <input
+                  type="text"
+                  bind:value={lcLaunchArgs}
+                  placeholder="-dx12 -fullscreen -windowed"
+                  spellcheck="false"
+                  class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded-xl px-3 py-2.5 border border-white/[0.08] focus:border-white/25 focus:outline-none transition-colors"
+                />
+              </div>
+
+              <!-- Note -->
+              {#if !lcExePath}
+                <p class="text-[11px] text-[#6b7280] leading-relaxed">
+                  Укажите путь к <span class="text-[#94a3b8] font-mono">.exe</span> файлу игры — после сохранения кнопка «Скачать» заменится на «Играть».
+                </p>
+              {/if}
+            </div>
+
+            <!-- Footer -->
+            <div class="flex items-center gap-3 px-5 py-4 border-t border-white/[0.06]">
+              <button
+                type="button"
+                disabled={lcSaving}
+                class="flex-1 h-9 flex items-center justify-center gap-2 rounded-xl text-sm font-bold transition-colors cursor-pointer
+                  {lcSaveSuccess
+                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                    : 'bg-white text-slate-950 hover:bg-white/90 active:scale-[0.98]'}"
+                onclick={handleSaveLaunchConfig}
+              >
+                {#if lcSaveSuccess}
+                  <Check class="w-4 h-4" />
+                  <span>Сохранено</span>
+                {:else}
+                  <span>{lcSaving ? 'Сохранение...' : 'Сохранить'}</span>
+                {/if}
+              </button>
+              <button
+                type="button"
+                class="h-9 px-4 rounded-xl text-sm font-medium text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] transition-colors cursor-pointer"
+                onclick={() => (isLaunchConfigOpen = false)}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      {/if}
 
       <!-- SNIPPETS FOR CONTENT SECTIONS -->
       {#snippet mediaAndDescription()}
@@ -1641,7 +1996,7 @@
                   </div>
 
                   <!-- Bottom-Left Label -->
-                  <div class="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-black/75 backdrop-blur-sm border border-white/10 text-[11px] font-semibold text-white/90 pointer-events-none flex items-center gap-2">
+                  <div class="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-[#07080a]/90 border border-white/10 text-[11px] font-semibold text-white/90 pointer-events-none flex items-center gap-2">
                     <ImageIcon class="w-3.5 h-3.5 text-[#9ca3af]" />
                     <span>{activeMedia.name}</span>
                     <span class="text-[#6b7280] font-mono">({activeMediaIndex + 1} / {mediaList.length})</span>
@@ -2007,70 +2362,168 @@
 
         {:else}
           <!-- RAW / UNENRICHED RELEASES COMPACT VIEW -->
+          {@const btih = extractBtih(activeVariant?.magnetUri || g.magnetUri || g.remotePath)}
+          {@const isTorrent = (activeVariant?.sourceType || g.sourceType) === 'torrent' || !!(activeVariant?.magnetUri || g.magnetUri || btih)}
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+            
+            <!-- CARD 1: Release Specifications -->
+            <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-4 text-xs">
               <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
                 <Server class="w-3.5 h-3.5 text-[#8e95a2]" />
-                <span>Сведения о релизе в репозитории</span>
+                <span>Сведения о релизе</span>
               </h4>
+
               <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
-                <div class="flex items-center justify-between py-2">
-                  <span class="text-[#8e95a2]">Имя объекта</span>
-                  <span class="font-semibold text-white truncate max-w-[220px]">{getDisplayTitle(g)}</span>
+                
+                <!-- Source -->
+                <div class="flex items-center justify-between py-2.5">
+                  <span class="text-[#8e95a2]">Источник</span>
+                  <span class="font-medium text-white flex items-center gap-1.5">
+                    <HardDrive class="w-3.5 h-3.5 text-[#8e95a2]" />
+                    <span>{downloadSourceInfo?.name || (isTorrent ? 'Торрент' : 'FTP-сервер')}</span>
+                  </span>
                 </div>
-                {#if (activeVariant?.rawName || g.rawName)}
-                  <div class="flex items-center justify-between py-2 gap-3">
-                    <span class="text-[#8e95a2] flex-shrink-0">Оригинальный релиз</span>
-                    <span class="font-mono text-white truncate max-w-[220px] select-all text-right" title={activeVariant?.rawName || g.rawName}>
-                      {activeVariant?.rawName || g.rawName}
-                    </span>
+
+                <!-- Raw Release Name -->
+                <div class="py-2.5 space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[#8e95a2]">Оригинальный релиз</span>
+                    <button
+                      type="button"
+                      class="text-[11px] text-[#8e95a2] hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+                      onclick={() => copyText(activeVariant?.rawName || g.rawName || '', 'Имя релиза скопировано')}
+                      title="Скопировать оригинальное название"
+                    >
+                      <Copy class="w-3 h-3" />
+                      <span>Копировать</span>
+                    </button>
+                  </div>
+                  <div class="font-mono text-white text-[11px] bg-black/40 border border-white/5 rounded-lg p-2.5 break-words select-all leading-relaxed">
+                    {activeVariant?.rawName || g.rawName || getDisplayTitle(g)}
+                  </div>
+                </div>
+
+                <!-- Size -->
+                <div class="flex items-center justify-between py-2.5">
+                  <span class="text-[#8e95a2]">Размер данных</span>
+                  <span class="font-bold text-white font-mono">{activeVariant?.sizeDisplay || formatSizeDisplay(g) || '—'}</span>
+                </div>
+
+                <!-- Protocol / Hash / Path -->
+                {#if isTorrent}
+                  <div class="flex items-center justify-between py-2.5">
+                    <span class="text-[#8e95a2]">Тип передачи</span>
+                    <span class="text-[#cbd5e1] font-mono">BitTorrent (P2P)</span>
+                  </div>
+
+                  {#if btih}
+                    <div class="flex items-center justify-between py-2.5 gap-3">
+                      <span class="text-[#8e95a2] flex-shrink-0">Хэш (BTIH)</span>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="font-mono text-white text-[11px] truncate select-all" title={btih}>
+                          {btih}
+                        </span>
+                        <button
+                          type="button"
+                          class="p-1 rounded hover:bg-white/10 text-[#8e95a2] hover:text-white transition-colors flex-shrink-0 cursor-pointer"
+                          onclick={() => copyText(activeVariant?.magnetUri || g.magnetUri || `magnet:?xt=urn:btih:${btih}`, 'Magnet-ссылка скопирована')}
+                          title="Скопировать magnet-ссылку"
+                        >
+                          <Copy class="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
+                {:else}
+                  <div class="flex items-center justify-between py-2.5 gap-3">
+                    <span class="text-[#8e95a2] flex-shrink-0">Путь на сервере</span>
+                    <span class="font-mono text-white truncate max-w-[240px] select-all text-right" title={g.remotePath}>{g.remotePath || '—'}</span>
+                  </div>
+                  <div class="flex items-center justify-between py-2.5">
+                    <span class="text-[#8e95a2]">Формат</span>
+                    <span class="text-white">{g.isDirectory ? 'Папка с файлами' : 'Архив'}</span>
                   </div>
                 {/if}
-                <div class="flex items-center justify-between py-2 gap-3">
-                  <span class="text-[#8e95a2] flex-shrink-0">Удаленный путь</span>
-                  <span class="font-mono text-white truncate max-w-[220px] select-all text-right" title={g.remotePath}>{g.remotePath}</span>
-                </div>
-                <div class="flex items-center justify-between py-2">
-                  <span class="text-[#8e95a2]">Размер данных</span>
-                  <span class="font-bold text-white font-mono">{formatSizeDisplay(g) || '—'}</span>
-                </div>
-                <div class="flex items-center justify-between py-2">
-                  <span class="text-[#8e95a2]">Тип содержимого</span>
-                  <span class="text-white">{g.isDirectory ? 'Папка с файлами' : 'Архив'}</span>
-                </div>
+
               </div>
             </div>
 
-            <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
-              <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
-                <Folder class="w-3.5 h-3.5 text-[#8e95a2]" />
-                <span>Параметры сохранения</span>
-              </h4>
-              <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
-                <div class="flex items-center justify-between py-2 gap-3">
-                  <span class="text-[#8e95a2] flex-shrink-0">Целевая папка</span>
-                  <span class="font-mono text-white truncate max-w-[220px] text-right">{customDownloadPath}</span>
-                </div>
-                <div class="flex items-center justify-between py-2">
-                  <span class="text-[#8e95a2]">Статус</span>
-                  <span class="font-semibold text-[var(--game-accent)]">
-                    {pageDetails?.isInstalled ? 'Установлено' : 'Готово к загрузке'}
-                  </span>
-                </div>
-                <div class="flex items-center justify-between py-2">
-                  <span class="text-[#8e95a2]">Метаданные Steam</span>
-                  <button
-                    data-nav-item
-                    class="text-xs text-[var(--game-accent)] hover:underline flex items-center gap-1 cursor-pointer font-medium"
-                    onclick={() => openSteamModal(g)}
-                  >
-                    <Edit3 class="w-3.5 h-3.5" />
-                    <span>Привязать AppID вручную</span>
-                  </button>
+            <!-- CARD 2: Save Settings & Steam Binding -->
+            <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-4 text-xs flex flex-col justify-between">
+              <div class="space-y-4">
+                <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
+                  <Folder class="w-3.5 h-3.5 text-[#8e95a2]" />
+                  <span>Параметры сохранения и интеграции</span>
+                </h4>
+
+                <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
+                  
+                  <!-- Download Destination -->
+                  <div class="flex items-center justify-between py-2.5 gap-3">
+                    <span class="text-[#8e95a2] flex-shrink-0">Папка сохранения</span>
+                    <div class="flex items-center gap-2 min-w-0 justify-end">
+                      <span class="font-mono text-white truncate max-w-[200px]" title={customDownloadPath}>{customDownloadPath}</span>
+                      <button
+                        type="button"
+                        class="text-[var(--game-accent)] hover:underline text-[11px] flex-shrink-0 cursor-pointer"
+                        onclick={handleBrowseFolder}
+                      >
+                        Изменить
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Install / Ready Status -->
+                  <div class="flex items-center justify-between py-2.5">
+                    <span class="text-[#8e95a2]">Статус</span>
+                    <span class="font-semibold {pageDetails?.isInstalled ? 'text-emerald-400' : 'text-white'}">
+                      {pageDetails?.isInstalled ? 'Установлено' : (isDownloading ? 'Скачивается' : 'Готово к скачиванию')}
+                    </span>
+                  </div>
+
+                  <!-- Steam Metadata Binding -->
+                  <div class="flex items-center justify-between py-2.5 gap-3">
+                    <span class="text-[#8e95a2]">Метаданные Steam</span>
+                    {#if isEnrichingCurrentGame}
+                      <span class="inline-flex items-center gap-1.5 text-[#8e95a2] text-xs font-mono">
+                        <RefreshCw class="w-3 h-3 animate-spin text-[#8e95a2]" />
+                        <span>Автопоиск...</span>
+                      </span>
+                    {:else}
+                      <button
+                        data-nav-item
+                        type="button"
+                        class="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-white border border-white/10 transition-colors flex items-center gap-1.5 cursor-pointer"
+                        onclick={() => openSteamModal(g)}
+                        title="Найти игру в Steam и привязать обложку, скриншоты и описание"
+                      >
+                        <Search class="w-3.5 h-3.5 text-[#8e95a2]" />
+                        <span>Привязать вручную</span>
+                      </button>
+                    {/if}
+                  </div>
+
                 </div>
               </div>
+
+              <!-- Subtle Info Note -->
+              <div class="p-3.5 rounded-lg bg-white/[0.02] border border-white/[0.04] text-[11px] text-[#8e95a2] leading-relaxed">
+                <span class="font-medium text-white/80">Интеграция:</span>
+                Привязка к Steam автоматически добавит официальное описание, постер, скриншоты, жанры, дату релиза и системные требования.
+              </div>
+
             </div>
+
           </div>
+
+          <!-- Toast Copy Feedback -->
+          {#if copiedTextFeedback}
+            <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-xl bg-[#11141c] border border-white/15 text-white text-xs font-medium shadow-2xl flex items-center gap-2">
+              <Check class="w-3.5 h-3.5 text-emerald-400" />
+              <span>{copiedTextFeedback}</span>
+            </div>
+          {/if}
         {/if}
 
       </div>

@@ -391,6 +391,22 @@ export class GamepadEngine {
   }
 
   /**
+   * Retries focusing the first item in a zone across multiple frames,
+   * guaranteeing focus capture even if DOM rendering is slightly delayed.
+   */
+  public retryFocusZone(zone: NavZone, maxAttempts = 6, intervalMs = 45): void {
+    let attempts = 0;
+    const tryFocus = () => {
+      attempts++;
+      if (this.focusFirstInZone(zone)) return;
+      if (attempts < maxAttempts) {
+        setTimeout(tryFocus, intervalMs);
+      }
+    };
+    tryFocus();
+  }
+
+  /**
    * Discovers all visible data-nav-zone elements dynamically on screen.
    */
   public getActiveZones(): NavZone[] {

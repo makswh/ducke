@@ -75,11 +75,13 @@ type GameEntity struct {
 
 // FavoriteItem represents a game saved to user's favorites / backlog
 type FavoriteItem struct {
-	GameID    int64      `json:"gameId"`
-	Status    string     `json:"status"` // "planned", "playing", "completed"
-	AddedAt   string     `json:"addedAt"`
-	UpdatedAt string     `json:"updatedAt"`
-	Game      GameEntity `json:"game"`
+	GameID          int64      `json:"gameId"`
+	Status          string     `json:"status"` // "planned", "playing", "completed"
+	AddedAt         string     `json:"addedAt"`
+	UpdatedAt       string     `json:"updatedAt"`
+	CustomExePath   string     `json:"customExePath"`
+	LaunchArguments string     `json:"launchArguments"`
+	Game            GameEntity `json:"game"`
 }
 
 // GameVariant represents an alternative release/repack/version of a game
@@ -91,7 +93,7 @@ type GameVariant struct {
 	SizeDisplay   string `json:"sizeDisplay"`
 	SourceType    string `json:"sourceType"`
 	TorrentSource string `json:"torrentSource,omitempty"`
-	RemotePath    string `json:"remotePath"`
+	RemotePath    string `json:"remotePath,omitempty"`
 	MagnetURI     string `json:"magnetUri,omitempty"`
 	UploadDate    string `json:"uploadDate,omitempty"`
 	IsDirectory   bool   `json:"isDirectory"`
@@ -302,6 +304,7 @@ func (d *Database) migrate() error {
 	_, _ = d.db.Exec("ALTER TABLE games ADD COLUMN upload_date TEXT DEFAULT ''")
 	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_source_type ON games(source_type)")
 	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_torrent_source ON games(torrent_source)")
+	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_source_id ON games(source_type, id DESC)")
 
 	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN is_torrent INTEGER DEFAULT 0")
 	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN magnet_uri TEXT DEFAULT ''")
@@ -314,10 +317,14 @@ func (d *Database) migrate() error {
 			status TEXT NOT NULL DEFAULT 'planned',
 			game_data TEXT NOT NULL DEFAULT '',
 			added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			custom_exe_path TEXT NOT NULL DEFAULT '',
+			launch_arguments TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS idx_favorites_status ON favorites(status);
 	`)
+	_, _ = d.db.Exec(`ALTER TABLE favorites ADD COLUMN custom_exe_path TEXT NOT NULL DEFAULT ''`)
+	_, _ = d.db.Exec(`ALTER TABLE favorites ADD COLUMN launch_arguments TEXT NOT NULL DEFAULT ''`)
 
 	// Backfill missing canonical keys asynchronously in background
 	go d.BackfillCanonicalKeys()
@@ -481,7 +488,7 @@ const gameSelectFieldsLite = `
 	COALESCE(s.title, ''), COALESCE(s.short_description, ''),
 	COALESCE(s.header_image, ''), COALESCE(s.capsule_image, ''), COALESCE(s.background_image, ''),
 	COALESCE(s.icon_url, ''),
-	COALESCE(s.screenshots, '[]'),
+	'',
 	COALESCE(s.genres, '[]'), COALESCE(s.tags, '[]'), COALESCE(s.developers, '[]'),
 	COALESCE(s.publishers, '[]'), COALESCE(s.release_date, ''), COALESCE(s.controller_support, ''),
 	COALESCE(s.metacritic_score, 0),
@@ -614,11 +621,19 @@ func (d *Database) scanGameLite(scanner rowScanner) (GameEntity, error) {
 		g.SourceType = "ftp"
 	}
 
-	var uris []string
-	if err := json.Unmarshal([]byte(urisJSON), &uris); err == nil && len(uris) > 0 {
-		g.MagnetURI = uris[0]
-	} else if strings.HasPrefix(g.RemotePath, "magnet:") {
+	// Fast magnet URI extraction without reflective JSON unmarshaling on every row
+	if strings.HasPrefix(g.RemotePath, "magnet:") {
 		g.MagnetURI = g.RemotePath
+	} else if strings.HasPrefix(urisJSON, "[\"magnet:") {
+		end := strings.Index(urisJSON[2:], "\"")
+		if end != -1 {
+			g.MagnetURI = urisJSON[2 : 2+end]
+		}
+	} else if urisJSON != "" && urisJSON != "[]" && urisJSON != "null" {
+		var uris []string
+		if err := json.Unmarshal([]byte(urisJSON), &uris); err == nil && len(uris) > 0 {
+			g.MagnetURI = uris[0]
+		}
 	}
 
 	if g.SourceType == "ftp" {
@@ -634,20 +649,33 @@ func (d *Database) scanGameLite(scanner rowScanner) (GameEntity, error) {
 		}
 	}
 
-	g.CleanTitle = remote.CleanDisplayTitle(g.CleanTitle)
+	// Avoid re-running heavy regex sweeps if titles were already processed and stored in DB
 	if g.CleanTitle == "" {
 		g.CleanTitle = remote.CleanDisplayTitle(g.RawName)
 	}
 	if g.CanonicalKey == "" {
 		g.CanonicalKey = remote.CleanCanonicalKey(g.CleanTitle)
 	}
-	g.SearchTitle = remote.SanitizeForSteamSearch(g.CleanTitle)
+	if g.SearchTitle == "" {
+		g.SearchTitle = remote.SanitizeForSteamSearch(g.CleanTitle)
+	}
 
-	_ = json.Unmarshal([]byte(screenshotsJSON), &g.Screenshots)
-	_ = json.Unmarshal([]byte(genresJSON), &g.Genres)
-	_ = json.Unmarshal([]byte(tagsJSON), &g.Tags)
-	_ = json.Unmarshal([]byte(devsJSON), &g.Developers)
-	_ = json.Unmarshal([]byte(pubsJSON), &g.Publishers)
+	// Conditional fast unmarshaling: avoid reflection overhead when fields are empty or "[]"
+	if screenshotsJSON != "" && screenshotsJSON != "[]" && screenshotsJSON != "null" {
+		_ = json.Unmarshal([]byte(screenshotsJSON), &g.Screenshots)
+	}
+	if genresJSON != "" && genresJSON != "[]" && genresJSON != "null" {
+		_ = json.Unmarshal([]byte(genresJSON), &g.Genres)
+	}
+	if tagsJSON != "" && tagsJSON != "[]" && tagsJSON != "null" {
+		_ = json.Unmarshal([]byte(tagsJSON), &g.Tags)
+	}
+	if devsJSON != "" && devsJSON != "[]" && devsJSON != "null" {
+		_ = json.Unmarshal([]byte(devsJSON), &g.Developers)
+	}
+	if pubsJSON != "" && pubsJSON != "[]" && pubsJSON != "null" {
+		_ = json.Unmarshal([]byte(pubsJSON), &g.Publishers)
+	}
 
 	if g.CapsuleImage == "" && g.SteamAppID > 0 {
 		if g.HeaderImage != "" {
@@ -850,6 +878,12 @@ func DeduplicateGames(games []GameEntity) []GameEntity {
 				continue
 			}
 			seenVariants[vKey] = true
+			remotePath := item.RemotePath
+			magnetURI := item.MagnetURI
+			if item.SourceType == "torrent" || strings.HasPrefix(remotePath, "magnet:") {
+				remotePath = ""
+				magnetURI = ""
+			}
 			variants = append(variants, GameVariant{
 				ID:            item.ID,
 				RawName:       item.RawName,
@@ -858,14 +892,22 @@ func DeduplicateGames(games []GameEntity) []GameEntity {
 				SizeDisplay:   item.SizeDisplay,
 				SourceType:    item.SourceType,
 				TorrentSource: item.TorrentSource,
-				RemotePath:    item.RemotePath,
-				MagnetURI:     item.MagnetURI,
+				RemotePath:    remotePath,
+				MagnetURI:     magnetURI,
 				UploadDate:    item.UploadDate,
 				IsDirectory:   item.IsDirectory,
 				SteamAppID:    item.SteamAppID,
 			})
 		}
-		primary.Variants = variants
+		if primary.SourceType == "torrent" || strings.HasPrefix(primary.RemotePath, "magnet:") {
+			primary.RemotePath = ""
+			primary.MagnetURI = ""
+		}
+		if len(variants) <= 1 {
+			primary.Variants = make([]GameVariant, 0)
+		} else {
+			primary.Variants = variants
+		}
 		result = append(result, primary)
 	}
 
@@ -1065,7 +1107,8 @@ func (d *Database) GetFavorites() ([]FavoriteItem, error) {
 	defer d.mu.RUnlock()
 
 	rows, err := d.db.Query(`
-		SELECT game_id, status, game_data, COALESCE(added_at, ''), COALESCE(updated_at, '') 
+		SELECT game_id, status, game_data, COALESCE(added_at, ''), COALESCE(updated_at, ''),
+		       COALESCE(custom_exe_path, ''), COALESCE(launch_arguments, '') 
 		FROM favorites 
 		ORDER BY updated_at DESC
 	`)
@@ -1077,12 +1120,14 @@ func (d *Database) GetFavorites() ([]FavoriteItem, error) {
 	var results []FavoriteItem
 	for rows.Next() {
 		var item FavoriteItem
-		var gameDataJSON, addedAt, updatedAt string
-		if err := rows.Scan(&item.GameID, &item.Status, &gameDataJSON, &addedAt, &updatedAt); err != nil {
+		var gameDataJSON, addedAt, updatedAt, customExePath, launchArgs string
+		if err := rows.Scan(&item.GameID, &item.Status, &gameDataJSON, &addedAt, &updatedAt, &customExePath, &launchArgs); err != nil {
 			continue
 		}
 		item.AddedAt = addedAt
 		item.UpdatedAt = updatedAt
+		item.CustomExePath = customExePath
+		item.LaunchArguments = launchArgs
 
 		// Try to fetch live game data if available
 		g, err := d.getGameByIDInternal(item.GameID)
@@ -1099,6 +1144,55 @@ func (d *Database) GetFavorites() ([]FavoriteItem, error) {
 		results = append(results, item)
 	}
 	return results, nil
+}
+
+// SetFavoriteLaunchConfig sets custom executable path and launch parameters for a favorite game
+func (d *Database) SetFavoriteLaunchConfig(gameID int64, exePath, launchArgs string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	stmt := `
+		UPDATE favorites 
+		SET custom_exe_path = ?, launch_arguments = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE game_id = ?
+	`
+	res, err := d.db.Exec(stmt, exePath, launchArgs, gameID)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		var gameDataJSON string
+		if g, gErr := d.getGameByIDInternal(gameID); gErr == nil && g != nil {
+			g.FavoriteStatus = "planned"
+			if b, bErr := json.Marshal(g); bErr == nil {
+				gameDataJSON = string(b)
+			}
+		}
+		insertStmt := `
+			INSERT INTO favorites (game_id, status, game_data, custom_exe_path, launch_arguments, updated_at)
+			VALUES (?, 'planned', ?, ?, ?, CURRENT_TIMESTAMP)
+		`
+		_, err = d.db.Exec(insertStmt, gameID, gameDataJSON, exePath, launchArgs)
+		return err
+	}
+	return nil
+}
+
+// GetFavoriteLaunchConfig returns custom_exe_path and launch_arguments for a game
+func (d *Database) GetFavoriteLaunchConfig(gameID int64) (string, string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var exePath, launchArgs string
+	err := d.db.QueryRow(`
+		SELECT COALESCE(custom_exe_path, ''), COALESCE(launch_arguments, '') 
+		FROM favorites WHERE game_id = ?
+	`, gameID).Scan(&exePath, &launchArgs)
+	if err != nil {
+		return "", "", err
+	}
+	return exePath, launchArgs, nil
 }
 
 // UpsertTorrentGames adds or updates games imported from a Hydra torrent source
@@ -1249,39 +1343,20 @@ func (d *Database) SetGameAppID(gameID int64, appID int) error {
 	}
 
 	// Also propagate AppID and synced status to all duplicate sibling rows in DB
-	var clean, search string
-	_ = d.db.QueryRow(`SELECT clean_title, search_title FROM games WHERE id = ?`, gameID).Scan(&clean, &search)
-	if clean != "" || search != "" {
-		if search != "" {
-			_, _ = d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE search_title = ? AND (steam_appid = 0 OR steam_synced = 0)`, appID, search)
-		}
-		canonicalKey := remote.CleanCanonicalKey(clean)
-		if canonicalKey != "" {
-			if rows, sErr := d.db.Query(`SELECT id, clean_title FROM games WHERE steam_appid <= 0 OR steam_synced = 0`); sErr == nil {
-				var siblingIDs []int64
-				for rows.Next() {
-					var sID int64
-					var sClean string
-					if rows.Scan(&sID, &sClean) == nil {
-						if remote.CleanCanonicalKey(sClean) == canonicalKey {
-							siblingIDs = append(siblingIDs, sID)
-						}
-					}
-				}
-				rows.Close()
-				if len(siblingIDs) > 0 {
-					placeholders := make([]string, len(siblingIDs))
-					args := make([]interface{}, len(siblingIDs)+1)
-					args[0] = appID
-					for i, sID := range siblingIDs {
-						placeholders[i] = "?"
-						args[i+1] = sID
-					}
-					query := fmt.Sprintf("UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (%s)", strings.Join(placeholders, ","))
-					_, _ = d.db.Exec(query, args...)
-				}
-			}
-		}
+	var clean, search, canonical string
+	_ = d.db.QueryRow(`SELECT clean_title, search_title, canonical_key FROM games WHERE id = ?`, gameID).Scan(&clean, &search, &canonical)
+	if canonical == "" && clean != "" {
+		canonical = remote.CleanCanonicalKey(clean)
+	}
+
+	if search != "" {
+		_, _ = d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE search_title = ? AND (steam_appid = 0 OR steam_synced = 0)`, appID, search)
+	}
+	if clean != "" {
+		_, _ = d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE clean_title = ? AND (steam_appid = 0 OR steam_synced = 0)`, appID, clean)
+	}
+	if canonical != "" {
+		_, _ = d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE canonical_key = ? AND (steam_appid = 0 OR steam_synced = 0)`, appID, canonical)
 	}
 
 	return nil
@@ -1345,12 +1420,20 @@ func (d *Database) SyncDuplicateGamesMetadata() (int64, error) {
 	}
 
 	var syncedCount int64
-	for _, item := range toUpdate {
-		res, err := d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, item.appID, item.id)
-		if err == nil {
-			if aff, _ := res.RowsAffected(); aff > 0 {
-				syncedCount += aff
+	if len(toUpdate) > 0 {
+		if tx, err := d.db.Begin(); err == nil {
+			if stmt, err := tx.Prepare(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`); err == nil {
+				for _, item := range toUpdate {
+					res, err := stmt.Exec(item.appID, item.id)
+					if err == nil {
+						if aff, _ := res.RowsAffected(); aff > 0 {
+							syncedCount += aff
+						}
+					}
+				}
+				stmt.Close()
 			}
+			_ = tx.Commit()
 		}
 	}
 
@@ -1380,19 +1463,38 @@ func (d *Database) ResetUnmatchedGames() (int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// Re-sanitize search_title for all games in DB to ensure newly added sanitization rules take effect
-	if rows, err := d.db.Query(`SELECT id, clean_title FROM games`); err == nil {
+	// Re-sanitize search_title only for games in DB with missing search_title
+	if rows, err := d.db.Query(`SELECT id, clean_title FROM games WHERE search_title = '' OR search_title IS NULL`); err == nil {
+		var updates []struct {
+			id     int64
+			search string
+		}
 		for rows.Next() {
 			var id int64
 			var clean string
 			if err := rows.Scan(&id, &clean); err == nil {
 				sanitized := remote.SanitizeForSteamSearch(clean)
 				if sanitized != "" {
-					_, _ = d.db.Exec(`UPDATE games SET search_title = ? WHERE id = ? AND search_title != ?`, sanitized, id, sanitized)
+					updates = append(updates, struct {
+						id     int64
+						search string
+					}{id: id, search: sanitized})
 				}
 			}
 		}
 		rows.Close()
+
+		if len(updates) > 0 {
+			if tx, err := d.db.Begin(); err == nil {
+				if stmt, err := tx.Prepare(`UPDATE games SET search_title = ? WHERE id = ?`); err == nil {
+					for _, u := range updates {
+						_, _ = stmt.Exec(u.search, u.id)
+					}
+					stmt.Close()
+				}
+				_ = tx.Commit()
+			}
+		}
 	}
 
 	res, err := d.db.Exec(`
@@ -1459,10 +1561,20 @@ func (d *Database) PurgeMismatchedMetadata(similarityChecker func(query, candida
 	}
 
 	purged := 0
-	for _, m := range mismatches {
-		_, err := d.db.Exec(`UPDATE games SET steam_appid = 0, steam_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, m.id)
-		if err == nil {
-			purged++
+	if len(mismatches) > 0 {
+		if tx, err := d.db.Begin(); err == nil {
+			if stmt, err := tx.Prepare(`UPDATE games SET steam_appid = 0, steam_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`); err == nil {
+				for _, m := range mismatches {
+					res, err := stmt.Exec(m.id)
+					if err == nil {
+						if aff, _ := res.RowsAffected(); aff > 0 {
+							purged += int(aff)
+						}
+					}
+				}
+				stmt.Close()
+			}
+			_ = tx.Commit()
 		}
 	}
 
@@ -1559,20 +1671,6 @@ func (d *Database) GetSteamMetadataFromCache(appID int) (*SteamMetadata, error) 
 	_ = json.Unmarshal([]byte(tagsJSON), &m.Tags)
 	_ = json.Unmarshal([]byte(devsJSON), &m.Developers)
 	_ = json.Unmarshal([]byte(pubsJSON), &m.Publishers)
-
-	// If cached movies exist but lack modern HLS streams, treat cache as expired so fresh streams are fetched
-	if len(m.Movies) > 0 {
-		hasHLS := false
-		for _, mov := range m.Movies {
-			if strings.TrimSpace(mov.HLS) != "" {
-				hasHLS = true
-				break
-			}
-		}
-		if !hasHLS {
-			return nil, nil
-		}
-	}
 
 	return &m, nil
 }

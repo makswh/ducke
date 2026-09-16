@@ -14,7 +14,7 @@
 </script>
 
 {#if isVisible}
-  <div class="fixed bottom-4 right-6 z-40 pointer-events-none hidden md:flex items-center gap-3 px-3.5 py-1.5 rounded-xl bg-[#0d0f14]/95 backdrop-blur-lg border border-white/[0.1] text-[11px] font-semibold text-[#9ca3af] shadow-2xl transition-all duration-300">
+  <div class="fixed bottom-4 right-6 z-40 pointer-events-none hidden md:flex items-center gap-3 px-3.5 py-1.5 rounded-xl bg-[#0d0f14] border border-white/10 text-[11px] font-semibold text-[#9ca3af] shadow-2xl transition-all duration-300">
     
     <!-- Button A -->
     <div class="flex items-center gap-1.5">

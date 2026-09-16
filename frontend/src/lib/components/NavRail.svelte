@@ -76,7 +76,6 @@
           >
             <Layers class="w-5 h-5 stroke-[1.75] {activeTab === 'catalog' ? (isCatalogLoading ? 'text-sky-400 animate-pulse' : 'text-white') : ''}" />
             {#if isCatalogLoading}
-              <span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-sky-400 animate-ping"></span>
               <span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-sky-400"></span>
             {/if}
           </button>

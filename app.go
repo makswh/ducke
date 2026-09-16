@@ -38,9 +38,14 @@ type App struct {
 	steamService       *metadata.SteamService
 	downloader         *downloader.DownloadManager
 	collectionsService *collections.StopGameService
-	catalogMu          sync.Mutex
-	torrentMu          sync.Mutex
-	appDataDir         string
+	catalogMu           sync.Mutex
+	torrentMu           sync.Mutex
+	torrentCache        []database.GameEntity
+	torrentCacheByID    map[int64]int
+	torrentCacheByAppID map[int][]int
+	torrentCacheValid   bool
+	enrichmentInFlight  sync.Map
+	appDataDir          string
 }
 
 // NewApp creates a new App application struct
@@ -101,27 +106,17 @@ func (a *App) startup(ctx context.Context) {
 		wailsRuntime.EventsEmit(a.ctx, "download:progress", event)
 	})
 
-	// Defer heavy database maintenance to background goroutine so startup queries (GetCatalog, GetTorrentCatalog)
-	// return immediately with cached records without waiting for SQLite locks
+	// Pre-warm torrent catalog cache into memory in background immediately
+	go func() {
+		_, _ = a.GetTorrentCatalog(false)
+		if a.ctx != nil {
+			wailsRuntime.EventsEmit(a.ctx, "torrents:updated", nil)
+		}
+	}()
+
+	// Start background enrichment without blocking SQLite startup queries
 	go func() {
 		time.Sleep(1500 * time.Millisecond)
-
-		// Auto-purge any historical corrupt matches where title similarity < 70%
-		if purgedCount, err := a.db.PurgeMismatchedMetadata(metadata.CalculateTitleSimilarity, 0.70); err == nil && purgedCount > 0 {
-			log.Printf("[Steam] Purged %d mismatched metadata records for fresh lookup", purgedCount)
-		}
-
-		// Reset any historical unmatched games (e.g. Abathor) so modern Steam Suggest engine processes them
-		if resetCount, err := a.db.ResetUnmatchedGames(); err == nil && resetCount > 0 {
-			log.Printf("[Steam] Re-queued %d unmatched games for enrichment with modern Suggest API", resetCount)
-		}
-
-		// Propagate metadata to duplicate releases (e.g. repacks, versions)
-		if dupeSynced, err := a.db.SyncDuplicateGamesMetadata(); err == nil && dupeSynced > 0 {
-			log.Printf("[Steam] Propagated Steam metadata to %d duplicate releases", dupeSynced)
-		}
-
-		// Start progressive background enrichment worker after maintenance has populated/reset records
 		a.triggerBackgroundEnrichment()
 	}()
 }
@@ -133,6 +128,7 @@ func (a *App) triggerBackgroundEnrichment() {
 	a.steamService.StartBackgroundEnrichment(
 		func(gameID int64, appID int) {
 			if game, err := a.db.GetGameByID(gameID); err == nil && game != nil {
+				a.updateTorrentCacheItem(game)
 				if a.ctx != nil {
 					wailsRuntime.EventsEmit(a.ctx, "game:enriched", game)
 					if game.IconURL != "" {
@@ -337,46 +333,63 @@ func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 		needDetails := (details.Game.ShortDescription == "" && details.Game.DetailedDescription == "") || (len(details.Game.Screenshots) == 0 && len(details.Game.Genres) == 0)
 		needTags := len(details.Game.Tags) == 0
 		if needReviews || needDetails || needTags {
-			go func(gameID int64, appID int, fetchReviews, fetchDetails, fetchTags bool) {
-				if a.steamService != nil {
-					if fetchDetails {
-						meta, err := a.steamService.FetchAppDetails(appID)
-						if err == nil && meta != nil {
-							if updatedGame, err := a.db.GetGameByID(gameID); err == nil && updatedGame != nil {
-								if a.ctx != nil {
-									wailsRuntime.EventsEmit(a.ctx, "game:enriched", updatedGame)
+			appID := details.Game.SteamAppID
+			if _, loaded := a.enrichmentInFlight.LoadOrStore(appID, true); !loaded {
+				go func(gameID int64, appID int, fetchReviews, fetchDetails, fetchTags bool) {
+					defer a.enrichmentInFlight.Delete(appID)
+					if a.steamService != nil {
+						if fetchDetails {
+							meta, err := a.steamService.FetchAppDetailsPriority(appID)
+							if err == nil && meta != nil {
+								if updatedGame, err := a.db.GetGameByID(gameID); err == nil && updatedGame != nil {
+									if a.ctx != nil {
+										wailsRuntime.EventsEmit(a.ctx, "game:enriched", updatedGame)
+									}
+								}
+								// If reviews were populated by FetchAppDetails, notify UI immediately without a second request
+								if meta.TotalReviews > 0 && a.ctx != nil {
+									wailsRuntime.EventsEmit(a.ctx, "game:reviews-updated", map[string]interface{}{
+										"gameId":          gameID,
+										"steamAppId":      appID,
+										"reviewScoreDesc": meta.ReviewScoreDesc,
+										"reviewPercent":   meta.ReviewPercent,
+										"totalReviews":    meta.TotalReviews,
+										"positiveReviews": meta.TotalPositive,
+									})
 								}
 							}
-						}
-					} else if fetchTags {
-						tags := a.steamService.FetchAppTags(appID)
-						if len(tags) > 0 {
-							_ = a.db.UpdateSteamMetadataTags(appID, tags)
-							if updatedGame, err := a.db.GetGameByID(gameID); err == nil && updatedGame != nil {
-								if a.ctx != nil {
-									wailsRuntime.EventsEmit(a.ctx, "game:enriched", updatedGame)
+						} else {
+							if fetchTags {
+								tags := a.steamService.FetchAppTags(appID)
+								if len(tags) > 0 {
+									_ = a.db.UpdateSteamMetadataTags(appID, tags)
+									if updatedGame, err := a.db.GetGameByID(gameID); err == nil && updatedGame != nil {
+										if a.ctx != nil {
+											wailsRuntime.EventsEmit(a.ctx, "game:enriched", updatedGame)
+										}
+									}
+								}
+							}
+							if fetchReviews {
+								desc, pct, tot, pos := a.steamService.FetchSteamReviewSummary(appID)
+								if tot > 0 {
+									_ = a.db.UpdateSteamReviewSummary(appID, desc, pct, tot, pos)
+									if a.ctx != nil {
+										wailsRuntime.EventsEmit(a.ctx, "game:reviews-updated", map[string]interface{}{
+											"gameId":          gameID,
+											"steamAppId":      appID,
+											"reviewScoreDesc": desc,
+											"reviewPercent":   pct,
+											"totalReviews":    tot,
+											"positiveReviews": pos,
+										})
+									}
 								}
 							}
 						}
 					}
-					if fetchReviews {
-						desc, pct, tot, pos := a.steamService.FetchSteamReviewSummary(appID)
-						if tot > 0 {
-							_ = a.db.UpdateSteamReviewSummary(appID, desc, pct, tot, pos)
-							if a.ctx != nil {
-								wailsRuntime.EventsEmit(a.ctx, "game:reviews-updated", map[string]interface{}{
-									"gameId":          gameID,
-									"steamAppId":      appID,
-									"reviewScoreDesc": desc,
-									"reviewPercent":   pct,
-									"totalReviews":    tot,
-									"positiveReviews": pos,
-								})
-							}
-						}
-					}
-				}
-			}(details.Game.ID, details.Game.SteamAppID, needReviews, needDetails, needTags)
+				}(details.Game.ID, appID, needReviews, needDetails, needTags)
+			}
 		}
 	}
 
@@ -413,9 +426,49 @@ func (a *App) LaunchGameByGameID(gameID int64) error {
 	return fmt.Errorf("игра еще не установлена")
 }
 
+// SetFavoriteLaunchConfig saves a custom executable path and launch arguments for a favorite game
+func (a *App) SetFavoriteLaunchConfig(gameID int64, exePath, launchArgs string) error {
+	if err := a.db.SetFavoriteLaunchConfig(gameID, exePath, launchArgs); err != nil {
+		return err
+	}
+	wailsRuntime.EventsEmit(a.ctx, "favorites:updated", nil)
+	return nil
+}
+
+// SelectGameExeFile opens a file dialog filtered to .exe files and returns the chosen path
+func (a *App) SelectGameExeFile() string {
+	path, err := wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{
+		Title: "Выберите исполняемый файл игры",
+		Filters: []wailsRuntime.FileFilter{
+			{DisplayName: "Исполняемые файлы (*.exe)", Pattern: "*.exe"},
+			{DisplayName: "Все файлы (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+// LaunchGameWithCustomConfig launches a game using a custom exe path from favorites,
+// falling back to the standard install-path detection if none is set.
+func (a *App) LaunchGameWithCustomConfig(gameID int64) error {
+	exePath, launchArgs, err := a.db.GetFavoriteLaunchConfig(gameID)
+	if err == nil && exePath != "" {
+		var args []string
+		if launchArgs != "" {
+			args = strings.Fields(launchArgs)
+		}
+		cmd := exec.Command(exePath, args...)
+		cmd.Dir = filepath.Dir(exePath)
+		return cmd.Start()
+	}
+	return a.LaunchGameByGameID(gameID)
+}
+
 func (a *App) UpdateSteamAppID(gameID int64, appID int) error {
 	if appID > 0 {
-		_, _ = a.steamService.FetchAppDetails(appID)
+		_, _ = a.steamService.FetchAppDetailsPriority(appID)
 		if err := a.db.SetGameAppID(gameID, appID); err != nil {
 			return err
 		}
@@ -444,6 +497,7 @@ func (a *App) ResetGameMetadata(gameID int64) error {
 func (a *App) EnrichGameNow(gameID int64) (*database.GameEntity, error) {
 	game, err := a.steamService.EnrichGame(gameID)
 	if err == nil && game != nil {
+		a.updateTorrentCacheItem(game)
 		wailsRuntime.EventsEmit(a.ctx, "game:enriched", game)
 	}
 	return game, err
@@ -465,7 +519,7 @@ func (a *App) GetGameMovies(appID int) ([]database.SteamMovie, error) {
 	if appID <= 0 {
 		return []database.SteamMovie{}, nil
 	}
-	meta, err := a.steamService.FetchAppDetails(appID)
+	meta, err := a.steamService.FetchAppDetailsPriority(appID)
 	if err != nil {
 		return []database.SteamMovie{}, err
 	}
@@ -922,6 +976,8 @@ func (a *App) AddTorrentSource(sourceURL string) (*config.TorrentSourceConfig, e
 		return nil, fmt.Errorf("ошибка сохранения настроек: %w", err)
 	}
 
+	a.invalidateTorrentCache()
+
 	log.Printf("[Torrent] Added source \"%s\" (%d items) from %s", sourceName, len(hf.Downloads), sourceURL)
 
 	if a.ctx != nil {
@@ -971,6 +1027,8 @@ func (a *App) RemoveTorrentSource(id string) error {
 		log.Printf("[Torrent] Error pruning games for source %s: %v", id, err)
 	}
 
+	a.invalidateTorrentCache()
+
 	log.Printf("[Torrent] Removed source %s", id)
 
 	if a.ctx != nil {
@@ -991,6 +1049,8 @@ func (a *App) ToggleTorrentSource(id string, enabled bool) error {
 	if err := a.cfgManager.SaveSettings(settings); err != nil {
 		return err
 	}
+
+	a.invalidateTorrentCache()
 
 	if a.ctx != nil {
 		wailsRuntime.EventsEmit(a.ctx, "settings:updated", a.cfgManager.GetSettings())
@@ -1028,6 +1088,7 @@ func (a *App) SyncTorrentSources() error {
 	}
 
 	if updated {
+		a.invalidateTorrentCache()
 		_ = a.cfgManager.SaveSettings(settings)
 		if a.ctx != nil {
 			wailsRuntime.EventsEmit(a.ctx, "settings:updated", a.cfgManager.GetSettings())
@@ -1038,25 +1099,195 @@ func (a *App) SyncTorrentSources() error {
 	return nil
 }
 
+func (a *App) invalidateTorrentCache() {
+	a.torrentMu.Lock()
+	a.torrentCache = nil
+	a.torrentCacheByID = nil
+	a.torrentCacheByAppID = nil
+	a.torrentCacheValid = false
+	a.torrentMu.Unlock()
+}
+
+func (a *App) rebuildTorrentCacheIndexLocked() {
+	a.torrentCacheByID = make(map[int64]int, len(a.torrentCache)*2)
+	a.torrentCacheByAppID = make(map[int][]int, len(a.torrentCache))
+	for i := range a.torrentCache {
+		g := &a.torrentCache[i]
+		a.torrentCacheByID[g.ID] = i
+		for _, v := range g.Variants {
+			a.torrentCacheByID[v.ID] = i
+		}
+		if g.SteamAppID > 0 {
+			a.torrentCacheByAppID[g.SteamAppID] = append(a.torrentCacheByAppID[g.SteamAppID], i)
+		}
+	}
+}
+
+func (a *App) updateTorrentCacheItem(enriched *database.GameEntity) {
+	if enriched == nil {
+		return
+	}
+	a.torrentMu.Lock()
+	defer a.torrentMu.Unlock()
+	if !a.torrentCacheValid || len(a.torrentCache) == 0 {
+		return
+	}
+
+	targetIndices := make(map[int]bool)
+	if a.torrentCacheByID != nil {
+		if idx, ok := a.torrentCacheByID[enriched.ID]; ok {
+			targetIndices[idx] = true
+		}
+	}
+	if enriched.SteamAppID > 0 && a.torrentCacheByAppID != nil {
+		if indices, ok := a.torrentCacheByAppID[enriched.SteamAppID]; ok {
+			for _, idx := range indices {
+				targetIndices[idx] = true
+			}
+		}
+	}
+
+	// Fallback if not found in index
+	if len(targetIndices) == 0 {
+		for i := range a.torrentCache {
+			g := &a.torrentCache[i]
+			match := g.ID == enriched.ID || (enriched.SteamAppID != 0 && g.SteamAppID == enriched.SteamAppID)
+			if !match && len(g.Variants) > 0 {
+				for _, v := range g.Variants {
+					if v.ID == enriched.ID {
+						match = true
+						break
+					}
+				}
+			}
+			if match {
+				targetIndices[i] = true
+				break
+			}
+		}
+	}
+
+	for idx := range targetIndices {
+		if idx < 0 || idx >= len(a.torrentCache) {
+			continue
+		}
+		g := &a.torrentCache[idx]
+		g.SteamAppID = enriched.SteamAppID
+		g.SteamSynced = enriched.SteamSynced
+		g.SteamTitle = enriched.SteamTitle
+		g.ShortDescription = enriched.ShortDescription
+		g.DetailedDescription = enriched.DetailedDescription
+		g.HeaderImage = enriched.HeaderImage
+		g.CapsuleImage = enriched.CapsuleImage
+		g.BackgroundImage = enriched.BackgroundImage
+		g.IconURL = enriched.IconURL
+		g.Genres = enriched.Genres
+		g.Tags = enriched.Tags
+		g.Developers = enriched.Developers
+		g.Publishers = enriched.Publishers
+		g.ReleaseDate = enriched.ReleaseDate
+		g.ControllerSupport = enriched.ControllerSupport
+		g.PCRequirements = enriched.PCRequirements
+		g.MetacriticScore = enriched.MetacriticScore
+		g.ReviewScoreDesc = enriched.ReviewScoreDesc
+		g.ReviewPercent = enriched.ReviewPercent
+		g.TotalReviews = enriched.TotalReviews
+		for vi := range g.Variants {
+			g.Variants[vi].SteamAppID = enriched.SteamAppID
+		}
+		if enriched.SteamAppID > 0 && a.torrentCacheByAppID != nil {
+			a.torrentCacheByAppID[enriched.SteamAppID] = append(a.torrentCacheByAppID[enriched.SteamAppID], idx)
+		}
+	}
+}
+
 func (a *App) GetTorrentCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	a.torrentMu.Lock()
 	defer a.torrentMu.Unlock()
 
+	if !forceRefresh && a.torrentCacheValid && a.torrentCache != nil {
+		res := make([]database.GameEntity, len(a.torrentCache))
+		copy(res, a.torrentCache)
+		return res, nil
+	}
+
 	if forceRefresh {
 		_ = a.SyncTorrentSources()
-		_, _ = a.db.PurgeMismatchedMetadata(metadata.CalculateTitleSimilarity, 0.70)
-		_, _ = a.db.ResetUnmatchedGames()
-		_, _ = a.db.SyncDuplicateGamesMetadata()
 		a.triggerBackgroundEnrichment()
 	}
 
 	games, err := a.db.GetTorrentGames()
 	if err == nil && len(games) == 0 && len(a.cfgManager.GetSettings().TorrentSources) > 0 {
 		_ = a.SyncTorrentSources()
-		return a.db.GetTorrentGames()
+		games, err = a.db.GetTorrentGames()
+	}
+
+	if err == nil {
+		a.torrentCache = games
+		a.rebuildTorrentCacheIndexLocked()
+		a.torrentCacheValid = true
+		res := make([]database.GameEntity, len(games))
+		copy(res, games)
+		return res, nil
 	}
 
 	return games, err
+}
+
+// ServeHTTP implements http.Handler for streaming large data directly to WebView2
+// completely bypassing Windows ExecuteScript IPC message payload limits.
+func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/torrent-catalog") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Cache-Control", "no-cache")
+
+		forceRefresh := r.URL.Query().Get("refresh") == "1"
+
+		games, err := a.GetTorrentCatalog(forceRefresh)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(games)
+		return
+	}
+	http.NotFound(w, r)
+}
+
+func (a *App) GetTorrentCatalogCount() int {
+	a.torrentMu.Lock()
+	if !a.torrentCacheValid || a.torrentCache == nil {
+		a.torrentMu.Unlock()
+		_, _ = a.GetTorrentCatalog(false)
+		a.torrentMu.Lock()
+	}
+	count := len(a.torrentCache)
+	a.torrentMu.Unlock()
+	return count
+}
+
+func (a *App) GetTorrentCatalogChunk(offset int, limit int) []database.GameEntity {
+	a.torrentMu.Lock()
+	if !a.torrentCacheValid || a.torrentCache == nil {
+		a.torrentMu.Unlock()
+		_, _ = a.GetTorrentCatalog(false)
+		a.torrentMu.Lock()
+	}
+	defer a.torrentMu.Unlock()
+
+	total := len(a.torrentCache)
+	if offset < 0 || offset >= total || limit <= 0 {
+		return []database.GameEntity{}
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	res := make([]database.GameEntity, end-offset)
+	copy(res, a.torrentCache[offset:end])
+	return res
 }
 
 // OpenConfigFolder opens the Ducke configuration/data directory in native explorer
@@ -1076,6 +1307,9 @@ func (a *App) ClearMetadataCache() (int, error) {
 	}
 	purged, err := a.db.PurgeMismatchedMetadata(metadata.CalculateTitleSimilarity, 0.70)
 	resetCount, _ := a.db.ResetUnmatchedGames()
+	_, _ = a.db.SyncDuplicateGamesMetadata()
+	a.invalidateTorrentCache()
+	a.triggerBackgroundEnrichment()
 	return purged + int(resetCount), err
 }
 

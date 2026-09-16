@@ -7,6 +7,7 @@ import {downloader} from '../models';
 import {logger} from '../models';
 import {metadata} from '../models';
 import {collections} from '../models';
+import {http} from '../models';
 
 export function AddTorrentSource(arg1:string):Promise<config.TorrentSourceConfig>;
 
@@ -66,6 +67,10 @@ export function GetStorageDrives():Promise<Array<downloader.StorageDriveInfo>>;
 
 export function GetTorrentCatalog(arg1:boolean):Promise<Array<database.GameEntity>>;
 
+export function GetTorrentCatalogChunk(arg1:number,arg2:number):Promise<Array<database.GameEntity>>;
+
+export function GetTorrentCatalogCount():Promise<number>;
+
 export function GetTorrentSources():Promise<Array<config.TorrentSourceConfig>>;
 
 export function ImportFileZillaFile():Promise<Array<config.ServerConfig>>;
@@ -79,6 +84,8 @@ export function IsLinuxSystem():Promise<boolean>;
 export function LaunchGame(arg1:string):Promise<void>;
 
 export function LaunchGameByGameID(arg1:number):Promise<void>;
+
+export function LaunchGameWithCustomConfig(arg1:number):Promise<void>;
 
 export function LaunchLinuxInstaller(arg1:string):Promise<void>;
 
@@ -118,7 +125,13 @@ export function SearchSteamCandidates(arg1:string):Promise<Array<metadata.SteamC
 
 export function SelectDirectory():Promise<string>;
 
+export function SelectGameExeFile():Promise<string>;
+
+export function ServeHTTP(arg1:http.ResponseWriter,arg2:http.Request):Promise<void>;
+
 export function SetActiveServer(arg1:string):Promise<void>;
+
+export function SetFavoriteLaunchConfig(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function SetFavoriteStatus(arg1:number,arg2:string):Promise<void>;
 

@@ -180,6 +180,7 @@
   color: #9ca3af;
   font-size: 0.8125rem;
   line-height: 1.65;
+  contain: layout style paint;
 }
 
 .steam-html-content h1,
@@ -213,11 +214,13 @@
 .steam-html-content iframe,
 .steam-html-content object,
 .steam-html-content embed {
-  width: 100% !important;
   max-width: 100% !important;
+  max-height: 420px !important;
+  width: auto !important;
   height: auto !important;
+  object-fit: contain;
   border-radius: 0.75rem;
-  margin: 1.25rem 0;
+  margin: 1rem auto;
   display: block;
   box-shadow: none !important;
   border: none !important;

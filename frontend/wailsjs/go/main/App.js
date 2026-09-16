@@ -118,6 +118,14 @@ export function GetTorrentCatalog(arg1) {
   return window['go']['main']['App']['GetTorrentCatalog'](arg1);
 }
 
+export function GetTorrentCatalogChunk(arg1, arg2) {
+  return window['go']['main']['App']['GetTorrentCatalogChunk'](arg1, arg2);
+}
+
+export function GetTorrentCatalogCount() {
+  return window['go']['main']['App']['GetTorrentCatalogCount']();
+}
+
 export function GetTorrentSources() {
   return window['go']['main']['App']['GetTorrentSources']();
 }
@@ -144,6 +152,10 @@ export function LaunchGame(arg1) {
 
 export function LaunchGameByGameID(arg1) {
   return window['go']['main']['App']['LaunchGameByGameID'](arg1);
+}
+
+export function LaunchGameWithCustomConfig(arg1) {
+  return window['go']['main']['App']['LaunchGameWithCustomConfig'](arg1);
 }
 
 export function LaunchLinuxInstaller(arg1) {
@@ -222,8 +234,20 @@ export function SelectDirectory() {
   return window['go']['main']['App']['SelectDirectory']();
 }
 
+export function SelectGameExeFile() {
+  return window['go']['main']['App']['SelectGameExeFile']();
+}
+
+export function ServeHTTP(arg1, arg2) {
+  return window['go']['main']['App']['ServeHTTP'](arg1, arg2);
+}
+
 export function SetActiveServer(arg1) {
   return window['go']['main']['App']['SetActiveServer'](arg1);
+}
+
+export function SetFavoriteLaunchConfig(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetFavoriteLaunchConfig'](arg1, arg2, arg3);
 }
 
 export function SetFavoriteStatus(arg1, arg2) {
