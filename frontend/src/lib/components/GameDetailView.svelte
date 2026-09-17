@@ -1,48 +1,49 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import {
-    Gamepad2,
+    GameController as Gamepad2,
     HardDrive,
-    Search,
+    MagnifyingGlass as Search,
     X,
     Folder,
-    Download,
+    DownloadSimple as Download,
     Star,
     Calendar,
     User,
-    Layers,
-    Building2,
+    SquaresFour as Layers,
+    Buildings as Building2,
     Tag,
-    Tags,
+    Tag as Tags,
     Monitor,
     Play,
-    Server,
+    HardDrives as Server,
     Disc,
     Cpu,
-    CheckCircle2,
+    CheckCircle as CheckCircle2,
     FolderOpen,
     FileText,
     ShieldCheck,
-    Edit3,
-    RefreshCw,
-    Link2,
-    Unlink,
-    ExternalLink,
+    PencilSimple as Edit3,
+    ArrowsClockwise as RefreshCw,
+    Link as Link2,
+    LinkBreak as Unlink,
+    ArrowSquareOut as ExternalLink,
     Check,
-    ChevronLeft,
-    ChevronRight,
-    Film,
+    CaretLeft as ChevronLeft,
+    CaretRight as ChevronRight,
+    FilmStrip as Film,
     Image as ImageIcon,
-    Maximize2,
-    Minimize2,
-    ChevronDown,
-    Bookmark,
-    BookmarkCheck,
+    ArrowsOut as Maximize2,
+    ArrowsIn as Minimize2,
+    CaretDown as ChevronDown,
+    BookmarkSimple as Bookmark,
+    BookmarkSimple as BookmarkCheck,
     Clock,
-    Trash2,
+    Trash as Trash2,
     Copy,
-    Settings
-  } from 'lucide-svelte';
+    Gear as Settings,
+    SteamLogo
+  } from 'phosphor-svelte';
   import VideoPlayer from './VideoPlayer.svelte';
   import type {
     GameEntity,
@@ -53,11 +54,12 @@
     GamePageDetails
   } from '../types/game';
   import { EventsOn } from '../../../wailsjs/runtime/runtime';
-  import { SetFavoriteStatus, RemoveFromFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig } from '../../../wailsjs/go/main/App';
+  import { SetFavoriteStatus, RemoveFromFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig, AddGameToSteam, CheckGameInSteam, RemoveGameFromSteam } from '../../../wailsjs/go/main/App';
+  import { isPlaceholderTitle, cleanTorrentTitle, getDisplayTitle } from '../utils/titleUtils';
 
 
   let {
-    game = null as GameEntity | null,
+    game = $bindable(null as GameEntity | null),
     downloadPath = '',
     isLoading = false,
     loadingStatusText = '',
@@ -74,38 +76,109 @@
   let lcLaunchArgs = $state<string>('');
   let lcSaving = $state<boolean>(false);
   let lcSaveSuccess = $state<boolean>(false);
+  let lcCandidates = $state<string[]>([]);
+  let isScanningCandidates = $state<boolean>(false);
 
-  // Sync modal fields when favoriteItem changes
+  // Synced local custom launch config (reacts even if favoriteItem is not passed as prop)
+  let currentCustomExePath = $state<string>('');
+  let currentLaunchArgs = $state<string>('');
+
+  // Sync modal fields when favoriteItem or game changes
   $effect(() => {
     if (favoriteItem) {
       lcExePath = favoriteItem.customExePath || '';
       lcLaunchArgs = favoriteItem.launchArguments || '';
+      currentCustomExePath = favoriteItem.customExePath || '';
+      currentLaunchArgs = favoriteItem.launchArguments || '';
+    } else if (game?.id) {
+      const targetGame = pageDetails?.game || game;
+      if (targetGame?.favoriteStatus) {
+        const app = typeof window !== 'undefined' ? (window as any)?.go?.main?.App : null;
+        if (app && app.GetFavoriteLaunchConfig) {
+          app.GetFavoriteLaunchConfig(targetGame.id).then((cfg: any) => {
+            if (cfg && cfg.exePath) {
+              lcExePath = cfg.exePath || '';
+              lcLaunchArgs = cfg.launchArgs || '';
+              currentCustomExePath = cfg.exePath || '';
+              currentLaunchArgs = cfg.launchArgs || '';
+            } else {
+              currentCustomExePath = '';
+              currentLaunchArgs = '';
+            }
+          }).catch(() => {});
+        }
+      } else {
+        lcExePath = '';
+        lcLaunchArgs = '';
+        currentCustomExePath = '';
+        currentLaunchArgs = '';
+      }
     }
   });
 
-  let hasCustomExe = $derived(!!(favoriteItem?.customExePath?.trim()));
+  let hasCustomExe = $derived(!!(currentCustomExePath?.trim() || favoriteItem?.customExePath?.trim()));
+
+  async function loadExeCandidates() {
+    const curId = game?.id;
+    if (!curId) return;
+    isScanningCandidates = true;
+    try {
+      const app = typeof window !== 'undefined' ? (window as any)?.go?.main?.App : null;
+      if (app && app.FindGameExecutables) {
+        const found = await app.FindGameExecutables(curId);
+        if (Array.isArray(found)) {
+          lcCandidates = found;
+          if (!lcExePath && found.length === 1) {
+            lcExePath = found[0];
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[GameDetailView] Failed to find executables:', e);
+    } finally {
+      isScanningCandidates = false;
+    }
+  }
+
+  function openLaunchConfigModal() {
+    isLaunchConfigOpen = true;
+    loadExeCandidates();
+  }
 
   async function handleBrowseExe() {
-    const path = await SelectGameExeFile();
+    const defaultDir = pageDetails?.localPath || '';
+    const app = typeof window !== 'undefined' ? (window as any)?.go?.main?.App : null;
+    let path = '';
+    if (app && app.SelectGameExeFile) {
+      path = await app.SelectGameExeFile(defaultDir);
+    } else {
+      path = await SelectGameExeFile();
+    }
     if (path) lcExePath = path;
   }
 
-  async function handleSaveLaunchConfig() {
+  async function handleSaveLaunchConfig(andLaunch = false) {
     if (!game) return;
     lcSaving = true;
     lcSaveSuccess = false;
     try {
       await SetFavoriteLaunchConfig(game.id, lcExePath.trim(), lcLaunchArgs.trim());
-      // Update local favoriteItem so hasCustomExe reactivity fires
+      currentCustomExePath = lcExePath.trim();
+      currentLaunchArgs = lcLaunchArgs.trim();
       if (favoriteItem) {
         favoriteItem.customExePath = lcExePath.trim();
         favoriteItem.launchArguments = lcLaunchArgs.trim();
       }
       lcSaveSuccess = true;
-      setTimeout(() => {
-        lcSaveSuccess = false;
-        if (lcExePath.trim()) isLaunchConfigOpen = false;
-      }, 1200);
+      if (andLaunch) {
+        isLaunchConfigOpen = false;
+        await handleLaunchWithCustom();
+      } else {
+        setTimeout(() => {
+          lcSaveSuccess = false;
+          if (lcExePath.trim()) isLaunchConfigOpen = false;
+        }, 800);
+      }
     } catch (e) {
       console.error('[GameDetailView] Failed to save launch config:', e);
     } finally {
@@ -113,12 +186,116 @@
     }
   }
 
+  let launchErrorFeedback = $state<string | null>(null);
+  let launchErrorTimeout: any = null;
+
+  function showLaunchError(msg: string) {
+    launchErrorFeedback = msg;
+    if (launchErrorTimeout) clearTimeout(launchErrorTimeout);
+    launchErrorTimeout = setTimeout(() => {
+      launchErrorFeedback = null;
+    }, 4500);
+  }
+
   async function handleLaunchWithCustom() {
     if (!game) return;
     try {
       await LaunchGameWithCustomConfig(game.id);
-    } catch (err) {
+    } catch (err: any) {
       console.error('[GameDetailView] Failed to launch with custom config:', err);
+      const errMsg = err?.message || String(err);
+      showLaunchError(`Ошибка запуска: ${errMsg}`);
+    }
+  }
+
+  async function handlePlayButtonClick() {
+    if (isGameInFavorites) {
+      if (!hasCustomExe) {
+        openLaunchConfigModal();
+        return;
+      }
+      await handleLaunchWithCustom();
+      return;
+    }
+
+    if (hasCustomExe) {
+      await handleLaunchWithCustom();
+      return;
+    }
+
+    await handleLaunchGame();
+  }
+
+  // Steam integration state
+  let isGameInSteam = $state<boolean>(false);
+  let isAddingToSteam = $state<boolean>(false);
+
+  async function checkSteamStatus() {
+    const curGame = pageDetails?.game || game;
+    if (!curGame?.id) {
+      isGameInSteam = false;
+      return;
+    }
+    try {
+      isGameInSteam = await CheckGameInSteam(curGame.id);
+    } catch {
+      isGameInSteam = false;
+    }
+  }
+
+  $effect(() => {
+    const _id = game?.id;
+    const _exe = currentCustomExePath;
+    checkSteamStatus();
+  });
+
+  async function handleAddToSteam() {
+    const curGame = pageDetails?.game || game;
+    if (!curGame?.id) return;
+
+    if (!hasCustomExe && !pageDetails?.localPath && !pageDetails?.isInstalled) {
+      openLaunchConfigModal();
+      showLaunchError('Сначала укажите исполняемый файл (.exe) игры в настройках');
+      return;
+    }
+
+    isAddingToSteam = true;
+    try {
+      const res = await AddGameToSteam(curGame.id);
+      isGameInSteam = true;
+      if (res && res.message) {
+        copiedTextFeedback = res.message;
+        if (copiedTimeout) clearTimeout(copiedTimeout);
+        copiedTimeout = setTimeout(() => {
+          copiedTextFeedback = null;
+        }, 5500);
+      }
+    } catch (err: any) {
+      console.error('[GameDetailView] Failed to add game to Steam:', err);
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes('.exe')) {
+        openLaunchConfigModal();
+      }
+      showLaunchError(errMsg);
+    } finally {
+      isAddingToSteam = false;
+    }
+  }
+
+  async function handleRemoveFromSteam() {
+    const curGame = pageDetails?.game || game;
+    if (!curGame?.id) return;
+    try {
+      await RemoveGameFromSteam(curGame.id);
+      isGameInSteam = false;
+      copiedTextFeedback = 'Ярлык удален из библиотеки Steam';
+      if (copiedTimeout) clearTimeout(copiedTimeout);
+      copiedTimeout = setTimeout(() => {
+        copiedTextFeedback = null;
+      }, 4000);
+    } catch (err: any) {
+      console.error('[GameDetailView] Failed to remove game from Steam:', err);
+      showLaunchError(`Ошибка: ${err?.message || String(err)}`);
     }
   }
 
@@ -220,13 +397,29 @@
     }
   }
 
+  let localFavoriteStatus = $state<string | null>(null);
+
+  $effect(() => {
+    const _ = game?.id;
+    localFavoriteStatus = null;
+  });
+
+  let effectiveFavoriteStatus = $derived(
+    localFavoriteStatus !== null
+      ? localFavoriteStatus
+      : (pageDetails?.game?.favoriteStatus || game?.favoriteStatus || '')
+  );
+
   async function handleToggleFavoriteStatus(status: string) {
     const targetGame = pageDetails?.game || game;
     if (!targetGame?.id) return;
     try {
       isFavoriteDropdownOpen = false;
       await SetFavoriteStatus(targetGame.id, status);
-      targetGame.favoriteStatus = status;
+      localFavoriteStatus = status;
+      if (pageDetails?.game) {
+        pageDetails.game.favoriteStatus = status;
+      }
     } catch (e) {
       console.error('Failed to set favorite status:', e);
     }
@@ -238,7 +431,10 @@
     try {
       isFavoriteDropdownOpen = false;
       await RemoveFromFavorites(targetGame.id);
-      targetGame.favoriteStatus = '';
+      localFavoriteStatus = '';
+      if (pageDetails?.game) {
+        pageDetails.game.favoriteStatus = '';
+      }
     } catch (e) {
       console.error('Failed to remove from favorites:', e);
     }
@@ -491,17 +687,6 @@
       if (res) {
         pageDetailsCache.set(gameId, res);
         pageDetails = res;
-        if (res.game) {
-          if (res.game.screenshots && res.game.screenshots.length > 0) {
-            game.screenshots = res.game.screenshots;
-          }
-          if (res.game.detailedDescription) {
-            game.detailedDescription = res.game.detailedDescription;
-          }
-          if (res.game.genres && res.game.genres.length > 0) {
-            game.genres = res.game.genres;
-          }
-        }
       }
     } catch (err) {
       console.error('[GameDetailView] Failed to get game page details:', err);
@@ -595,62 +780,7 @@
     }
   }
 
-  function isPlaceholderTitle(title: string | undefined | null): boolean {
-    if (!title) return true;
-    const t = title.trim();
-    return t === '' || /^Steam App \d+$/i.test(t);
-  }
 
-  function cleanTorrentTitle(raw: string): string {
-    if (!raw) return '';
-    let s = raw.trim();
-
-    // 1. Fix spaced dot abbreviations like "S T A L K E R" -> "S.T.A.L.K.E.R."
-    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.$4.$5.$6.$7.');
-    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.$4.$5.$6.');
-    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.$4.$5.');
-    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.$4.');
-    s = s.replace(/\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b/g, '$1.$2.$3.');
-
-    // 2. If title has a dual slash e.g. "TITLE / НАЗВАНИЕ"
-    if (s.includes(' / ')) {
-      const parts = s.split(' / ').map((p) => p.trim()).filter(Boolean);
-      if (parts.length >= 2 && parts[0].length >= 3) {
-        s = parts[0];
-      }
-    } else if (s.includes(' | ')) {
-      const parts = s.split(' | ').map((p) => p.trim()).filter(Boolean);
-      if (parts.length >= 2 && parts[0].length >= 3) {
-        s = parts[0];
-      }
-    }
-
-    // 3. Strip bracketed release tags
-    s = s.replace(/\[(?:ru|en|multi|repack|steamrip|gog|portable|rip|lic|fitgirl|xatab|dodi|decepticon|[\d.,\s/\\+-]+)[^\]]*\]/gi, '');
-    s = s.replace(/\((?:repack|rip|версия|от|by|[\d.,\s/\\+-]+)[^\)]*\)/gi, '');
-    s = s.replace(/\(\s*\d{4}(?:\s*[-–—/]\s*\d{4})?\s*\)/g, '');
-    s = s.replace(/\[.*?\]\s*$/g, '');
-    s = s.replace(/\(.*?\)\s*$/g, '');
-    s = s.replace(/\s+(?:v\s*\d+([._\s]\d+)*|build\s*\d+|patch\s*\d+|update\s*\d+)\b/gi, '');
-
-    // 4. Strip OS and packaging markers
-    s = s.replace(/^[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]\s*/gi, '');
-    s = s.replace(/\s*[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]$/gi, '');
-    s = s.replace(/[\{\}]/g, '');
-    s = s.replace(/[\s\-_]+(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб|g|m|t))(?:\)|\])?$/i, '');
-    s = s.replace(/(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб))(?:\)|\])?$/i, '');
-
-    return s.replace(/\s+/g, ' ').trim();
-  }
-
-  function getDisplayTitle(g: GameEntity | null): string {
-    if (!g) return '';
-    if (!isPlaceholderTitle(g.steamTitle)) {
-      return g.steamTitle!.trim();
-    }
-    const raw = (g.cleanTitle && g.cleanTitle.trim() !== '') ? g.cleanTitle : (g.rawName || '');
-    return cleanTorrentTitle(raw);
-  }
 
   function formatSizeDisplay(g: GameEntity | null): string {
     if (!g) return '';
@@ -919,8 +1049,10 @@
       } else if (app && app.OpenGameFolder) {
         await app.OpenGameFolder(game.id);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[GameDetailView] Failed to launch game:', err);
+      const errMsg = err?.message || String(err);
+      showLaunchError(`Ошибка запуска: ${errMsg}`);
     }
   }
 
@@ -1135,9 +1267,6 @@
           pageDetails.game.reviewPercent = event.reviewPercent;
           pageDetails.game.totalReviews = event.totalReviews;
         }
-        game.reviewScoreDesc = event.reviewScoreDesc;
-        game.reviewPercent = event.reviewPercent;
-        game.totalReviews = event.totalReviews;
       }
     });
 
@@ -1207,6 +1336,14 @@
     pageDetails?.downloadStatus === 'downloading' ||
     pageDetails?.downloadStatus === 'queued' ||
     pageDetails?.downloadStatus === 'scanning'
+  );
+
+  let isDownloadCompleted = $derived(
+    !!(pageDetails?.isInstalled || pageDetails?.downloadStatus === 'completed')
+  );
+
+  let isGameInFavorites = $derived(
+    !!(favoriteItem || effectiveFavoriteStatus)
   );
 </script>
 
@@ -1468,27 +1605,27 @@
                   bind:this={favoriteDropdownTriggerEl}
                   data-nav-item
                   type="button"
-                  class="inline-flex items-center gap-2 text-xs px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer border {g.favoriteStatus ? 'bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/25' : 'text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.06] hover:border-white/15'}"
+                  class="h-11 inline-flex items-center gap-2 text-xs px-3.5 rounded-xl transition-colors cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#cbd5e1] hover:text-white"
                   onclick={(e) => {
                     e.stopPropagation();
                     isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
                   }}
                   title="Добавить в избранное / статус прохождения"
                 >
-                  {#if g.favoriteStatus === 'playing'}
+                  {#if effectiveFavoriteStatus === 'playing'}
                     <Gamepad2 class="w-3.5 h-3.5 text-amber-400" />
-                    <span class="font-medium text-amber-300">Прохожу</span>
-                  {:else if g.favoriteStatus === 'completed'}
+                    <span class="font-medium text-[#ededed]">Прохожу</span>
+                  {:else if effectiveFavoriteStatus === 'completed'}
                     <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400" />
-                    <span class="font-medium text-emerald-300">Прошел</span>
-                  {:else if g.favoriteStatus === 'planned'}
+                    <span class="font-medium text-[#ededed]">Прошел</span>
+                  {:else if effectiveFavoriteStatus === 'planned'}
                     <BookmarkCheck class="w-3.5 h-3.5 text-sky-400" />
-                    <span class="font-medium text-sky-300">В планах</span>
+                    <span class="font-medium text-[#ededed]">В планах</span>
                   {:else}
-                    <Bookmark class="w-3.5 h-3.5" />
-                    <span>В избранное</span>
+                    <Bookmark class="w-3.5 h-3.5 text-[#8e95a2]" />
+                    <span class="text-[#8e95a2]">В избранное</span>
                   {/if}
-                  <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isFavoriteDropdownOpen ? 'rotate-180' : ''}" />
+                  <ChevronDown class="w-3.5 h-3.5 text-[#8e95a2] transition-transform duration-200 {isFavoriteDropdownOpen ? 'rotate-180' : ''}" />
                 </button>
 
                 {#if isFavoriteDropdownOpen}
@@ -1501,39 +1638,39 @@
                     </div>
                     <button
                       type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {g.favoriteStatus === 'planned' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {effectiveFavoriteStatus === 'planned' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                       onclick={() => handleToggleFavoriteStatus('planned')}
                     >
                       <Clock class="w-3.5 h-3.5 text-sky-400" />
                       <span>В планах</span>
-                      {#if g.favoriteStatus === 'planned'}
+                      {#if effectiveFavoriteStatus === 'planned'}
                         <Check class="w-3.5 h-3.5 ml-auto text-sky-400" />
                       {/if}
                     </button>
                     <button
                       type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {g.favoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {effectiveFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                       onclick={() => handleToggleFavoriteStatus('playing')}
                     >
                       <Gamepad2 class="w-3.5 h-3.5 text-amber-400" />
                       <span>Прохожу</span>
-                      {#if g.favoriteStatus === 'playing'}
+                      {#if effectiveFavoriteStatus === 'playing'}
                         <Check class="w-3.5 h-3.5 ml-auto text-amber-400" />
                       {/if}
                     </button>
                     <button
                       type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {g.favoriteStatus === 'completed' ? 'bg-emerald-500/20 text-emerald-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {effectiveFavoriteStatus === 'completed' ? 'bg-emerald-500/20 text-emerald-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                       onclick={() => handleToggleFavoriteStatus('completed')}
                     >
                       <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400" />
                       <span>Прошел</span>
-                      {#if g.favoriteStatus === 'completed'}
+                      {#if effectiveFavoriteStatus === 'completed'}
                         <Check class="w-3.5 h-3.5 ml-auto text-emerald-400" />
                       {/if}
                     </button>
 
-                    {#if g.favoriteStatus}
+                    {#if effectiveFavoriteStatus}
                       <div class="h-px bg-white/[0.06] my-1"></div>
                       <button
                         type="button"
@@ -1550,72 +1687,107 @@
             {/snippet}
 
             {#snippet gearButton()}
-              {#if favoriteItem}
+              {#if isGameInFavorites}
                 <button
                   data-nav-item
                   type="button"
-                  title="Настройки запуска"
-                  class="inline-flex items-center gap-1.5 text-xs px-3 py-2.5 rounded-xl transition-colors cursor-pointer border {hasCustomExe ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20' : 'text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.06] hover:border-white/15'}"
-                  onclick={() => { isLaunchConfigOpen = true; }}
+                  title={hasCustomExe ? "Настройки запуска (настроено)" : "Настройки запуска (укажите .exe файл)"}
+                  class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-xl transition-all cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
+                  onclick={openLaunchConfigModal}
                 >
-                  <Settings class="w-3.5 h-3.5" />
+                  <Settings class="w-4 h-4" />
                 </button>
               {/if}
             {/snippet}
 
-            {#if pageDetails?.isInstalled}
-
-              <!-- ALREADY INSTALLED STATE: PLAY + OPEN FOLDER -->
-              <div class="flex flex-wrap items-center gap-4">
+            {#snippet folderButton()}
+              {#if pageDetails?.localPath || pageDetails?.isInstalled}
                 <button
                   data-nav-item
-                  class="px-9 py-3.5 text-sm font-black rounded-xl flex items-center justify-center gap-3 cursor-pointer active:scale-95 transition-all hover:brightness-110 shadow-lg"
-                  style="background-color: var(--game-accent); color: var(--game-accent-text);"
-                  onclick={handleLaunchGame}
-                >
-                  <Play class="w-4 h-4 fill-current stroke-[2]" />
-                  <span>ИГРАТЬ</span>
-                </button>
-
-                <button
-                  data-nav-item
-                  class="px-5 py-3.5 text-xs font-bold rounded-xl bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-white flex items-center gap-2 cursor-pointer transition-colors"
+                  type="button"
+                  title="Открыть папку с игрой"
+                  class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-xl transition-all cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
                   onclick={handleOpenFolder}
                 >
-                  <FolderOpen class="w-4 h-4 text-[var(--game-accent)]" />
-                  <span>Папка с игрой</span>
+                  <FolderOpen class="w-4 h-4" />
                 </button>
-
-                {@render favoriteButton()}
-                {@render gearButton()}
-
-                {#if formatSizeDisplay(g)}
-                  <span class="text-sm font-mono text-[#8e95a2] px-3 py-1.5 rounded-lg bg-black/40 border border-white/[0.06]">
-                    {formatSizeDisplay(g)}
-                  </span>
-                {/if}
-              </div>
-
-              {#if pageDetails.localPath}
-                <div class="flex items-center gap-2 text-xs text-[#8e95a2] bg-white/[0.02] border border-white/[0.04] px-4 py-2 rounded-xl w-fit max-w-full">
-                  <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                  <span class="text-[#6b7280] flex-shrink-0">Установлено:</span>
-                  <span class="font-mono text-white truncate">{pageDetails.localPath}</span>
-                </div>
               {/if}
+            {/snippet}
 
-              {#if (activeVariant?.rawName || g.rawName)}
-                <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b]">
-                  <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
-                  <span class="text-[#64748b] flex-shrink-0">Оригинальный релиз:</span>
-                  <span
-                    class="text-[#cbd5e1] font-medium truncate max-w-2xl select-all"
-                    title={activeVariant?.rawName || g.rawName}
+            {#snippet steamButton()}
+              {#if isGameInFavorites}
+                <button
+                  data-nav-item
+                  type="button"
+                  title={isGameInSteam ? "Игра добавлена в Steam (нажмите для повторной синхронизации)" : "Добавить игру со всеми обложками в библиотеку Steam"}
+                  class="h-11 px-3.5 flex items-center justify-center gap-2 rounded-xl transition-all cursor-pointer border text-xs font-medium {isGameInSteam ? 'bg-sky-500/15 border-sky-500/30 text-sky-300 hover:bg-sky-500/25' : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10 text-[#8e95a2] hover:text-white'}"
+                  onclick={handleAddToSteam}
+                  disabled={isAddingToSteam}
+                >
+                  {#if isAddingToSteam}
+                    <RefreshCw class="w-3.5 h-3.5 animate-spin text-sky-400 flex-shrink-0" />
+                    <span>В Steam...</span>
+                  {:else if isGameInSteam}
+                    <Check class="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+                    <span>В Steam</span>
+                  {:else}
+                    <SteamLogo size={16} weight="bold" class="flex-shrink-0" />
+                    <span>В Steam</span>
+                  {/if}
+                </button>
+              {/if}
+            {/snippet}
+
+            {#if isDownloadCompleted || pageDetails?.isInstalled}
+
+              <!-- ALREADY INSTALLED / DOWNLOAD COMPLETED STATE: PLAY + GEAR + FOLDER + FAVORITE -->
+              <div class="space-y-2">
+                <div class="flex flex-wrap items-center gap-2.5">
+                  <button
+                    data-nav-item
+                    class="h-11 px-8 text-sm font-black rounded-xl flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 transition-all hover:brightness-110 shadow-lg uppercase tracking-wider"
+                    style="background-color: var(--game-accent); color: var(--game-accent-text);"
+                    onclick={handlePlayButtonClick}
                   >
-                    {activeVariant?.rawName || g.rawName}
-                  </span>
+                    <Play class="w-4 h-4 fill-current stroke-[2]" />
+                    <span>ИГРАТЬ</span>
+                  </button>
+
+                  {@render gearButton()}
+                  {@render folderButton()}
+                  {@render steamButton()}
+                  {@render favoriteButton()}
                 </div>
-              {/if}
+
+                <!-- Minimalist Sleek Metadata Line: Folder Path • Size • Original Release -->
+                <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[#8e95a2] pt-0.5">
+                  {#if pageDetails?.localPath}
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1.5 font-mono text-[#94a3b8] hover:text-white transition-colors cursor-pointer hover:underline"
+                      onclick={handleOpenFolder}
+                      title="Нажмите, чтобы открыть папку в проводнике"
+                    >
+                      <Folder class="w-3.5 h-3.5 text-[#6b7280]" />
+                      <span class="truncate max-w-md">{pageDetails.localPath}</span>
+                    </button>
+                  {/if}
+
+                  {#if formatSizeDisplay(g)}
+                    {#if pageDetails?.localPath}
+                      <span class="text-white/20 select-none">•</span>
+                    {/if}
+                    <span class="font-mono text-[#8e95a2]">{formatSizeDisplay(g)}</span>
+                  {/if}
+
+                  {#if (activeVariant?.rawName || g.rawName)}
+                    <span class="text-white/20 select-none">•</span>
+                    <span class="font-mono text-[#64748b] truncate max-w-md" title={activeVariant?.rawName || g.rawName}>
+                      {activeVariant?.rawName || g.rawName}
+                    </span>
+                  {/if}
+                </div>
+              </div>
 
             {:else if isDownloading}
               <!-- ACTIVE DOWNLOADING / QUEUED STATE -->
@@ -1665,27 +1837,29 @@
 
             {:else}
               <!-- NOT INSTALLED / READY TO DOWNLOAD STATE -->
-              <div class="space-y-2.5 pt-1">
-                <div class="flex flex-wrap items-center gap-3">
-
-
+              <div class="space-y-2">
+                <div class="flex flex-wrap items-center gap-2.5">
                   {#if hasCustomExe}
                     <!-- ИГРАТЬ via custom exe -->
                     <button
                       data-nav-item
-                      class="px-9 py-3 text-xs sm:text-sm font-black rounded-xl flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider shadow-lg"
+                      class="h-11 px-8 text-xs sm:text-sm font-black rounded-xl flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider shadow-lg"
                       style="background-color: var(--game-accent); color: var(--game-accent-text);"
                       onclick={handleLaunchWithCustom}
                     >
                       <Play class="w-4 h-4 fill-current stroke-[2]" />
                       <span>ИГРАТЬ</span>
                     </button>
+                    {@render gearButton()}
+                    {@render folderButton()}
+                    {@render steamButton()}
+                    {@render favoriteButton()}
                   {:else}
                     <!-- Unified Split Download Button -->
                     <div class="relative inline-flex items-stretch rounded-xl shadow-lg border border-white/10 overflow-visible {isVariantDropdownOpen ? 'z-30' : ''}">
                       <button
                         data-nav-item
-                        class="px-7 py-3 text-xs sm:text-sm font-black flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider {g.variants && g.variants.length > 1 ? 'rounded-l-xl' : 'rounded-xl'}"
+                        class="h-11 px-7 text-xs sm:text-sm font-black flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider {g.variants && g.variants.length > 1 ? 'rounded-l-xl' : 'rounded-xl'}"
                         style="background-color: var(--game-accent); color: var(--game-accent-text);"
                         onclick={() => onStartDownload(selectedVariantId || g.id, customDownloadPath)}
                       >
@@ -1700,7 +1874,7 @@
                           bind:this={variantDropdownTriggerEl}
                           data-nav-item
                           type="button"
-                          class="px-3 flex items-center justify-center border-l border-black/20 hover:brightness-110 active:scale-95 cursor-pointer transition-all rounded-r-xl"
+                          class="h-11 px-3 flex items-center justify-center border-l border-black/20 hover:brightness-110 active:scale-95 cursor-pointer transition-all rounded-r-xl"
                           style="background-color: var(--game-accent); color: var(--game-accent-text);"
                           onclick={(e) => {
                             e.stopPropagation();
@@ -1748,66 +1922,40 @@
                         {/if}
                       {/if}
                     </div>
-                  {/if}
 
-                  <!-- Download Source Chip -->
-                  {#if downloadSourceInfo && !hasCustomExe}
-                    <div
-                      class="inline-flex items-center gap-2 text-xs text-[#8e95a2] bg-white/[0.04] border border-white/[0.06] px-3.5 py-2.5 rounded-xl"
-                      title="Источник, с которого будет производиться скачивание"
-                    >
-                      <HardDrive class="w-3.5 h-3.5 text-[#8e95a2]" />
-                      <span class="text-[#6b7280]">Источник:</span>
-                      <span class="font-medium text-white">
-                        {downloadSourceInfo.shortName}
-                      </span>
-                    </div>
+                    {@render steamButton()}
+                    {@render favoriteButton()}
+                    {@render gearButton()}
                   {/if}
-
-                  <!-- Folder Destination Chip (Clickable to browse) -->
-                  {#if !hasCustomExe}
-                    <button
-                      data-nav-item
-                      type="button"
-                      class="inline-flex items-center gap-2 text-xs text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer"
-                      onclick={handleBrowseFolder}
-                      title="Нажмите, чтобы изменить папку для сохранения"
-                    >
-                      <Folder class="w-3.5 h-3.5 text-[var(--game-accent)] flex-shrink-0" />
-                      <span class="text-[#6b7280]">Папка:</span>
-                      <span class="font-mono text-white truncate max-w-[220px] sm:max-w-[320px]">{customDownloadPath}</span>
-                    </button>
-                  {/if}
-
-                  <!-- Favorites + Gear Buttons -->
-                  {@render favoriteButton()}
-                  {@render gearButton()}
                 </div>
 
+                <!-- Minimalist Sleek Metadata Line: Folder Path • Source • Release Name -->
+                <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[#8e95a2] pt-0.5">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1.5 font-mono text-[#94a3b8] hover:text-white transition-colors cursor-pointer hover:underline"
+                    onclick={handleBrowseFolder}
+                    title="Нажмите, чтобы изменить папку для сохранения"
+                  >
+                    <Folder class="w-3.5 h-3.5 text-[#6b7280]" />
+                    <span class="truncate max-w-xs">{customDownloadPath}</span>
+                  </button>
 
-                <!-- Multiple Releases Selector Info (only shown if there is choice between variants) -->
-                {#if g.variants && g.variants.length > 1}
-                  <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b] pt-1">
-                    <Layers class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
-                    <span class="text-[#64748b] flex-shrink-0">Выбран релиз:</span>
+                  {#if downloadSourceInfo}
+                    <span class="text-white/20 select-none">•</span>
+                    <span class="text-[#8e95a2]">{downloadSourceInfo.shortName}</span>
+                  {/if}
+
+                  {#if (activeVariant?.rawName || g.rawName)}
+                    <span class="text-white/20 select-none">•</span>
                     <span
-                      class="text-[#cbd5e1] font-medium truncate max-w-xl select-all"
+                      class="font-mono text-[#64748b] truncate max-w-md"
                       title={activeVariant?.rawName || g.rawName}
                     >
                       {activeVariant?.rawName || g.rawName}
                     </span>
-                    <button
-                      type="button"
-                      class="text-[var(--game-accent)] hover:underline cursor-pointer flex items-center gap-0.5 flex-shrink-0 ml-1 text-xs"
-                      onclick={(e) => {
-                        e.stopPropagation();
-                        isVariantDropdownOpen = true;
-                      }}
-                    >
-                      <span>(сменить версию)</span>
-                    </button>
-                  </div>
-                {/if}
+                  {/if}
+                </div>
               </div>
             {/if}
 
@@ -1817,7 +1965,7 @@
       </div>
 
       <!-- Launch Config Modal -->
-      {#if isLaunchConfigOpen && favoriteItem}
+      {#if isLaunchConfigOpen && (favoriteItem || isGameInFavorites)}
         <!-- Backdrop -->
         <button
           type="button"
@@ -1831,13 +1979,15 @@
           <div class="pointer-events-auto w-full max-w-md bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-              <div class="flex items-center gap-2.5">
-                <Settings class="w-4 h-4 text-[#94a3b8]" />
-                <span class="text-sm font-bold text-white">Настройки запуска</span>
+              <div class="flex items-center gap-2.5 min-w-0">
+                <Settings class="w-4 h-4 text-[#94a3b8] flex-shrink-0" />
+                <span class="text-sm font-bold text-white truncate">
+                  Настройки запуска — {getDisplayTitle(g)}
+                </span>
               </div>
               <button
                 type="button"
-                class="w-7 h-7 flex items-center justify-center rounded-lg text-[#6b7280] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-[#6b7280] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                 onclick={() => (isLaunchConfigOpen = false)}
               >
                 <X class="w-4 h-4" />
@@ -1846,13 +1996,45 @@
 
             <!-- Body -->
             <div class="px-5 py-4 space-y-4">
+              <!-- Auto-detected Exe Candidates (if any found) -->
+              {#if isScanningCandidates}
+                <div class="flex items-center gap-2 text-xs text-[#8e95a2] py-1">
+                  <RefreshCw class="w-3.5 h-3.5 animate-spin text-[#8e95a2]" />
+                  <span>Поиск исполняемых файлов в папке игры...</span>
+                </div>
+              {:else if lcCandidates && lcCandidates.length > 0}
+                <div class="space-y-1.5">
+                  <div class="text-[11px] font-semibold uppercase tracking-wider text-[#8e95a2] flex items-center justify-between">
+                    <span>Обнаруженные файлы игры ({lcCandidates.length})</span>
+                    <span class="text-[10px] text-[#64748b] font-normal lowercase">нажмите для выбора</span>
+                  </div>
+                  <div class="flex flex-col gap-1 max-h-32 overflow-y-auto pr-1">
+                    {#each lcCandidates as cand}
+                      {@const fileName = cand.split(/[/\\]/).pop()}
+                      {@const isSelected = lcExePath === cand}
+                      <button
+                        type="button"
+                        class="text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs font-mono transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold border border-white/20' : 'bg-white/[0.03] hover:bg-white/[0.07] text-[#cbd5e1] border border-white/[0.05]'}"
+                        onclick={() => { lcExePath = cand; }}
+                      >
+                        <span class="truncate">{fileName}</span>
+                        {#if isSelected}
+                          <Check class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 ml-2" />
+                        {/if}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
               <!-- Exe Path -->
               <div class="space-y-1.5">
-                <label class="text-[11px] font-semibold uppercase tracking-wider text-[#8e95a2]">
-                  Исполняемый файл
+                <label for="launch-config-exe-input" class="text-[11px] font-semibold uppercase tracking-wider text-[#8e95a2]">
+                  Исполняемый файл (.exe)
                 </label>
                 <div class="flex items-center gap-2">
                   <input
+                    id="launch-config-exe-input"
                     type="text"
                     bind:value={lcExePath}
                     placeholder="C:\Games\game.exe"
@@ -1861,7 +2043,7 @@
                   />
                   <button
                     type="button"
-                    title="Выбрать файл"
+                    title="Выбрать файл на диске"
                     class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-white/[0.05] hover:bg-white/10 border border-white/[0.08] text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
                     onclick={handleBrowseExe}
                   >
@@ -1875,11 +2057,12 @@
 
               <!-- Launch Args -->
               <div class="space-y-1.5">
-                <label class="text-[11px] font-semibold uppercase tracking-wider text-[#8e95a2]">
+                <label for="launch-config-args-input" class="text-[11px] font-semibold uppercase tracking-wider text-[#8e95a2]">
                   Параметры запуска
                   <span class="normal-case font-normal text-[#6b7280]">(необязательно)</span>
                 </label>
                 <input
+                  id="launch-config-args-input"
                   type="text"
                   bind:value={lcLaunchArgs}
                   placeholder="-dx12 -fullscreen -windowed"
@@ -1891,21 +2074,34 @@
               <!-- Note -->
               {#if !lcExePath}
                 <p class="text-[11px] text-[#6b7280] leading-relaxed">
-                  Укажите путь к <span class="text-[#94a3b8] font-mono">.exe</span> файлу игры — после сохранения кнопка «Скачать» заменится на «Играть».
+                  Укажите путь к исполняемому файлу игры или выберите его из обнаруженных выше.
                 </p>
               {/if}
             </div>
 
             <!-- Footer -->
-            <div class="flex items-center gap-3 px-5 py-4 border-t border-white/[0.06]">
+            <div class="flex items-center gap-2.5 px-5 py-4 border-t border-white/[0.06]">
+              {#if lcExePath.trim()}
+                <button
+                  type="button"
+                  disabled={lcSaving}
+                  class="h-9 px-4 flex items-center justify-center gap-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md hover:brightness-110 active:scale-95"
+                  style="background-color: var(--game-accent); color: var(--game-accent-text);"
+                  onclick={() => handleSaveLaunchConfig(true)}
+                >
+                  <Play class="w-3.5 h-3.5 fill-current" />
+                  <span>Сохранить и играть</span>
+                </button>
+              {/if}
+
               <button
                 type="button"
                 disabled={lcSaving}
-                class="flex-1 h-9 flex items-center justify-center gap-2 rounded-xl text-sm font-bold transition-colors cursor-pointer
+                class="flex-1 h-9 flex items-center justify-center gap-2 rounded-xl text-xs font-bold transition-colors cursor-pointer
                   {lcSaveSuccess
                     ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
                     : 'bg-white text-slate-950 hover:bg-white/90 active:scale-[0.98]'}"
-                onclick={handleSaveLaunchConfig}
+                onclick={() => handleSaveLaunchConfig(false)}
               >
                 {#if lcSaveSuccess}
                   <Check class="w-4 h-4" />
@@ -1914,9 +2110,10 @@
                   <span>{lcSaving ? 'Сохранение...' : 'Сохранить'}</span>
                 {/if}
               </button>
+
               <button
                 type="button"
-                class="h-9 px-4 rounded-xl text-sm font-medium text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] transition-colors cursor-pointer"
+                class="h-9 px-3.5 rounded-xl text-xs font-medium text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] transition-colors cursor-pointer"
                 onclick={() => (isLaunchConfigOpen = false)}
               >
                 Отмена
@@ -2522,6 +2719,14 @@
             <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-xl bg-[#11141c] border border-white/15 text-white text-xs font-medium shadow-2xl flex items-center gap-2">
               <Check class="w-3.5 h-3.5 text-emerald-400" />
               <span>{copiedTextFeedback}</span>
+            </div>
+          {/if}
+
+          <!-- Toast Launch Error Feedback -->
+          {#if launchErrorFeedback}
+            <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-xl bg-[#1c1114] border border-rose-500/30 text-rose-200 text-xs font-medium shadow-2xl flex items-center gap-2">
+              <X class="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+              <span>{launchErrorFeedback}</span>
             </div>
           {/if}
         {/if}

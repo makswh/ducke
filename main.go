@@ -51,7 +51,7 @@ func main() {
 		Frameless: true,
 		AssetServer: &assetserver.Options{
 			Assets:  assets,
-			Handler: app,
+			Handler: NewAssetHandler(app),
 		},
 		BackgroundColour: &options.RGBA{R: 7, G: 8, B: 10, A: 255}, // #07080a
 		OnStartup:        app.startup,

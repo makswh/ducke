@@ -37,7 +37,8 @@
     ToggleTorrentSource,
     SyncTorrentSources,
     StartTorrentDownload,
-    GetFavorites
+    GetFavorites,
+    LogMessage
   } from '../wailsjs/go/main/App';
 
   import { EventsOn, EventsOff, Quit, WindowFullscreen, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
@@ -258,6 +259,52 @@
     }, 3000);
   }
 
+  function logApp(level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG', message: string) {
+    const prefix = `[Frontend] ${message}`;
+    if (level === 'ERROR') {
+      console.error(prefix);
+    } else if (level === 'WARN') {
+      console.warn(prefix);
+    } else {
+      console.log(prefix);
+    }
+    try {
+      if (typeof LogMessage === 'function') {
+        LogMessage(level, 'Frontend', message);
+      }
+    } catch {}
+  }
+
+  function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T, operationName: string): Promise<T> {
+    return new Promise<T>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          logApp('WARN', `${operationName} timed out after ${timeoutMs}ms, using fallback`);
+          resolve(fallbackValue);
+        }
+      }, timeoutMs);
+
+      promise
+        .then((val) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(val);
+          }
+        })
+        .catch((err) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            logApp('ERROR', `${operationName} failed: ${err?.message || err}`);
+            resolve(fallbackValue);
+          }
+        });
+    });
+  }
+
   let catalogLoadPromise: Promise<void> | null = null;
 
   async function handleLoadTorrentCatalog(forceRefresh: boolean = false): Promise<void> {
@@ -265,29 +312,44 @@
       return catalogLoadPromise;
     }
 
+    const tStart = Date.now();
+    logApp('INFO', `Starting handleLoadTorrentCatalog(forceRefresh=${forceRefresh})`);
+
     catalogLoadPromise = (async () => {
       isTorrentsLoading = true;
       try {
         let total = 0;
         try {
           if (typeof GetTorrentCatalogCount === 'function') {
-            total = await GetTorrentCatalogCount();
+            total = await withTimeout(GetTorrentCatalogCount(), 10000, 0, 'GetTorrentCatalogCount');
           }
-        } catch (e) {
-          console.warn('[Ducke] GetTorrentCatalogCount error:', e);
+        } catch (e: any) {
+          logApp('WARN', `GetTorrentCatalogCount exception: ${e?.message || e}`);
         }
+
+        logApp('INFO', `Torrent catalog total games count: ${total} (took ${Date.now() - tStart}ms)`);
 
         if (total > 0) {
           const CHUNK_SIZE = 2000;
+          const chunkStart = Date.now();
           // Step 1: Fetch first chunk and render IMMEDIATELY (< 200ms)
-          const firstChunk = await GetTorrentCatalogChunk(0, CHUNK_SIZE);
+          const firstChunk = await withTimeout(
+            GetTorrentCatalogChunk(0, CHUNK_SIZE),
+            10000,
+            [],
+            'GetTorrentCatalogChunk(0)'
+          );
+
           if (Array.isArray(firstChunk) && firstChunk.length > 0) {
             torrentGames = firstChunk;
             // Instantly clear loader so user sees games right away
             isTorrentsLoading = false;
+            logApp('INFO', `First chunk displayed immediately: ${firstChunk.length} games (took ${Date.now() - chunkStart}ms)`);
+          } else {
+            logApp('WARN', `First chunk was empty or invalid (total was ${total})`);
           }
 
-          // Step 2: Fetch remaining chunks concurrently in parallel batches
+          // Step 2: Stream remaining chunks gently in the background without blocking the UI
           if (total > CHUNK_SIZE) {
             const allGames = Array.isArray(firstChunk) ? [...firstChunk] : [];
             const remainingOffsets: number[] = [];
@@ -295,42 +357,61 @@
               remainingOffsets.push(offset);
             }
 
-            // Fetch in batches of 4 concurrent calls
-            const BATCH_SIZE = 4;
-            const seenIds = new Set<number>(allGames.map((g) => g.id));
-            for (let i = 0; i < remainingOffsets.length; i += BATCH_SIZE) {
-              const batchOffsets = remainingOffsets.slice(i, i + BATCH_SIZE);
-              const chunks = await Promise.all(
-                batchOffsets.map((off) => GetTorrentCatalogChunk(off, CHUNK_SIZE))
-              );
-              for (const ch of chunks) {
-                if (Array.isArray(ch) && ch.length > 0) {
-                  for (const g of ch) {
-                    if (g && !seenIds.has(g.id)) {
-                      seenIds.add(g.id);
-                      allGames.push(g);
+            // Background async loader - does not block initial load completion
+            (async () => {
+              const bgStart = Date.now();
+              const BATCH_SIZE = 2; // Stream 2 chunks at a time to prevent WebView2 IPC pipe congestion
+              const seenIds = new Set<number>(allGames.map((g) => g.id));
+
+              for (let i = 0; i < remainingOffsets.length; i += BATCH_SIZE) {
+                const batchOffsets = remainingOffsets.slice(i, i + BATCH_SIZE);
+                const chunks = await Promise.all(
+                  batchOffsets.map((off) =>
+                    withTimeout(GetTorrentCatalogChunk(off, CHUNK_SIZE), 10000, [], `GetTorrentCatalogChunk(${off})`)
+                  )
+                );
+
+                let batchNewCount = 0;
+                for (const ch of chunks) {
+                  if (Array.isArray(ch) && ch.length > 0) {
+                    for (const g of ch) {
+                      if (g && !seenIds.has(g.id)) {
+                        seenIds.add(g.id);
+                        allGames.push(g);
+                        batchNewCount++;
+                      }
                     }
                   }
                 }
-              }
-            }
 
-            if (allGames.length > 0) {
-              torrentGames = allGames;
-            }
+                if (batchNewCount > 0) {
+                  torrentGames = allGames;
+                }
+
+                // Yield to browser event loop so UI stays fluid at 60fps
+                await new Promise((r) => setTimeout(r, 20));
+              }
+
+              logApp('INFO', `Background chunk streaming completed: total ${allGames.length} games (took ${Date.now() - bgStart}ms)`);
+            })();
           }
         } else {
           // Fallback legacy RPC if count is 0 or uninitialized
-          const res = await GetTorrentCatalog(forceRefresh);
+          logApp('INFO', `Attempting fallback GetTorrentCatalog(forceRefresh=${forceRefresh})...`);
+          const res = await withTimeout(GetTorrentCatalog(forceRefresh), 12000, [], 'GetTorrentCatalog');
           if (Array.isArray(res) && res.length > 0) {
             torrentGames = res;
+            logApp('INFO', `Fallback GetTorrentCatalog returned ${res.length} games`);
+          } else {
+            logApp('WARN', 'Fallback GetTorrentCatalog returned 0 games');
           }
         }
       } catch (e: any) {
-        console.error('Failed to load torrent catalog:', e);
+        logApp('ERROR', `Failed to load torrent catalog: ${e?.message || e}`);
       } finally {
         isTorrentsLoading = false;
         catalogLoadPromise = null;
+        logApp('INFO', `handleLoadTorrentCatalog complete: isTorrentsLoading=false, torrentGames=${torrentGames?.length || 0} (total ${Date.now() - tStart}ms)`);
       }
     })();
 
@@ -354,26 +435,29 @@
   async function loadInitialData() {
     isCatalogLoading = true;
     isTorrentsLoading = true;
+    const startInit = Date.now();
+    logApp('INFO', 'Starting loadInitialData');
     try {
-      await ensureWailsReady();
+      const wailsReady = await ensureWailsReady();
+      logApp('INFO', `Wails bridge ready: ${wailsReady} (took ${Date.now() - startInit}ms)`);
 
       // Retry fetching settings with backoff to ensure IPC bridge is fully initialized
       let fetchedSettings: any = null;
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
-          fetchedSettings = await GetSettings();
+          fetchedSettings = await withTimeout(GetSettings(), 3000, null, `GetSettings(attempt ${attempt + 1})`);
           if (fetchedSettings) break;
-        } catch (err) {
-          console.warn(`[Ducke] GetSettings attempt ${attempt + 1} failed:`, err);
+        } catch (err: any) {
+          logApp('WARN', `GetSettings attempt ${attempt + 1} failed: ${err?.message || err}`);
           await new Promise((r) => setTimeout(r, 75 * (attempt + 1)));
         }
       }
 
       // 1. Fetch downloads, history, and torrent sources immediately
       const [fetchedDownloads, fetchedHistory, fetchedSources] = await Promise.all([
-        GetDownloads().catch(() => []),
-        GetDownloadHistory().catch(() => []),
-        GetTorrentSources().catch(() => [])
+        withTimeout(GetDownloads(), 5000, [], 'GetDownloads'),
+        withTimeout(GetDownloadHistory(), 5000, [], 'GetDownloadHistory'),
+        withTimeout(GetTorrentSources(), 5000, [], 'GetTorrentSources')
       ]);
 
       if (fetchedSettings) {
@@ -387,6 +471,8 @@
 
       activeDownloads = Array.isArray(fetchedDownloads) ? fetchedDownloads : [];
       downloadHistory = Array.isArray(fetchedHistory) ? fetchedHistory : [];
+
+      logApp('INFO', `Downloads count: ${activeDownloads.length}, History count: ${downloadHistory.length}, Torrent sources: ${settings?.torrentSources?.length || 0}`);
 
       if (settings && settings.steamDeckMode) {
         switchToBigPicture();
@@ -405,15 +491,17 @@
       } else {
         activeTab = 'catalog';
       }
+      logApp('INFO', `Initial tab determined: "${activeTab}" (ftpAvailable=${ftpAvailable}, torrentAvailable=${torrentAvailable})`);
 
       // 2. Fetch game catalog and torrent catalog concurrently and independently
       if (ftpAvailable) {
-        GetCatalog(false)
+        withTimeout(GetCatalog(false), 12000, [], 'GetCatalog')
           .then((res) => {
             games = Array.isArray(res) ? res : [];
+            logApp('INFO', `Catalog loaded: ${games.length} games`);
           })
           .catch((err) => {
-            console.error('Failed to load initial catalog:', err);
+            logApp('ERROR', `Failed to load catalog: ${err?.message || err}`);
           })
           .finally(() => {
             isCatalogLoading = false;
@@ -423,14 +511,15 @@
         games = [];
       }
 
-      // Load torrent catalog via streaming/chunked loader and await it to prevent race conditions
+      // Load torrent catalog via streaming/chunked loader and await first chunk display
       await handleLoadTorrentCatalog(false);
     } catch (e: any) {
-      console.error('Failed to load initial state:', e);
+      logApp('ERROR', `loadInitialData uncaught exception: ${e?.message || e}`);
       isCatalogLoading = false;
       isTorrentsLoading = false;
     } finally {
       isInitialLoadComplete = true;
+      logApp('INFO', `loadInitialData completed (total ${Date.now() - startInit}ms)`);
     }
   }
 

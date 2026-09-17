@@ -1,29 +1,37 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import {
+    Gear,
     HardDrive,
-    Server,
-    DownloadCloud,
+    Database,
+    CloudArrowDown,
+    CloudArrowDown as DownloadCloud,
     Sliders,
     Info,
     Check,
-    Save,
-    Star,
+    FloppyDisk,
+    FloppyDisk as Save,
     Plus,
-    Trash2,
-    RefreshCw,
+    Trash,
+    Trash as Trash2,
+    ArrowClockwise,
+    ArrowClockwise as RefreshCw,
     FolderOpen,
     Folder,
     Eye,
-    EyeOff,
-    ExternalLink,
-    AlertCircle,
-    CheckCircle2,
+    EyeSlash,
+    EyeSlash as EyeOff,
+    ArrowSquareOut,
+    ArrowSquareOut as ExternalLink,
+    Warning,
+    CheckCircle,
+    CheckCircle as CheckCircle2,
     Terminal,
-    Download,
+    DownloadSimple,
+    DownloadSimple as Download,
     Magnet,
     X
-  } from 'lucide-svelte';
+  } from 'phosphor-svelte';
   import * as AppAPI from '../../../wailsjs/go/main/App';
   import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime';
   import TorrentSourcesManager from './TorrentSourcesManager.svelte';
@@ -107,7 +115,7 @@
   });
 
   let selectedServerId = $state<string>('');
-  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.0' });
+  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.5' });
   let storageDrives = $state<StorageDrive[]>([]);
   let isTestingConnection = $state<boolean>(false);
   let testResult = $state<{ success: boolean; message: string } | null>(null);
@@ -462,41 +470,47 @@
 <!-- Steam Native Ascetic Settings Shell (Zero AI Cliches, High Contrast) -->
 <div class="flex-1 flex h-full overflow-hidden bg-[#07080a] text-white font-sans select-none">
   
-  <!-- Left Navigation Column -->
-  <aside data-nav-zone="list" class="w-60 lg:w-64 flex flex-col flex-shrink-0 h-full border-r border-white/[0.06] bg-[#090c12]">
-    <div class="px-6 py-6 border-b border-white/[0.04]">
-      <span class="text-xs font-bold uppercase tracking-widest text-[#8e95a2] font-mono">Настройки Ducke</span>
+  <!-- Left Navigation Column: Matches FavoritesView and MasterDetailCatalog -->
+  <aside data-nav-zone="list" class="panel-master relative w-[310px] lg:w-[340px] flex flex-col flex-shrink-0 h-full select-none border-r border-white/[0.06] bg-[#07080a]">
+    <!-- Top Header matching app standard -->
+    <div class="p-3 pb-2.5 border-b border-white/[0.06] flex-shrink-0 bg-[#07080a]">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <Gear size={15} weight="fill" class="text-sky-400" />
+          <h1 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">Настройки</h1>
+        </div>
+      </div>
     </div>
 
     <!-- Category Nav Items -->
-    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+    <nav class="flex-1 p-2 space-y-1 overflow-y-auto">
       <button
         data-nav-item
-        class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-left {activeSubTab === 'storage' ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'storage' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'storage')}
       >
-        <HardDrive class="w-4 h-4 flex-shrink-0 {activeSubTab === 'storage' ? 'text-sky-400' : ''}" />
+        <HardDrive size={15} class="flex-shrink-0 {activeSubTab === 'storage' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
         <span>Хранилище</span>
       </button>
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-left {activeSubTab === 'server' ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'server' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'server')}
       >
-        <Server class="w-4 h-4 flex-shrink-0 {activeSubTab === 'server' ? 'text-sky-400' : ''}" />
+        <Database size={15} class="flex-shrink-0 {activeSubTab === 'server' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
         <span>Серверы</span>
       </button>
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-left {activeSubTab === 'torrents' ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'torrents' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'torrents')}
       >
-        <Magnet class="w-4 h-4 flex-shrink-0 {activeSubTab === 'torrents' ? 'text-sky-400' : ''}" />
+        <Magnet size={15} class="flex-shrink-0 {activeSubTab === 'torrents' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
         <span>Торренты</span>
         {#if (localSettings.torrentSources || []).length > 0}
-          <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded-md bg-white/[0.06] text-[#8e95a2] font-mono">
+          <span class="ml-auto text-[10px] font-mono font-semibold text-[#8e95a2] bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.06]">
             {(localSettings.torrentSources || []).length}
           </span>
         {/if}
@@ -504,35 +518,35 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-left {activeSubTab === 'downloads' ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'downloads' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'downloads')}
       >
-        <DownloadCloud class="w-4 h-4 flex-shrink-0 {activeSubTab === 'downloads' ? 'text-sky-400' : ''}" />
+        <DownloadCloud size={15} class="flex-shrink-0 {activeSubTab === 'downloads' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
         <span>Загрузки</span>
       </button>
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-left {activeSubTab === 'interface' ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'interface' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'interface')}
       >
-        <Sliders class="w-4 h-4 flex-shrink-0 {activeSubTab === 'interface' ? 'text-sky-400' : ''}" />
+        <Sliders size={15} class="flex-shrink-0 {activeSubTab === 'interface' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
         <span>Интерфейс</span>
       </button>
 
       {#if localSettings.enableLogs}
         <button
           data-nav-item
-          class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-left {activeSubTab === 'logs' ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+          class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'logs' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
           onclick={() => {
             activeSubTab = 'logs';
             loadLogs();
           }}
         >
-          <Terminal class="w-4 h-4 flex-shrink-0 {activeSubTab === 'logs' ? 'text-sky-400' : ''}" />
+          <Terminal size={15} class="flex-shrink-0 {activeSubTab === 'logs' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
           <span>Логи</span>
           {#if logEntries.length > 0}
-            <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded-md bg-white/[0.06] text-[#8e95a2] font-mono">
+            <span class="ml-auto text-[10px] font-mono font-semibold text-[#8e95a2] bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.06]">
               {logEntries.length}
             </span>
           {/if}
@@ -541,43 +555,43 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-left {activeSubTab === 'about' ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'about' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'about')}
       >
-        <Info class="w-4 h-4 flex-shrink-0 {activeSubTab === 'about' ? 'text-sky-400' : ''}" />
+        <Info size={15} class="flex-shrink-0 {activeSubTab === 'about' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
         <span>О программе</span>
       </button>
     </nav>
 
-    <!-- Save Feedback / Action -->
-    <div class="p-3 border-t border-white/[0.04] space-y-2">
+    <!-- Save Action -->
+    <div class="p-3 border-t border-white/[0.06] flex-shrink-0 bg-[#07080a]">
       <button
         data-nav-item
-        class="w-full py-2.5 px-3 rounded-xl text-xs font-mono font-bold flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 {isSaved ? 'bg-emerald-500 text-slate-950 shadow-md' : 'bg-white/10 text-white hover:bg-white/15'}"
+        class="w-full py-2 px-3 rounded-lg text-xs font-mono font-medium flex items-center justify-center gap-2 cursor-pointer transition-colors {isSaved ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/10 text-white hover:bg-white/15 border border-white/10'}"
         onclick={handleSave}
       >
         {#if isSaved}
-          <Check class="w-4 h-4 stroke-[2.5]" />
-          <span>СОХРАНЕНО</span>
+          <Check size={14} weight="bold" />
+          <span>Сохранено</span>
         {:else}
-          <Save class="w-4 h-4" />
-          <span>СОХРАНИТЬ</span>
+          <Save size={14} weight="bold" />
+          <span>Сохранить настройки</span>
         {/if}
       </button>
     </div>
   </aside>
 
   <!-- Right Settings Content (Pure Flat Layout) -->
-  <main data-nav-zone="detail" class="flex-1 flex flex-col h-full overflow-y-auto px-8 py-8 lg:px-12 max-w-4xl">
+  <main data-nav-zone="detail" class="flex-1 flex flex-col h-full overflow-y-auto px-8 py-6 lg:px-10 max-w-4xl bg-[#07080a]">
     
     <!-- 1. STORAGE -->
     {#if activeSubTab === 'storage'}
-      <div class="space-y-8">
-        <div class="flex items-center justify-between border-b border-white/[0.06] pb-4">
-          <h1 class="text-base font-black uppercase tracking-wider text-white font-mono">Хранилище игр</h1>
+      <div class="space-y-6">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3.5">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">Хранилище игр</h2>
           <button
             data-nav-item
-            class="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-mono text-[#cbd5e1] hover:text-white border border-white/[0.06] transition-colors cursor-pointer flex items-center gap-2"
+            class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-white border border-white/10 font-medium transition-colors cursor-pointer flex items-center gap-1.5"
             onclick={handleBrowseFolder}
           >
             <Folder class="w-3.5 h-3.5" />
@@ -585,75 +599,75 @@
           </button>
         </div>
 
-        <div class="space-y-8">
+        <div class="space-y-4">
           {#each storageDrives as drive}
             {@const total = drive.totalBytes || 1}
             {@const duckePct = Math.min(100, Math.max(0, (drive.duckeBytes / total) * 100))}
             {@const otherBytes = Math.max(0, (drive.usedBytes - drive.duckeBytes))}
             {@const otherPct = Math.min(100 - duckePct, Math.max(0, (otherBytes / total) * 100))}
 
-            <div class="space-y-3.5 pb-6 border-b border-white/[0.06]">
+            <div class="p-4 rounded-xl bg-[#0d1117] border border-white/[0.06] space-y-3">
               <!-- Header Row -->
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2.5">
-                  <HardDrive class="w-4 h-4 text-white" />
-                  <span class="text-sm font-bold text-white font-mono">{drive.label}</span>
+                  <HardDrive class="w-4 h-4 text-sky-400" />
+                  <span class="text-xs font-bold text-white font-mono">{drive.label}</span>
                   {#if drive.isDefault}
-                    <span class="px-2 py-0.5 rounded-md bg-sky-500/20 text-sky-400 border border-sky-500/30 text-[10px] font-mono font-bold uppercase">
+                    <span class="px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/25 text-[10px] font-mono font-semibold uppercase">
                       Основной
                     </span>
                   {/if}
                 </div>
 
-                <div class="text-xs font-mono font-bold uppercase tracking-wider text-[#8e95a2]">
-                  <span class="text-white">{drive.freeGB}</span> свободно из {drive.totalGB}
+                <div class="text-xs font-mono text-[#8e95a2]">
+                  <span class="text-white font-medium">{drive.freeGB}</span> свободно из {drive.totalGB}
                 </div>
               </div>
 
               <!-- Path Label in Steam Style -->
-              <div class="text-[11px] font-mono tracking-wider text-[#64748b]">
+              <div class="text-[11px] font-mono text-[#64748b] truncate">
                 {drive.isDefault ? localSettings.downloadPath : drive.path}
               </div>
 
               <!-- Steam Single Storage Bar -->
-              <div class="w-full h-2 rounded-full bg-[#1e293b] overflow-hidden flex">
+              <div class="w-full h-2 rounded-full bg-white/[0.06] overflow-hidden flex">
                 {#if duckePct > 0}
-                  <div class="h-full bg-[#38bdf8]" style="width: {duckePct}%;"></div>
+                  <div class="h-full bg-sky-400" style="width: {duckePct}%;"></div>
                 {/if}
                 {#if otherPct > 0}
-                  <div class="h-full bg-[#eab308]" style="width: {otherPct}%;"></div>
+                  <div class="h-full bg-slate-500" style="width: {otherPct}%;"></div>
                 {/if}
               </div>
 
               <!-- Steam Storage Legend -->
-              <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-mono uppercase tracking-wider">
+              <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs font-mono pt-0.5">
                 {#if drive.duckeBytes > 0}
-                  <div class="flex items-center gap-1.5 text-[#38bdf8]">
-                    <span class="text-base leading-none">●</span>
-                    <span class="text-white font-bold">DUCKE</span>
-                    <span class="text-[#cbd5e1] font-normal lowercase">{drive.duckeGB}</span>
+                  <div class="flex items-center gap-1.5 text-sky-400">
+                    <span class="text-xs leading-none">●</span>
+                    <span class="text-slate-200">Ducke</span>
+                    <span class="text-[#8e95a2] lowercase">({drive.duckeGB})</span>
                   </div>
                 {/if}
 
-                <div class="flex items-center gap-1.5 text-[#eab308]">
-                  <span class="text-base leading-none">●</span>
-                  <span class="text-white font-bold">ДРУГИЕ ФАЙЛЫ</span>
-                  <span class="text-[#cbd5e1] font-normal lowercase">{formatBytesReadable(otherBytes)}</span>
+                <div class="flex items-center gap-1.5 text-slate-400">
+                  <span class="text-xs leading-none">●</span>
+                  <span class="text-slate-200">Другие файлы</span>
+                  <span class="text-[#8e95a2] lowercase">({formatBytesReadable(otherBytes)})</span>
                 </div>
 
-                <div class="flex items-center gap-1.5 text-[#64748b]">
-                  <span class="text-base leading-none">●</span>
-                  <span class="text-white font-bold">СВОБОДНО</span>
-                  <span class="text-[#cbd5e1] font-normal lowercase">{drive.freeGB}</span>
+                <div class="flex items-center gap-1.5 text-slate-500">
+                  <span class="text-xs leading-none">●</span>
+                  <span class="text-slate-200">Свободно</span>
+                  <span class="text-[#8e95a2] lowercase">({drive.freeGB})</span>
                 </div>
               </div>
 
               <!-- Action Links -->
-              <div class="pt-2 flex items-center gap-4 text-xs font-mono text-[#8e95a2]">
+              <div class="pt-1 flex items-center gap-4 text-xs font-mono text-[#8e95a2]">
                 {#if !drive.isDefault}
                   <button
                     data-nav-item
-                    class="hover:text-white underline cursor-pointer"
+                    class="text-sky-400 hover:text-sky-300 hover:underline cursor-pointer"
                     onclick={() => handleSetDriveAsDefault(drive)}
                   >
                     Сделать основным
@@ -662,7 +676,7 @@
 
                 <button
                   data-nav-item
-                  class="hover:text-white underline cursor-pointer"
+                  class="hover:text-white hover:underline cursor-pointer"
                   onclick={handleBrowseFolder}
                 >
                   Выбрать папку
@@ -670,7 +684,7 @@
 
                 <button
                   data-nav-item
-                  class="hover:text-white underline cursor-pointer"
+                  class="hover:text-white hover:underline cursor-pointer"
                   onclick={() => onOpenFolder(drive.isDefault ? localSettings.downloadPath : drive.path)}
                 >
                   Открыть в проводнике
@@ -684,13 +698,13 @@
     <!-- 2. SERVERS -->
     {:else if activeSubTab === 'server'}
       <div class="space-y-6">
-        <div class="flex items-center justify-between border-b border-white/[0.06] pb-4">
-          <h1 class="text-base font-black uppercase tracking-wider text-white font-mono">FTP / SFTP Серверы</h1>
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3.5">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">FTP / SFTP Серверы</h2>
 
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2.5">
             <button
               data-nav-item
-              class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-mono text-[#cbd5e1] hover:text-white border border-white/[0.06] transition-colors cursor-pointer"
+              class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#cbd5e1] hover:text-white border border-white/[0.06] transition-colors cursor-pointer"
               onclick={onImportFile}
             >
               Импорт из FileZilla
@@ -698,29 +712,29 @@
 
             <button
               data-nav-item
-              class="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-mono font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
+              class="px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5"
               onclick={handleAddServer}
             >
               <Plus class="w-3.5 h-3.5" />
-              <span>Добавить</span>
+              <span>Добавить сервер</span>
             </button>
           </div>
         </div>
 
         <!-- Server Selector Tabs -->
         {#if localSettings.savedServers.length > 0}
-          <div class="flex items-center gap-2 overflow-x-auto pb-2">
+          <div class="flex items-center gap-2 overflow-x-auto pb-1">
             {#each localSettings.savedServers as srv (srv.id)}
               {@const isSelected = selectedServer?.id === srv.id}
               {@const isActive = localSettings.activeServer?.id === srv.id}
               <button
                 data-nav-item
-                class="px-3.5 py-2 rounded-xl text-xs font-mono border transition-all cursor-pointer flex items-center gap-2 flex-shrink-0 {isSelected ? 'bg-white/10 border-white/30 text-white font-bold' : 'bg-[#0c1017] border-white/[0.06] text-[#8e95a2] hover:text-white'}"
+                class="px-3 py-1.5 rounded-lg text-xs font-mono border transition-colors cursor-pointer flex items-center gap-2 flex-shrink-0 {isSelected ? 'bg-white/10 border-white/20 text-white font-medium' : 'bg-[#0d1117] border-white/[0.06] text-[#8e95a2] hover:text-white'}"
                 onclick={() => handleSelectServer(srv.id)}
               >
                 <span>{srv.name || srv.host || 'Сервер'}</span>
                 {#if isActive}
-                  <span class="w-2 h-2 rounded-full bg-emerald-400" title="Активный сервер"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Активный сервер"></span>
                 {/if}
               </button>
             {/each}
@@ -729,20 +743,20 @@
 
         <!-- Selected Server Editor -->
         {#if selectedServer}
-          <div class="space-y-4 pt-1">
+          <div class="p-4 rounded-xl bg-[#0d1117] border border-white/[0.06] space-y-3.5">
             
             <!-- Top Controls for Selected Server -->
             <div class="flex items-center justify-between pb-3 border-b border-white/[0.06]">
               <div class="flex items-center gap-2">
                 {#if localSettings.activeServer?.id === selectedServer.id}
-                  <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-bold">
+                  <div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 text-[11px] font-mono font-medium">
                     <CheckCircle2 class="w-3.5 h-3.5" />
-                    <span>АКТИВНЫЙ СЕРВЕР</span>
+                    <span>Активный сервер</span>
                   </div>
                 {:else}
                   <button
                     data-nav-item
-                    class="px-3 py-1 rounded-xl bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 border border-sky-500/30 text-xs font-mono font-bold cursor-pointer transition-colors"
+                    class="px-3 py-1 rounded-lg bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 border border-sky-500/25 text-xs font-mono font-medium cursor-pointer transition-colors"
                     onclick={() => handleMakeServerActive(selectedServer)}
                   >
                     Сделать активным
@@ -753,7 +767,7 @@
               {#if localSettings.savedServers.length > 1}
                 <button
                   data-nav-item
-                  class="px-2.5 py-1 rounded-lg text-xs font-mono text-[#8e95a2] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer flex items-center gap-1.5"
+                  class="px-2.5 py-1 rounded-lg text-xs text-[#8e95a2] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer flex items-center gap-1.5"
                   onclick={() => handleDeleteServer(selectedServer)}
                   title="Удалить этот сервер"
                 >
@@ -764,7 +778,7 @@
             </div>
 
             <!-- Server Name -->
-            <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
+            <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Название</span>
               <input
                 data-nav-item
@@ -772,18 +786,18 @@
                 bind:value={selectedServer.name}
                 onchange={handleServerFieldChange}
                 placeholder="Основной SFTP"
-                class="w-72 bg-transparent text-right text-white font-mono focus:outline-none focus:text-sky-400"
+                class="w-72 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
             <!-- Protocol -->
-            <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
+            <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Протокол</span>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5">
                 <button
                   data-nav-item
                   type="button"
-                  class="px-3 py-1 text-xs rounded-lg cursor-pointer transition-colors font-mono {selectedServer.protocol === 'sftp' ? 'bg-sky-500 text-slate-950 font-bold' : 'text-[#8e95a2] hover:text-white bg-white/5'}"
+                  class="px-3 py-1 text-xs rounded-lg cursor-pointer transition-colors font-mono {selectedServer.protocol === 'sftp' ? 'bg-white/15 text-white font-semibold border border-white/20' : 'text-[#8e95a2] hover:text-white bg-white/5 border border-transparent'}"
                   onclick={() => {
                     if (selectedServer) {
                       selectedServer.protocol = 'sftp';
@@ -797,7 +811,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="px-3 py-1 text-xs rounded-lg cursor-pointer transition-colors font-mono {selectedServer.protocol === 'ftp' ? 'bg-sky-500 text-slate-950 font-bold' : 'text-[#8e95a2] hover:text-white bg-white/5'}"
+                  class="px-3 py-1 text-xs rounded-lg cursor-pointer transition-colors font-mono {selectedServer.protocol === 'ftp' ? 'bg-white/15 text-white font-semibold border border-white/20' : 'text-[#8e95a2] hover:text-white bg-white/5 border border-transparent'}"
                   onclick={() => {
                     if (selectedServer) {
                       selectedServer.protocol = 'ftp';
@@ -812,7 +826,7 @@
             </div>
 
             <!-- Host -->
-            <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
+            <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Хост / IP адрес</span>
               <input
                 data-nav-item
@@ -820,24 +834,24 @@
                 bind:value={selectedServer.host}
                 onchange={handleServerFieldChange}
                 placeholder="192.168.1.100"
-                class="w-72 bg-transparent text-right text-white font-mono focus:outline-none focus:text-sky-400"
+                class="w-72 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
             <!-- Port -->
-            <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
+            <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Порт</span>
               <input
                 data-nav-item
                 type="number"
                 bind:value={selectedServer.port}
                 onchange={handleServerFieldChange}
-                class="w-24 bg-transparent text-right text-white font-mono focus:outline-none focus:text-sky-400"
+                class="w-24 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
             <!-- User -->
-            <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
+            <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Пользователь</span>
               <input
                 data-nav-item
@@ -845,12 +859,12 @@
                 bind:value={selectedServer.user}
                 onchange={handleServerFieldChange}
                 placeholder="anonymous"
-                class="w-72 bg-transparent text-right text-white font-mono focus:outline-none focus:text-sky-400"
+                class="w-72 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
             <!-- Password -->
-            <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
+            <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Пароль</span>
               <div class="flex items-center gap-2">
                 {#if showPassword}
@@ -860,7 +874,7 @@
                     bind:value={selectedServer.password}
                     onchange={handleServerFieldChange}
                     placeholder="••••••••"
-                    class="w-64 bg-transparent text-right text-white font-mono focus:outline-none focus:text-sky-400"
+                    class="w-64 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
                   />
                 {:else}
                   <input
@@ -869,7 +883,7 @@
                     bind:value={selectedServer.password}
                     onchange={handleServerFieldChange}
                     placeholder="••••••••"
-                    class="w-64 bg-transparent text-right text-white font-mono focus:outline-none focus:text-sky-400"
+                    class="w-64 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
                   />
                 {/if}
                 <button
@@ -888,7 +902,7 @@
             </div>
 
             <!-- Remote Dir -->
-            <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
+            <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Удаленный каталог</span>
               <input
                 data-nav-item
@@ -896,16 +910,16 @@
                 bind:value={selectedServer.remoteDir}
                 onchange={handleServerFieldChange}
                 placeholder="/public"
-                class="w-72 bg-transparent text-right text-white font-mono focus:outline-none focus:text-sky-400"
+                class="w-72 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
             <!-- Connection Test -->
-            <div class="pt-3 flex items-center justify-between">
+            <div class="pt-2 flex items-center justify-between">
               <button
                 data-nav-item
                 disabled={isTestingConnection}
-                class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 active:bg-white/25 text-xs font-mono font-bold text-white cursor-pointer flex items-center gap-2 disabled:opacity-50 transition-colors"
+                class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 active:bg-white/20 text-xs font-mono font-medium text-white border border-white/10 cursor-pointer flex items-center gap-2 disabled:opacity-50 transition-colors"
                 onclick={handleTestConn}
               >
                 {#if isTestingConnection}
@@ -938,9 +952,9 @@
     <!-- 3. DOWNLOADS -->
     {:else if activeSubTab === 'downloads'}
       <div class="space-y-6">
-        <h1 class="text-base font-black uppercase tracking-wider text-white font-mono border-b border-white/[0.06] pb-4">Параметры загрузок</h1>
+        <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1] border-b border-white/[0.06] pb-3.5">Параметры загрузок</h2>
 
-        <div class="space-y-6 pt-1">
+        <div class="space-y-5 pt-1">
           <!-- Download Folder -->
           <div class="space-y-2 pb-4 border-b border-white/[0.06]">
             <span class="text-xs text-[#cbd5e1] font-mono">Папка для скачивания по умолчанию</span>
@@ -949,11 +963,11 @@
                 type="text"
                 readonly
                 value={localSettings.downloadPath}
-                class="flex-1 bg-[#0c1017] border border-white/[0.08] px-3.5 py-2 rounded-xl text-xs font-mono text-white select-all"
+                class="flex-1 bg-[#0d1117] border border-white/10 px-3 py-1.5 rounded-lg text-xs font-mono text-white select-all"
               />
               <button
                 data-nav-item
-                class="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-mono font-bold text-white transition-colors cursor-pointer"
+                class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white border border-white/10 transition-colors cursor-pointer"
                 onclick={handleBrowseFolder}
               >
                 Обзор
@@ -993,7 +1007,7 @@
                   step="512"
                   bind:value={localSettings.maxSpeedKBps}
                   onchange={handleSave}
-                  class="w-24 bg-[#0c1017] border border-white/[0.08] px-2.5 py-1 rounded-lg text-right text-white font-mono text-xs focus:outline-none focus:border-sky-400"
+                  class="w-24 bg-[#0d1117] border border-white/10 px-2.5 py-1 rounded-lg text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
                 />
                 <span class="text-xs font-mono text-[#8e95a2]">КБ/с</span>
               </div>
@@ -1004,7 +1018,7 @@
               {#each speedPresets as preset}
                 <button
                   data-nav-item
-                  class="px-3 py-1.5 rounded-xl text-xs font-mono transition-colors cursor-pointer {localSettings.maxSpeedKBps === preset.value ? 'bg-sky-500 text-slate-950 font-bold' : 'bg-white/5 hover:bg-white/10 text-[#8e95a2] hover:text-white'}"
+                  class="px-3 py-1.5 rounded-lg text-xs font-mono transition-colors cursor-pointer {localSettings.maxSpeedKBps === preset.value ? 'bg-white/15 border border-white/20 text-white font-medium' : 'bg-[#0d1117] border border-white/[0.06] hover:bg-white/5 text-[#8e95a2] hover:text-white'}"
                   onclick={() => {
                     localSettings.maxSpeedKBps = preset.value;
                     handleSave();
@@ -1025,9 +1039,9 @@
     <!-- 4. INTERFACE & BEHAVIOR -->
     {:else if activeSubTab === 'interface'}
       <div class="space-y-6">
-        <h1 class="text-base font-black uppercase tracking-wider text-white font-mono border-b border-white/[0.06] pb-4">Интерфейс и интеграции</h1>
+        <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1] border-b border-white/[0.06] pb-3.5">Интерфейс и интеграции</h2>
 
-        <div class="space-y-6 pt-1">
+        <div class="space-y-5 pt-1">
           <!-- Steam Deck / Big Picture Mode -->
           <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
             <div>
@@ -1071,7 +1085,7 @@
               bind:value={localSettings.steamApiKey}
               onchange={handleSave}
               placeholder="32-значный ключ Steam API..."
-              class="w-full bg-[#0c1017] border border-white/[0.08] px-3.5 py-2 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-sky-400"
+              class="w-full bg-[#0d1117] border border-white/10 px-3 py-1.5 rounded-lg text-xs font-mono text-white focus:outline-none focus:border-white/25"
             />
           </div>
 
@@ -1085,7 +1099,7 @@
               <button
                 data-nav-item
                 disabled={isClearingCache}
-                class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 active:bg-white/25 text-xs font-mono font-bold text-white cursor-pointer flex items-center gap-2 disabled:opacity-50 transition-colors"
+                class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 active:bg-white/20 text-xs font-mono font-medium text-white border border-white/10 cursor-pointer flex items-center gap-2 disabled:opacity-50 transition-colors"
                 onclick={handleClearCache}
               >
                 <RefreshCw class="w-3.5 h-3.5 {isClearingCache ? 'animate-spin' : ''}" />
@@ -1127,12 +1141,12 @@
     <!-- LOGS -->
     {:else if activeSubTab === 'logs'}
       <div class="h-full flex flex-col space-y-4">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/[0.06] pb-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/[0.06] pb-3.5">
           <div>
-            <h1 class="text-base font-black uppercase tracking-wider text-white font-mono flex items-center gap-2">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1] flex items-center gap-2">
               <Terminal class="w-4 h-4 text-sky-400" />
               <span>Журнал работы (Логи)</span>
-            </h1>
+            </h2>
             <p class="text-[11px] text-[#64748b] font-mono mt-0.5">
               Диагностика сети, загрузчика, метаданных и системы
             </p>
@@ -1141,7 +1155,7 @@
           <div class="flex items-center gap-2 flex-wrap">
             <button
               data-nav-item
-              class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-mono font-bold text-white cursor-pointer flex items-center gap-1.5 transition-colors"
+              class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-white border border-white/10 cursor-pointer flex items-center gap-1.5 transition-colors font-medium"
               onclick={handleClearLogs}
               title="Очистить буфер логов"
             >
@@ -1151,7 +1165,7 @@
 
             <button
               data-nav-item
-              class="px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs font-mono font-bold text-white cursor-pointer flex items-center gap-1.5 transition-colors shadow-sm"
+              class="px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition-colors"
               onclick={handleExportLogs}
               title="Экспорт в текстовый файл"
             >
@@ -1171,13 +1185,13 @@
         {/if}
 
         <!-- Filter bar -->
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-[#0c1017] p-2.5 rounded-xl border border-white/[0.06]">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-[#0d1117] p-2 rounded-lg border border-white/[0.06]">
           <!-- Level filters -->
           <div class="flex items-center gap-1 overflow-x-auto">
             {#each ['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG'] as lvl}
               <button
                 data-nav-item
-                class="px-2.5 py-1 rounded-md text-[11px] font-mono font-bold uppercase transition-colors cursor-pointer {selectedLogLevel === lvl ? 'bg-white/15 text-white' : 'text-[#8e95a2] hover:text-white hover:bg-white/5'}"
+                class="px-2.5 py-1 rounded-md text-[11px] font-mono font-medium uppercase transition-colors cursor-pointer {selectedLogLevel === lvl ? 'bg-white/15 text-white' : 'text-[#8e95a2] hover:text-white hover:bg-white/5'}"
                 onclick={() => (selectedLogLevel = lvl)}
               >
                 {lvl}
@@ -1193,7 +1207,7 @@
                 type="text"
                 bind:value={logSearchQuery}
                 placeholder="Поиск по логам..."
-                class="w-full bg-[#111622] border border-white/[0.08] px-2.5 py-1 text-[11px] font-mono text-white rounded-md placeholder:text-white/30 focus:outline-none focus:border-sky-400"
+                class="w-full bg-[#07080a] border border-white/10 px-2.5 py-1 text-[11px] font-mono text-white rounded-md placeholder:text-[#64748b] focus:outline-none focus:border-white/25"
               />
               {#if logSearchQuery}
                 <button
@@ -1219,7 +1233,7 @@
         <!-- Terminal Log Viewer -->
         <div
           bind:this={logContainerEl}
-          class="flex-1 min-h-[320px] max-h-[calc(100vh-280px)] overflow-y-auto bg-[#06080c] border border-white/[0.08] rounded-xl p-3 font-mono text-xs select-text space-y-1"
+          class="flex-1 min-h-[320px] max-h-[calc(100vh-280px)] overflow-y-auto bg-[#040507] border border-white/[0.08] rounded-lg p-3 font-mono text-xs select-text space-y-1"
         >
           {#if displayedLogs.length === 0}
             <div class="h-full min-h-[200px] flex flex-col items-center justify-center text-center text-[#64748b]">
@@ -1241,7 +1255,7 @@
             {#each displayedLogs as entry (entry.id)}
               <div class="flex items-start gap-2 py-0.5 px-1 rounded hover:bg-white/[0.03] transition-colors leading-relaxed break-all">
                 <span class="text-[#64748b] text-[11px] flex-shrink-0 select-none">{entry.timestamp}</span>
-                <span class="px-1.5 py-0.2 rounded text-[10px] font-bold flex-shrink-0 select-none {entry.level === 'ERROR' ? 'bg-rose-500/20 text-rose-300' : entry.level === 'WARN' ? 'bg-amber-500/20 text-amber-300' : entry.level === 'DEBUG' ? 'bg-purple-500/20 text-purple-300' : 'bg-sky-500/20 text-sky-300'}">
+                <span class="px-1.5 py-0.2 rounded text-[10px] font-bold flex-shrink-0 select-none {entry.level === 'ERROR' ? 'bg-rose-500/15 text-rose-300 border border-rose-500/20' : entry.level === 'WARN' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/20' : entry.level === 'DEBUG' ? 'bg-slate-500/15 text-slate-300 border border-slate-500/20' : 'bg-sky-500/15 text-sky-300 border border-sky-500/20'}">
                   {entry.level}
                 </span>
                 <span class="text-slate-400 text-[11px] font-bold flex-shrink-0 select-none">[{entry.source}]</span>
@@ -1260,27 +1274,27 @@
     <!-- 5. ABOUT -->
     {:else if activeSubTab === 'about'}
       <div class="space-y-6">
-        <h1 class="text-base font-black uppercase tracking-wider text-white font-mono border-b border-white/[0.06] pb-4">О программе</h1>
+        <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1] border-b border-white/[0.06] pb-3.5">О программе</h2>
 
-        <div class="space-y-4 pt-1">
-          <div class="flex items-center justify-between py-3 border-b border-white/[0.06] text-xs font-mono">
+        <div class="space-y-3 pt-1">
+          <div class="flex items-center justify-between py-2.5 border-b border-white/[0.06] text-xs font-mono">
             <span class="text-[#8e95a2]">Приложение</span>
             <span class="font-bold text-white">{appInfo.name}</span>
           </div>
 
-          <div class="flex items-center justify-between py-3 border-b border-white/[0.06] text-xs font-mono">
+          <div class="flex items-center justify-between py-2.5 border-b border-white/[0.06] text-xs font-mono">
             <span class="text-[#8e95a2]">Версия</span>
             <span class="text-white font-semibold">v{appInfo.version}</span>
           </div>
 
-          <div class="flex items-center justify-between py-3 border-b border-white/[0.06] text-xs font-mono">
+          <div class="flex items-center justify-between py-2.5 border-b border-white/[0.06] text-xs font-mono">
             <div>
               <span class="text-[#8e95a2] block">Папка конфигурации и БД</span>
               <span class="text-[11px] text-[#64748b]">Настройки config.json и база данных ducke.db</span>
             </div>
             <button
               data-nav-item
-              class="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+              class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer flex items-center gap-1.5"
               onclick={onOpenConfigFolder}
             >
               <FolderOpen class="w-3.5 h-3.5" />

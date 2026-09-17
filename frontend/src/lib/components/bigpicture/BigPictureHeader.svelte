@@ -1,18 +1,18 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import {
-    Home,
-    Gamepad2,
-    Search,
+    House,
+    GameController,
+    MagnifyingGlass,
     Monitor,
     X,
     Compass,
     Magnet,
-    Heart,
-    Download,
-    Settings,
+    BookmarkSimple,
+    DownloadSimple,
+    Gear,
     Clock
-  } from 'lucide-svelte';
+  } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
 
   type TabType = 'home' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings';
@@ -67,14 +67,14 @@
 
     <!-- Clock -->
     <div class="flex items-center gap-1.5 text-xs font-mono font-bold text-[#8e95a2] pl-2 border-l border-white/[0.08]">
-      <Clock class="w-3.5 h-3.5 text-[#64748b]" />
+      <Clock size={14} class="text-[#64748b]" />
       <span>{currentTime}</span>
     </div>
 
     <!-- Controller Connected Indicator -->
     {#if isGamepadConnected}
       <div class="hidden sm:flex items-center gap-1.5 text-xs text-emerald-400 pl-2 border-l border-white/[0.08]" title="Геймпад подключен">
-        <Gamepad2 class="w-3.5 h-3.5" />
+        <GameController size={14} />
         <span class="text-[11px] font-medium hidden lg:inline">Геймпад</span>
       </div>
     {/if}
@@ -95,7 +95,7 @@
         onTabChange('home');
       }}
     >
-      <Home class="w-3.5 h-3.5 {activeTab === 'home' ? 'text-sky-400' : 'text-[#64748b]'}" />
+      <House size={14} class={activeTab === 'home' ? 'text-sky-400' : 'text-[#64748b]'} />
       <span class="hidden sm:inline">Главная</span>
     </button>
 
@@ -110,7 +110,7 @@
           onTabChange('catalog');
         }}
       >
-        <Compass class="w-3.5 h-3.5 {activeTab === 'catalog' ? 'text-sky-400' : 'text-[#64748b]'}" />
+        <Compass size={14} class={activeTab === 'catalog' ? 'text-sky-400' : 'text-[#64748b]'} />
         <span class="hidden sm:inline">Каталог</span>
       </button>
     {/if}
@@ -126,7 +126,7 @@
           onTabChange('torrents');
         }}
       >
-        <Magnet class="w-3.5 h-3.5 {activeTab === 'torrents' ? 'text-sky-400' : 'text-[#64748b]'}" />
+        <Magnet size={14} class={activeTab === 'torrents' ? 'text-sky-400' : 'text-[#64748b]'} />
         <span class="hidden sm:inline">Торренты</span>
       </button>
     {/if}
@@ -141,7 +141,7 @@
         onTabChange('favorites');
       }}
     >
-      <Heart class="w-3.5 h-3.5 {activeTab === 'favorites' ? 'text-rose-400 fill-rose-400/20' : 'text-[#64748b]'}" />
+      <BookmarkSimple size={14} weight={activeTab === 'favorites' ? 'fill' : 'regular'} class={activeTab === 'favorites' ? 'text-amber-400' : 'text-[#64748b]'} />
       <span class="hidden sm:inline">Избранное</span>
     </button>
 
@@ -155,7 +155,7 @@
         onTabChange('downloads');
       }}
     >
-      <Download class="w-3.5 h-3.5 {activeTab === 'downloads' ? 'text-sky-400' : 'text-[#64748b]'}" />
+      <DownloadSimple size={14} class={activeTab === 'downloads' ? 'text-sky-400' : 'text-[#64748b]'} />
       <span class="hidden sm:inline">Загрузки</span>
       {#if activeDownloadsCount > 0}
         <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-sky-500 text-black font-black">
@@ -174,7 +174,7 @@
         onTabChange('settings');
       }}
     >
-      <Settings class="w-3.5 h-3.5 {activeTab === 'settings' ? 'text-sky-400' : 'text-[#64748b]'}" />
+      <Gear size={14} class={activeTab === 'settings' ? 'text-sky-400' : 'text-[#64748b]'} />
       <span class="hidden sm:inline">Настройки</span>
     </button>
 
@@ -192,7 +192,7 @@
       onclick={() => onToggleSearch()}
       title="Поиск [X]"
     >
-      <Search class="w-3.5 h-3.5 text-sky-400" />
+      <MagnifyingGlass size={14} class="text-sky-400" />
       <span class="hidden sm:inline">Поиск</span>
       <span class="px-1 py-0.2 rounded bg-sky-500 text-black text-[9px] font-black leading-none">X</span>
     </button>
@@ -205,7 +205,7 @@
       onclick={() => onSwitchToDesktop()}
       title="Переключить в режим рабочего стола"
     >
-      <Monitor class="w-3.5 h-3.5" />
+      <Monitor size={14} />
       <span class="hidden lg:inline">Рабочий стол</span>
     </button>
 
@@ -217,7 +217,7 @@
       onclick={() => onCloseApp()}
       title="Закрыть приложение"
     >
-      <X class="w-4 h-4" />
+      <X size={16} />
     </button>
   </div>
 </header>

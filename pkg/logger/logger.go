@@ -28,6 +28,8 @@ type Logger struct {
 	nextID      atomic.Int64
 	onEntryHook func(entry LogEntry)
 	origOutput  io.Writer
+	filePath    string
+	fileWriter  *os.File
 }
 
 var (
@@ -76,6 +78,54 @@ func (l *Logger) SetHook(hook func(entry LogEntry)) {
 	l.onEntryHook = hook
 }
 
+// SetLogFile sets up persistent file logging on disk with immediate synchronization
+func (l *Logger) SetLogFile(filePath string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.fileWriter != nil {
+		_ = l.fileWriter.Close()
+		l.fileWriter = nil
+	}
+
+	dir := os.TempDir()
+	if lastSlash := strings.LastIndexAny(filePath, "/\\"); lastSlash != -1 {
+		dir = filePath[:lastSlash]
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	// Rotate if existing log file > 10MB
+	if fi, err := os.Stat(filePath); err == nil && fi.Size() > 10*1024*1024 {
+		oldPath := filePath + ".old"
+		_ = os.Remove(oldPath)
+		_ = os.Rename(filePath, oldPath)
+	}
+
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open log file %s: %w", filePath, err)
+	}
+
+	l.filePath = filePath
+	l.fileWriter = f
+
+	// Write session start marker
+	header := fmt.Sprintf("\n=======================================================\n# Ducke Log Session Started: %s\n=======================================================\n", time.Now().Format("2006-01-02 15:04:05.000"))
+	_, _ = f.WriteString(header)
+	_ = f.Sync()
+
+	return nil
+}
+
+// GetLogFilePath returns the path to the active log file
+func (l *Logger) GetLogFilePath() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.filePath
+}
+
 // Write implements io.Writer to intercept standard Go log.Printf / log.Println calls
 func (l *Logger) Write(p []byte) (n int, err error) {
 	msg := strings.TrimSpace(string(p))
@@ -116,7 +166,7 @@ func (l *Logger) Write(p []byte) (n int, err error) {
 func (l *Logger) AddEntry(level, source, message string) LogEntry {
 	entry := LogEntry{
 		ID:        l.nextID.Add(1),
-		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Timestamp: time.Now().Format("2006-01-02 15:04:05.000"),
 		Level:     strings.ToUpper(strings.TrimSpace(level)),
 		Source:    strings.TrimSpace(source),
 		Message:   strings.TrimSpace(message),
@@ -139,6 +189,13 @@ func (l *Logger) AddEntry(level, source, message string) LogEntry {
 	}
 	l.entries = append(l.entries, entry)
 	hook := l.onEntryHook
+
+	// Write directly to disk file and sync
+	if l.fileWriter != nil {
+		line := fmt.Sprintf("[%s] [%-5s] [%-10s] %s\n", entry.Timestamp, entry.Level, entry.Source, entry.Message)
+		_, _ = l.fileWriter.WriteString(line)
+		_ = l.fileWriter.Sync()
+	}
 	l.mu.Unlock()
 
 	if hook != nil && l.enabled.Load() {

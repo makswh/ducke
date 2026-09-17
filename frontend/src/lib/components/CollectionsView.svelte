@@ -2,23 +2,23 @@
   import { onMount } from 'svelte';
   import {
     Compass,
-    Search,
-    RefreshCw,
+    MagnifyingGlass,
+    MagnifyingGlass as Search,
+    ArrowClockwise,
+    ArrowClockwise as RefreshCw,
     ArrowLeft,
-    Check,
-    Download,
-    ExternalLink,
+    ArrowSquareOut,
+    ArrowSquareOut as ExternalLink,
     Clock,
-    User,
-    MessageSquare,
-    Gamepad2,
+    GameController,
+    GameController as Gamepad2,
     X,
-    Filter,
-    ChevronLeft,
-    ChevronRight,
-    Star,
-    Info
-  } from 'lucide-svelte';
+    CaretLeft,
+    CaretLeft as ChevronLeft,
+    CaretRight,
+    CaretRight as ChevronRight,
+    Star
+  } from 'phosphor-svelte';
 
   import type {
     CompilationSummary,
@@ -66,6 +66,7 @@
   let detailError = $state<string>('');
   let detailFilter = $state<'all' | 'in_library' | 'missing'>('all');
   let detailSearch = $state<string>('');
+  let isDescriptionExpanded = $state<boolean>(false);
 
   // State: Full-page Game Detail (NO MODAL)
   let selectedGame = $state<GameEntity | null>(null);
@@ -108,6 +109,7 @@
       detailError = '';
       detailFilter = 'all';
       detailSearch = '';
+      isDescriptionExpanded = false;
 
       const res: CompilationDetail = await GetStopGameCompilationDetail(id, forceRefresh);
       if (res && res.id) {
@@ -128,6 +130,7 @@
     detail = null;
     detailError = '';
     selectedGame = null;
+    isDescriptionExpanded = false;
   }
 
   onMount(() => {
@@ -194,55 +197,18 @@
     return Math.round((inLibraryCount / detail.games.length) * 100);
   });
 
-  // Subtle fan tilt offsets for overlapping posters
-  function getFanTransform(idx: number, total: number): string {
-    if (total <= 1) return 'rotate(0deg)';
-    if (total === 2) {
-      return idx === 0 ? 'rotate(-6deg) translateX(-14px)' : 'rotate(6deg) translateX(14px)';
+  function getBackgroundCovers(previewImages?: string[], targetCount = 16): string[] {
+    if (!previewImages || previewImages.length === 0) return [];
+    const valid = previewImages.filter(Boolean);
+    if (valid.length === 0) return [];
+    const result: string[] = [];
+    while (result.length < targetCount) {
+      for (const img of valid) {
+        result.push(img);
+        if (result.length >= targetCount) break;
+      }
     }
-    if (total === 3) {
-      if (idx === 0) return 'rotate(-8deg) translateX(-26px) translateY(3px)';
-      if (idx === 1) return 'rotate(0deg) translateY(-5px) scale(1.04)';
-      return 'rotate(8deg) translateX(26px) translateY(3px)';
-    }
-    if (total === 4) {
-      if (idx === 0) return 'rotate(-10deg) translateX(-34px) translateY(5px)';
-      if (idx === 1) return 'rotate(-3deg) translateX(-11px) translateY(0px)';
-      if (idx === 2) return 'rotate(3deg) translateX(11px) translateY(0px)';
-      return 'rotate(10deg) translateX(34px) translateY(5px)';
-    }
-    const transforms = [
-      'rotate(-11deg) translateX(-42px) translateY(6px)',
-      'rotate(-5deg) translateX(-21px) translateY(1px)',
-      'rotate(0deg) translateX(0px) translateY(-6px) scale(1.06)',
-      'rotate(5deg) translateX(21px) translateY(1px)',
-      'rotate(11deg) translateX(42px) translateY(6px)'
-    ];
-    return transforms[Math.min(idx, 4)];
-  }
-
-  function getFanZIndex(idx: number, total: number): number {
-    if (total === 5) {
-      return [1, 2, 5, 2, 1][idx] || 1;
-    }
-    if (total === 3) {
-      return [1, 4, 1][idx] || 1;
-    }
-    if (total === 4) {
-      return [1, 3, 3, 1][idx] || 1;
-    }
-    return idx + 1;
-  }
-
-  function getCompilationBackdrop(comp: StopGameCompilation): string | null {
-    if (!comp.previewImages || comp.previewImages.length === 0) return null;
-    let hash = 0;
-    const str = String(comp.id || comp.title || '');
-    for (let i = 0; i < str.length; i++) {
-      hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
-    }
-    const idx = hash % comp.previewImages.length;
-    return comp.previewImages[idx] || comp.previewImages[0];
+    return result;
   }
 </script>
 
@@ -285,26 +251,21 @@
     <!-- ========================================== -->
     <div class="flex-1 flex flex-col h-full overflow-hidden">
       <!-- Sub-header bar with tabs and search -->
-      <header class="px-6 py-4 border-b border-white/[0.06] bg-[#07080a] flex flex-col gap-3 flex-shrink-0">
+      <header class="px-6 py-3.5 border-b border-white/[0.06] bg-[#07080a] flex flex-col gap-2.5 flex-shrink-0">
         <div class="flex items-center justify-between gap-4 flex-wrap">
-          <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg bg-white/[0.05] border border-white/10 flex items-center justify-center text-slate-300">
-              <Compass class="w-4 h-4" />
-            </div>
-            <div>
-              <h1 class="text-base font-semibold text-white tracking-wide">Подборки игр</h1>
-              <p class="text-[11px] text-[#8e95a2]">Тематические сборники StopGame с сопоставлением в библиотеке Ducke</p>
-            </div>
+          <div class="flex items-center gap-2.5">
+            <Compass size={16} weight="bold" class="text-sky-400" />
+            <h1 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">Подборки</h1>
           </div>
 
           <!-- Search compilations -->
-          <div class="relative w-72">
-            <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#8e95a2]" />
+          <div class="relative w-64">
+            <MagnifyingGlass size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748b]" />
             <input
               type="text"
-              placeholder="Поиск по подборкам и авторам..."
+              placeholder="Поиск по подборкам..."
               bind:value={catalogSearch}
-              class="w-full h-8 pl-8 pr-3 text-xs bg-[#0d1117] border border-white/10 rounded-lg text-white placeholder-[#8e95a2] focus:outline-none focus:border-white/25 transition-colors"
+              class="w-full h-8 pl-8 pr-3 text-xs bg-[#0d1117] border border-white/10 rounded-lg text-white placeholder-[#64748b] focus:outline-none focus:border-white/25 transition-colors"
             />
             {#if catalogSearch}
               <button
@@ -312,19 +273,19 @@
                 onclick={() => (catalogSearch = '')}
                 class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8e95a2] hover:text-white"
               >
-                <X class="w-3 h-3" />
+                <X size={12} />
               </button>
             {/if}
           </div>
         </div>
 
         <!-- Sorter navigation tabs -->
-        <div class="flex items-center gap-1.5 overflow-x-auto pt-1 no-scrollbar">
+        <div class="flex items-center gap-1.5 overflow-x-auto pt-0.5 no-scrollbar text-xs">
           {#each sortTabs as tab}
             <button
               type="button"
               onclick={() => loadCompilations(1, tab.id)}
-              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap cursor-pointer {sortOption === tab.id ? 'bg-white/10 text-white border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap cursor-pointer {sortOption === tab.id ? 'bg-white/10 text-white font-semibold border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
             >
               {tab.label}
             </button>
@@ -349,7 +310,7 @@
         {:else if catalogError}
           <div class="h-full flex flex-col items-center justify-center text-center p-6 gap-3">
             <div class="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
-              <Compass class="w-6 h-6" />
+              <Compass size={24} />
             </div>
             <p class="text-sm text-slate-300 font-medium max-w-md">{catalogError}</p>
             <button
@@ -357,13 +318,13 @@
               onclick={() => loadCompilations(currentPage, sortOption)}
               class="mt-2 px-4 py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-lg border border-white/10 flex items-center gap-2 transition-colors cursor-pointer"
             >
-              <RefreshCw class="w-3.5 h-3.5" />
+              <ArrowClockwise size={14} />
               Повторить попытку
             </button>
           </div>
         {:else if filteredCompilations.length === 0}
           <div class="h-full flex flex-col items-center justify-center text-center p-6 text-[#8e95a2]">
-            <Compass class="w-10 h-10 stroke-[1.25] mb-2 opacity-50" />
+            <Compass size={40} class="mb-2 opacity-50" />
             <p class="text-sm">Подборки не найдены</p>
             {#if catalogSearch}
               <button
@@ -379,103 +340,59 @@
           <!-- Grid of Compilations -->
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {#each filteredCompilations as comp (comp.id)}
-              {@const backdrop = getCompilationBackdrop(comp)}
               <div
                 role="button"
                 tabindex="0"
                 onclick={() => openCompilation(comp.id)}
                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') openCompilation(comp.id); }}
-                class="group relative overflow-hidden bg-[#0d1117] hover:bg-[#121620] border border-white/[0.06] hover:border-white/15 rounded-xl p-4 flex flex-col justify-between transition-all duration-200 cursor-pointer shadow-sm hover:shadow-md"
+                class="group relative h-48 sm:h-52 rounded-xl overflow-hidden bg-[#0d1117] border border-white/[0.06] hover:border-white/20 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between p-4"
               >
-                <!-- Ambient collection cover backdrop -->
-                {#if backdrop}
-                  <div class="absolute inset-0 overflow-hidden pointer-events-none z-0 select-none">
-                    <img
-                      src={backdrop}
-                      alt=""
-                      aria-hidden="true"
-                      loading="lazy"
-                      decoding="async"
-                      class="w-full h-full object-cover brightness-[0.2] contrast-125 transition-transform duration-500 group-hover:scale-105 opacity-40"
-                      onerror={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
-                    />
-                    <div class="absolute inset-0 bg-gradient-to-t from-[#0d1117] via-[#0d1117]/85 to-[#0d1117]/50"></div>
-                  </div>
-                {/if}
-
-                <div class="relative z-10">
-                  <!-- Fan of tilted posters (Clean: no extra borders or background boxes) -->
-                  <div class="relative w-full h-36 mb-3 flex items-center justify-center overflow-hidden">
-                    {#if comp.previewImages && comp.previewImages.length > 0}
-                      <div class="relative w-full h-full flex items-center justify-center">
-                        {#each comp.previewImages.slice(0, 5) as imgUrl, idx}
+                <!-- 45-degree diagonal background grid of covers -->
+                <div class="absolute -inset-20 flex items-center justify-center pointer-events-none overflow-hidden select-none">
+                  {#if comp.previewImages && comp.previewImages.length > 0}
+                    <div
+                      class="grid grid-cols-4 gap-2 w-[180%] h-[180%] rotate-[-45deg] opacity-20 group-hover:opacity-30 grayscale-[25%] transition-opacity duration-300"
+                    >
+                      {#each getBackgroundCovers(comp.previewImages) as imgUrl}
+                        <div class="aspect-[2/3] rounded-md overflow-hidden bg-black/40 border border-white/[0.04]">
                           <img
                             src={imgUrl}
                             alt=""
                             loading="lazy"
                             decoding="async"
-                            class="absolute w-20 h-28 sm:w-22 sm:h-30 object-cover rounded-md shadow-lg shadow-black/80 transition-transform duration-300 ease-out pointer-events-none"
-                            style="transform: {getFanTransform(idx, Math.min(comp.previewImages.length, 5))}; z-index: {getFanZIndex(idx, Math.min(comp.previewImages.length, 5))};"
+                            class="w-full h-full object-cover pointer-events-none"
                             onerror={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
                           />
-                        {/each}
-                      </div>
-                    {:else}
-                      <div class="text-[#8e95a2] text-xs flex items-center gap-1.5 opacity-40">
-                        <Gamepad2 class="w-5 h-5" />
-                        <span>{comp.gamesCount} игр</span>
-                      </div>
-                    {/if}
-                  </div>
-
-                  <!-- Badges row -->
-                  <div class="flex items-center gap-1.5 mb-2 flex-wrap text-[10px]">
-                    <span class="px-2 py-0.5 rounded bg-white/[0.06] text-slate-300 font-mono flex items-center gap-1">
-                      <Gamepad2 class="w-3 h-3 text-[#8e95a2]" />
-                      {comp.gamesCount} игр
-                    </span>
-                    {#if comp.rating}
-                      <span class="px-2 py-0.5 rounded bg-white/[0.06] text-slate-300 font-mono">
-                        {comp.rating}
-                      </span>
-                    {/if}
-                    {#if comp.commentsCount > 0}
-                      <span class="px-2 py-0.5 rounded bg-white/[0.04] text-[#8e95a2] font-mono flex items-center gap-1">
-                        <MessageSquare class="w-2.5 h-2.5" />
-                        {comp.commentsCount}
-                      </span>
-                    {/if}
-                  </div>
-
-                  <!-- Title -->
-                  <h2 class="text-sm font-semibold text-white group-hover:text-sky-300 transition-colors line-clamp-2 mb-1.5 leading-snug">
-                    {comp.title}
-                  </h2>
-
-                  <!-- Description snippet -->
-                  {#if comp.description}
-                    <p class="text-[11px] text-[#8e95a2] line-clamp-2 leading-relaxed mb-3">
-                      {comp.description}
-                    </p>
+                        </div>
+                      {/each}
+                    </div>
                   {/if}
                 </div>
 
-                <!-- Footer: Author info -->
-                <div class="relative z-10 pt-2.5 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-[#8e95a2]">
-                  <div class="flex items-center gap-1.5 truncate pr-2">
-                    {#if comp.authorAvatar}
-                      <img
-                        src={comp.authorAvatar}
-                        alt=""
-                        class="w-4 h-4 rounded-full object-cover flex-shrink-0"
-                        onerror={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
-                      />
-                    {:else}
-                      <User class="w-3.5 h-3.5 opacity-60 flex-shrink-0" />
+                <!-- Pure charcoal vignette matching Ducke palette (#0d1117 / #07080a) -->
+                <div class="absolute inset-0 bg-gradient-to-t from-[#0d1117] via-[#0d1117]/85 to-[#0d1117]/55 pointer-events-none"></div>
+
+                <!-- Card Content Layer (Pure collection info, NO personal data, NO rainbow badges) -->
+                <div class="relative z-10 flex flex-col justify-between h-full">
+                  <!-- Top Row: Clean Neutral Metadata -->
+                  <div class="flex items-center justify-between text-xs text-[#8e95a2] font-mono">
+                    <span>{comp.gamesCount} игр</span>
+                    {#if comp.rating}
+                      <span class="text-[#8e95a2]">★ {comp.rating}</span>
                     {/if}
-                    <span class="truncate">{comp.authorName || 'StopGame'}</span>
                   </div>
-                  <span class="text-white/40 group-hover:text-white transition-colors text-xs font-mono">→</span>
+
+                  <!-- Middle: Title & Description -->
+                  <div class="space-y-1 my-auto">
+                    <h2 class="text-sm font-semibold text-white group-hover:text-sky-300 transition-colors line-clamp-2 leading-snug">
+                      {comp.title}
+                    </h2>
+                    {#if comp.description}
+                      <p class="text-[11px] text-[#8e95a2] line-clamp-2 leading-relaxed">
+                        {comp.description}
+                      </p>
+                    {/if}
+                  </div>
                 </div>
               </div>
             {/each}
@@ -535,6 +452,17 @@
               Загрузка подборки...
             </div>
           {:else}
+            {#if detail?.id}
+              <button
+                type="button"
+                onclick={() => openExternalUrl(`https://stopgame.ru/games/compilation/${detail?.id}`)}
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-[#8e95a2] hover:text-white transition-colors cursor-pointer"
+                title="Перейти к оригинальной подборке на StopGame.ru"
+              >
+                <span>Оригинал на StopGame</span>
+                <ExternalLink class="w-3.5 h-3.5" />
+              </button>
+            {/if}
             <button
               type="button"
               onclick={() => selectedCompId && openCompilation(selectedCompId, true)}
@@ -567,53 +495,23 @@
             </button>
           </div>
         {:else if detail}
-          <!-- Attribution Disclaimer & Source Link -->
-          <div class="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2 rounded-lg bg-white/[0.02] border border-white/[0.05] text-[11px] text-[#8e95a2] mb-5">
-            <div class="flex items-center gap-2 min-w-0">
-              <Info class="w-3.5 h-3.5 text-[#64748b] flex-shrink-0" />
-              <span class="leading-normal">
-                Материалы получены из открытых общедоступных источников <strong class="text-slate-300 font-medium">StopGame.ru</strong> в некоммерческих ознакомительных целях, без извлечения выгоды.
-              </span>
-            </div>
-            {#if detail.id}
-              <button
-                type="button"
-                onclick={() => openExternalUrl(`https://stopgame.ru/games/compilation/${detail?.id}`)}
-                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-sky-400 hover:text-sky-300 font-medium transition-colors cursor-pointer flex-shrink-0"
-                title="Перейти к оригинальной подборке на StopGame.ru"
-              >
-                <span>Оригинал на StopGame.ru</span>
-                <ExternalLink class="w-3 h-3" />
-              </button>
-            {/if}
-          </div>
-
-          <!-- Compilation Header / Hero (No border, no background, larger text) -->
-          <section class="mb-6 flex flex-col gap-3.5">
-            <div class="flex items-start justify-between gap-6 flex-wrap">
+          <!-- Compilation Header / Hero -->
+          <section class="mb-5 flex flex-col gap-3">
+            <div class="flex items-start justify-between gap-4 flex-wrap">
               <div class="flex-1 min-w-[280px]">
-                <h1 class="text-2xl sm:text-3xl font-bold text-white tracking-tight leading-tight mb-2.5">
+                <h1 class="text-2xl sm:text-3xl font-bold text-white tracking-tight leading-tight mb-2">
                   {detail.title}
                 </h1>
-                <div class="flex items-center gap-3.5 flex-wrap text-xs text-[#8e95a2]">
-                  {#if detail.authorName}
-                    <div class="flex items-center gap-1.5">
-                      {#if detail.authorAvatar}
-                        <img src={detail.authorAvatar} alt="" class="w-4 h-4 rounded-full object-cover" />
-                      {:else}
-                        <User class="w-3.5 h-3.5" />
-                      {/if}
-                      <span class="text-slate-200">{detail.authorName}</span>
-                    </div>
-                  {/if}
+                <div class="flex items-center gap-3 flex-wrap text-xs text-[#8e95a2]">
                   {#if detail.rating}
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] text-slate-200 font-mono text-[11px]">
+                    <span class="inline-flex items-center gap-1 text-slate-200 font-mono text-xs">
                       <Star class="w-3 h-3 fill-amber-400 text-amber-400" />
-                      <span>Рейтинг: {detail.rating}</span>
+                      <span>{detail.rating}</span>
                     </span>
                   {/if}
                   {#if detail.lastUpdated}
-                    <span class="flex items-center gap-1 text-[11px]">
+                    <span class="text-white/20">•</span>
+                    <span class="flex items-center gap-1 text-xs">
                       <Clock class="w-3 h-3 text-[#8e95a2]" />
                       {detail.lastUpdated}
                     </span>
@@ -621,26 +519,35 @@
                 </div>
               </div>
 
-              <!-- Library Match Status Pill -->
-              <div class="px-4 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex flex-col items-end text-right min-w-[170px]">
-                <span class="text-[10px] uppercase font-bold tracking-wider text-[#8e95a2]">В библиотеке Ducke</span>
-                <div class="text-sm font-mono font-bold text-white mt-0.5">
-                  <span class="text-emerald-400">{inLibraryCount}</span>
+              <!-- Compact Library Match Status -->
+              <div class="flex items-center gap-3 px-3.5 py-2 rounded-lg bg-white/[0.03] border border-white/[0.08] text-xs self-start">
+                <span class="text-[#8e95a2]">В библиотеке:</span>
+                <span class="font-mono text-white">
+                  <strong class="text-emerald-400 font-semibold">{inLibraryCount}</strong>
                   <span class="text-[#8e95a2]"> / {detail.games.length}</span>
-                  <span class="text-[11px] font-normal text-[#8e95a2] ml-1">({matchPercent}%)</span>
-                </div>
-                <!-- Slim progress bar -->
-                <div class="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
-                  <div class="h-full bg-emerald-400 rounded-full transition-all duration-300" style="width: {matchPercent}%;"></div>
-                </div>
+                </span>
+                <span class="text-[11px] font-mono text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded">
+                  {matchPercent}%
+                </span>
               </div>
             </div>
 
-            <!-- Description (no background, no border, larger typography) -->
+            <!-- Description (collapsible to avoid wall of text pushing games down) -->
             {#if detail.description}
-              <p class="text-sm sm:text-[15px] text-slate-300 leading-relaxed font-normal whitespace-pre-line max-w-4xl select-text pt-1">
-                {detail.description}
-              </p>
+              <div class="max-w-4xl pt-1">
+                <p class="text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-line select-text {isDescriptionExpanded ? '' : 'line-clamp-2'}">
+                  {detail.description}
+                </p>
+                {#if detail.description.length > 140}
+                  <button
+                    type="button"
+                    onclick={() => (isDescriptionExpanded = !isDescriptionExpanded)}
+                    class="mt-1 text-xs text-sky-400 hover:text-sky-300 font-medium cursor-pointer transition-colors"
+                  >
+                    {isDescriptionExpanded ? 'Свернуть' : 'Развернуть описание...'}
+                  </button>
+                {/if}
+              </div>
             {/if}
           </section>
 
@@ -685,7 +592,7 @@
                   onclick={() => (detailSearch = '')}
                   class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8e95a2] hover:text-white"
                 >
-                  <X class="w-3 h-3" />
+                  <X size={12} />
                 </button>
               {/if}
             </div>
@@ -746,8 +653,8 @@
                     <!-- Gradient vignette at the bottom of the poster -->
                     <div class="absolute inset-0 bg-gradient-to-t from-[#0d1117] via-transparent to-transparent opacity-80 pointer-events-none"></div>
 
-                    <!-- Top controls / badges row -->
-                    <div class="absolute top-2 left-2 right-2 flex items-center justify-between gap-1.5 pointer-events-none">
+                    <!-- Top controls / badges (clean: visible on hover) -->
+                    <div class="absolute top-2 left-2 right-2 flex items-center justify-between gap-1.5 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                       <!-- Left: StopGame Article Link (only if game has url) -->
                       {#if game.url}
                         <button
@@ -757,7 +664,7 @@
                             const fullUrl = game.url.startsWith('http') ? game.url : `https://stopgame.ru${game.url}`;
                             openExternalUrl(fullUrl);
                           }}
-                          class="pointer-events-auto p-1 rounded-md bg-[#07080a]/90 hover:bg-black border border-white/10 text-[#8e95a2] hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                          class="pointer-events-auto p-1 rounded-md bg-[#07080a]/90 hover:bg-black border border-white/10 text-[#8e95a2] hover:text-white transition-all"
                           title="Открыть статью об игре на StopGame.ru"
                         >
                           <ExternalLink class="w-3 h-3" />
@@ -768,7 +675,7 @@
 
                       <!-- Right: StopGame score chip -->
                       {#if game.stopGameScore && game.stopGameScore !== '-'}
-                        <div class="px-1.5 py-0.5 rounded-md bg-[#07080a]/95 border border-white/10 text-white font-mono font-bold text-[10px] flex items-center gap-1 shadow">
+                        <div class="px-1.5 py-0.5 rounded-md bg-[#07080a]/90 border border-white/10 text-slate-200 font-mono text-[10px] flex items-center gap-1 shadow">
                           <Star class="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
                           <span>{game.stopGameScore}</span>
                         </div>
@@ -776,20 +683,20 @@
                     </div>
                   </div>
 
-                  <!-- Content info (Tactile Steam/Ducke style like MasterDetailCatalog) -->
-                  <div class="p-2.5 px-3 flex-1 flex flex-col justify-between gap-1.5 min-h-[64px]">
-                    <h3 class="text-xs sm:text-[13px] font-semibold leading-snug truncate text-[#d1d5db] group-hover:text-white" title={game.title}>
+                  <!-- Content info -->
+                  <div class="p-2.5 px-3 flex-1 flex flex-col justify-between gap-1.5 min-h-[58px]">
+                    <h3 class="text-xs sm:text-[13px] font-medium leading-snug truncate text-slate-200 group-hover:text-white" title={game.title}>
                       {game.title}
                     </h3>
 
-                    <div class="flex items-center justify-between text-[10px] pt-0.5">
+                    <div class="flex items-center justify-between text-[10px] pt-0.5 text-[#8e95a2]">
                       {#if game.inLibrary && game.duckeGame}
                         <span class="inline-flex items-center gap-1.5 text-emerald-400 font-medium truncate">
                           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0"></span>
                           <span class="truncate">В библиотеке</span>
                         </span>
                         {#if game.duckeGame.sizeDisplay}
-                          <span class="font-mono text-[10px] text-[#94a3b8] px-1.5 py-0.5 rounded bg-black/60 border border-white/[0.06] flex-shrink-0 ml-1">
+                          <span class="font-mono text-[10px] text-[#8e95a2] flex-shrink-0 ml-1">
                             {game.duckeGame.sizeDisplay}
                           </span>
                         {/if}
@@ -798,14 +705,16 @@
                           <Search class="w-3 h-3 flex-shrink-0" />
                           <span class="truncate">Искать в Ducke</span>
                         </span>
-                        <span class="font-mono text-[9px] text-[#525a6c] uppercase tracking-wider flex-shrink-0 ml-1">
-                          Каталог
-                        </span>
                       {/if}
                     </div>
                   </div>
                 </div>
               {/each}
+            </div>
+
+            <!-- Attribution footnote -->
+            <div class="pt-8 pb-4 text-center text-[11px] text-[#8e95a2]/50">
+              Материалы подборок получены из открытых источников StopGame.ru в ознакомительных целях
             </div>
           {/if}
         {/if}

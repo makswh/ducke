@@ -1,16 +1,15 @@
 <script lang="ts">
   import {
-    Library,
-    Download,
-    Settings,
-    Gamepad2,
-    Layers,
+    SquaresFour,
     Magnet,
-    Tv,
+    Compass,
+    BookmarkSimple,
+    DownloadSimple,
+    Gear,
+    GameController,
     Check,
-    Bookmark,
-    Compass
-  } from 'lucide-svelte';
+    CheckCircle
+  } from 'phosphor-svelte';
 
   let {
     activeTab = $bindable<'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('catalog'),
@@ -74,7 +73,7 @@
             onclick={() => (activeTab = 'catalog')}
             title={isCatalogLoading ? "Каталог игр (загрузка...)" : "Каталог игр"}
           >
-            <Layers class="w-5 h-5 stroke-[1.75] {activeTab === 'catalog' ? (isCatalogLoading ? 'text-sky-400 animate-pulse' : 'text-white') : ''}" />
+            <SquaresFour size={20} weight={activeTab === 'catalog' ? 'bold' : 'regular'} class={activeTab === 'catalog' ? (isCatalogLoading ? 'text-sky-400 animate-pulse' : 'text-white') : ''} />
             {#if isCatalogLoading}
               <span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-sky-400"></span>
             {/if}
@@ -94,7 +93,7 @@
             onclick={() => (activeTab = 'torrents')}
             title="Торренты"
           >
-            <Magnet class="w-5 h-5 stroke-[1.75] {activeTab === 'torrents' ? 'text-white' : ''}" />
+            <Magnet size={20} weight={activeTab === 'torrents' ? 'bold' : 'regular'} class={activeTab === 'torrents' ? 'text-white' : ''} />
           </button>
         </div>
       {/if}
@@ -110,7 +109,7 @@
           onclick={() => (activeTab = 'collections')}
           title="Подборки игр"
         >
-          <Compass class="w-5 h-5 stroke-[1.75] {activeTab === 'collections' ? 'text-white' : ''}" />
+          <Compass size={20} weight={activeTab === 'collections' ? 'bold' : 'regular'} class={activeTab === 'collections' ? 'text-white' : ''} />
         </button>
       </div>
 
@@ -125,7 +124,7 @@
           onclick={() => (activeTab = 'favorites')}
           title="Избранное"
         >
-          <Bookmark class="w-5 h-5 stroke-[1.75] {activeTab === 'favorites' ? 'text-white' : ''}" />
+          <BookmarkSimple size={20} weight={activeTab === 'favorites' ? 'fill' : 'regular'} class={activeTab === 'favorites' ? 'text-white' : ''} />
         </button>
       </div>
 
@@ -170,7 +169,7 @@
               </span>
             </div>
           {:else}
-            <Download class="w-5 h-5 stroke-[1.75] {activeTab === 'downloads' ? 'text-white' : ''}" />
+            <DownloadSimple size={20} weight={activeTab === 'downloads' ? 'bold' : 'regular'} class={activeTab === 'downloads' ? 'text-white' : ''} />
             {#if activeDownloadsCount > 0}
               <span class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-sky-400 text-slate-950 text-[9px] font-bold font-mono flex items-center justify-center pointer-events-none">
                 {activeDownloadsCount}
@@ -213,7 +212,7 @@
           onclick={() => (activeTab = 'settings')}
           title="Настройки"
         >
-          <Settings class="w-5 h-5 stroke-[1.75] {activeTab === 'settings' ? 'text-white' : ''}" />
+          <Gear size={20} weight={activeTab === 'settings' ? 'bold' : 'regular'} class={activeTab === 'settings' ? 'text-white' : ''} />
         </button>
       </div>
     </nav>
@@ -240,7 +239,7 @@
                 stroke-width="2.5"
               />
             </svg>
-            <Check class="w-3.5 h-3.5 text-emerald-400 absolute stroke-[2.5]" />
+            <Check size={14} weight="bold" class="text-emerald-400 absolute" />
           {:else if metadataProgress.total > 0}
             <!-- Determinate Radial Progress Ring -->
             <svg class="w-7 h-7 -rotate-90" viewBox="0 0 32 32">
@@ -324,10 +323,7 @@
           onclick={onRefresh}
           title="Синхронизация метаданных: всё актуально (нажмите для проверки)"
         >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.75" />
-            <path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="2" />
-          </svg>
+          <CheckCircle size={16} weight="regular" />
         </button>
 
         <div
@@ -344,7 +340,7 @@
       class="w-9 h-9 rounded-lg flex items-center justify-center transition-colors {isGamepadConnected ? 'text-sky-400 bg-sky-400/10 border border-sky-400/20' : 'text-[#4b5563]'}"
       title={isGamepadConnected ? 'Контроллер подключен' : 'Контроллер не обнаружен'}
     >
-      <Gamepad2 class="w-4 h-4 stroke-[1.75]" />
+      <GameController size={18} weight={isGamepadConnected ? 'fill' : 'regular'} />
     </div>
   </div>
 </aside>

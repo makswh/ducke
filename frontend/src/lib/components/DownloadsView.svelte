@@ -5,19 +5,23 @@
     Play,
     X,
     FolderOpen,
-    Trash2,
+    Trash,
+    Trash as Trash2,
     HardDrive,
-    BarChart2,
-    TrendingUp,
-    Settings,
-    Download,
-    RefreshCw,
+    ChartBar,
+    ChartLineUp,
+    Gear,
+    Gear as Settings,
+    DownloadSimple,
+    DownloadSimple as Download,
+    ArrowClockwise,
+    ArrowClockwise as RefreshCw,
     Sliders,
-    ChevronDown,
+    CaretDown,
     Check,
-    Menu,
-    Layers
-  } from 'lucide-svelte';
+    List,
+    SquaresFour
+  } from 'phosphor-svelte';
 
   interface DownloadItem {
     downloadId: string;
@@ -94,11 +98,14 @@
     isMounted = false;
   });
 
+  const inFlightCovers = new Set<string>();
+  const inFlightLogos = new Set<string>();
+
   async function resolveMissingLogo(title: string, gameId?: number) {
     if (!title || !isMounted) return;
     const key = title.trim().toLowerCase();
-    if (resolvedLogos[key] !== undefined) return;
-    resolvedLogos[key] = '';
+    if (resolvedLogos[key] !== undefined || inFlightLogos.has(key)) return;
+    inFlightLogos.add(key);
 
     try {
       const app = (window as any)?.go?.main?.App;
@@ -111,12 +118,14 @@
 
         const searchTitle = title.replace(/\[.*?\]|\(.*?\)/g, '').trim() || title;
         const url = await app.ResolveGameLogo(gId, searchTitle, appId);
-        if (url && isMounted) {
-          resolvedLogos[key] = url;
+        if (isMounted) {
+          resolvedLogos[key] = url || '';
         }
+      } else if (isMounted) {
+        resolvedLogos[key] = '';
       }
     } catch {
-      // Ignore if no logo available
+      if (isMounted) resolvedLogos[key] = '';
     }
   }
 
@@ -142,8 +151,8 @@
   async function resolveMissingCover(title: string, gameId?: number) {
     if (!title || !isMounted) return;
     const key = title.trim().toLowerCase();
-    if (resolvedCovers[key] !== undefined) return;
-    resolvedCovers[key] = '';
+    if (resolvedCovers[key] !== undefined || inFlightCovers.has(key)) return;
+    inFlightCovers.add(key);
 
     try {
       const app = (window as any)?.go?.main?.App;
@@ -162,12 +171,14 @@
           url = await app.ResolveGameCover(gId, searchTitle, appId);
         }
 
-        if (url && isMounted) {
-          resolvedCovers[key] = url;
+        if (isMounted) {
+          resolvedCovers[key] = url || '';
         }
+      } else if (isMounted) {
+        resolvedCovers[key] = '';
       }
     } catch {
-      // Normal fallback when cover is not available; resolvedCovers[key] remains '' to prevent repeat attempts
+      if (isMounted) resolvedCovers[key] = '';
     }
   }
 
@@ -497,61 +508,49 @@
     return getGameBackground(currentDownload);
   });
 
-  let speedHistory = $state<number[]>(Array(90).fill(0));
-  let diskHistory = $state<number[]>(Array(90).fill(0));
+  let graphContainerWidth = $state<number>(0);
+  let speedHistory = $state<number[]>(Array(300).fill(0));
+  let diskHistory = $state<number[]>(Array(300).fill(0));
 
-  function getHistBars(width = 800, height = 90) {
-    const sampleCount = 90;
-    const recent = speedHistory.slice(-sampleCount);
+  const BAR_WIDTH = 3.5;
+  const BAR_GAP = 2.5;
+  const STEP = BAR_WIDTH + BAR_GAP; // 6px per sample
+
+  function getHistBars(w: number, height = 90) {
+    if (w <= 0) return [];
     const maxVal = Math.max(peakSpeedBytes, 1024 * 1024);
-    const step = width / sampleCount;
-    const barW = step * 0.5; // Exact 1:1 ratio between bar width and gap
+    const count = Math.floor(w / STEP);
+    if (count <= 0) return [];
+    const recent = speedHistory.slice(-count);
 
     return recent.map((val, idx) => {
-      const barH = val > 0 ? Math.max(3, (val / maxVal) * (height - 12)) : 0;
+      const x = w - (recent.length - idx) * STEP;
+      const barH = val > 0 ? Math.max(2, (val / maxVal) * (height - 12)) : 0;
       return {
-        x: (idx * step).toFixed(2),
-        y: (height - barH).toFixed(2),
-        w: barW.toFixed(2),
-        h: barH.toFixed(2)
+        x: Math.round(x * 10) / 10,
+        y: Math.round((height - barH) * 10) / 10,
+        w: BAR_WIDTH,
+        h: Math.round(barH * 10) / 10
       };
     });
   }
 
-  function getDiskLine(width = 800, height = 90): string {
-    const sampleCount = 90;
-    const recent = diskHistory.slice(-sampleCount);
+  function getDiskLine(w: number, height = 90): string {
+    if (w <= 0) return '';
     const maxVal = Math.max(peakSpeedBytes, 1024 * 1024);
-    const step = width / (sampleCount - 1);
-    const halfBar = (width / sampleCount) * 0.25;
+    const count = Math.floor(w / STEP);
+    if (count <= 0) return '';
+    const recent = diskHistory.slice(-count);
 
     return recent
       .map((val, idx) => {
-        const x = (idx * step + halfBar).toFixed(2);
-        const y = val > 0 ? (height - (val / maxVal) * (height - 14) - 6).toFixed(2) : (height - 2).toFixed(2);
+        const x = (w - (recent.length - idx) * STEP + BAR_WIDTH / 2).toFixed(1);
+        const y = val > 0 
+          ? (height - (val / maxVal) * (height - 14) - 6).toFixed(1) 
+          : (height - 2).toFixed(1);
         return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
       })
       .join(' ');
-  }
-
-  function getSparklinePoints(width = 500, height = 54): string {
-    const points = speedHistory;
-    const maxVal = Math.max(peakSpeedBytes, 1024 * 1024);
-    const step = width / (points.length - 1);
-
-    return points
-      .map((val, idx) => {
-        const x = (idx * step).toFixed(1);
-        const y = (height - (val / maxVal) * (height - 8) - 4).toFixed(1);
-        return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
-      })
-      .join(' ');
-  }
-
-  function getSparklineArea(width = 500, height = 54): string {
-    const line = getSparklinePoints(width, height);
-    if (!line) return '';
-    return `${line} L ${width} ${height} L 0 ${height} Z`;
   }
 
   onMount(() => {
@@ -611,10 +610,10 @@
     {@const logoUrl = getGameLogo(currentDownload)}
     {@const bannerUrl = getGameBanner(currentDownload)}
 
-    <div class="relative z-10 w-full rounded-none bg-[#090d14] border-b border-[#1b222d] border-t-0 border-x-0 overflow-hidden shadow-xl flex flex-col md:flex-row items-stretch min-h-[160px] sm:min-h-[170px]">
+    <div class="relative z-10 w-full rounded-none bg-[#0d1117] border-b border-white/[0.06] border-t-0 border-x-0 overflow-hidden flex flex-col md:flex-row items-stretch min-h-[160px] sm:min-h-[170px]">
       
       <!-- 1. LEFT GAME BANNER WITH HALF-LIFE STYLE LOGO / TITLE OVERLAY -->
-      <div class="relative w-full md:w-[380px] lg:w-[440px] shrink-0 h-[160px] sm:h-[170px] overflow-hidden bg-[#0d121a]">
+      <div class="relative w-full md:w-[380px] lg:w-[440px] shrink-0 h-[160px] sm:h-[170px] overflow-hidden bg-[#07080a]">
         {#if bannerUrl && !imageLoadFailed[bannerUrl]}
           <img
             src={bannerUrl}
@@ -629,7 +628,7 @@
         {/if}
         <!-- Scrim gradient for contrast and seamless blend on right -->
         <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent"></div>
-        <div class="absolute top-0 bottom-0 right-0 w-16 bg-gradient-to-r from-transparent to-[#090d14] hidden md:block"></div>
+        <div class="absolute top-0 bottom-0 right-0 w-16 bg-gradient-to-r from-transparent to-[#0d1117] hidden md:block"></div>
 
         <!-- Game Logo or Title overlaid at bottom left (matching screenshot) -->
         <div class="absolute bottom-3 left-4 right-4 flex items-end justify-between gap-2 z-20">
@@ -645,13 +644,13 @@
                 }}
               />
             {:else}
-              <span class="text-base sm:text-lg font-black text-white uppercase tracking-wider filter drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] line-clamp-2">
+              <span class="text-base sm:text-lg font-bold text-white tracking-wide filter drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] line-clamp-2">
                 {currentDownload.gameTitle}
               </span>
             {/if}
           </div>
           {#if currentDownload.isTorrent}
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-white/10 text-white border border-white/15 shrink-0">
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase tracking-wider bg-white/10 text-white border border-white/15 shrink-0">
               TORRENT
             </span>
           {/if}
@@ -659,12 +658,15 @@
       </div>
 
       <!-- 2. LIVE GRAPH SPANNING ACROSS BANNER RIGHT & MIDDLE SECTION (Matching Screenshot) -->
-      <div class="absolute bottom-0 left-[240px] sm:left-[280px] md:left-[320px] right-[380px] sm:right-[420px] md:right-[460px] h-[95px] z-10 pointer-events-none overflow-hidden hidden sm:flex items-end">
-        <svg class="w-full h-[90px]" viewBox="0 0 800 90" preserveAspectRatio="none">
-          {#each getHistBars(800, 90) as bar}
-            <rect x={bar.x} y={bar.y} width={bar.w} height={bar.h} fill="#1a9fff" opacity="0.85" />
+      <div
+        bind:clientWidth={graphContainerWidth}
+        class="absolute bottom-0 left-[240px] sm:left-[280px] md:left-[320px] right-[380px] sm:right-[420px] md:right-[460px] h-[95px] z-10 pointer-events-none overflow-hidden hidden sm:flex items-end"
+      >
+        <svg class="w-full h-[90px]" viewBox="0 0 {graphContainerWidth || 600} 90">
+          {#each getHistBars(graphContainerWidth || 600, 90) as bar}
+            <rect x={bar.x} y={bar.y} width={bar.w} height={bar.h} fill="#38bdf8" opacity="0.8" rx="0.5" />
           {/each}
-          <path d={getDiskLine(800, 90)} fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          <path d={getDiskLine(graphContainerWidth || 600, 90)} fill="none" stroke="#34d399" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </div>
 
@@ -673,24 +675,24 @@
         <div class="relative">
           <button
             type="button"
-            class="w-7 h-7 flex items-center justify-center text-[#8f98a0] hover:text-white transition-colors cursor-pointer"
+            class="w-7 h-7 flex items-center justify-center text-[#8e95a2] hover:text-white transition-colors cursor-pointer"
             onclick={() => (isDeckMenuOpen = !isDeckMenuOpen)}
             title="Опции загрузки"
           >
-            <Menu class="w-4 h-4" />
+            <List size={16} />
           </button>
 
           {#if isDeckMenuOpen}
-            <div class="absolute left-0 top-8 z-30 w-48 rounded bg-[#161c26] border border-white/10 shadow-2xl py-1 text-xs font-sans">
+            <div class="absolute left-0 top-8 z-30 w-48 rounded-lg bg-[#0d1117] border border-white/10 shadow-xl py-1 text-xs font-sans">
               {#if currentDownload.localPath}
                 <button
-                  class="w-full text-left px-3 py-2 flex items-center gap-2 text-xs text-[#c6d4df] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+                  class="w-full text-left px-3 py-2 flex items-center gap-2 text-xs text-[#cbd5e1] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
                   onclick={() => {
                     isDeckMenuOpen = false;
                     onOpenFolder(currentDownload.localPath);
                   }}
                 >
-                  <FolderOpen class="w-3.5 h-3.5 text-[#8f98a0]" />
+                  <FolderOpen class="w-3.5 h-3.5 text-[#8e95a2]" />
                   <span>Открыть папку</span>
                 </button>
               {/if}
@@ -710,7 +712,7 @@
       </div>
 
       <!-- 4. RIGHT TELEMETRY & PROGRESS PANEL (Matching Screenshot) -->
-      <div class="flex-1 min-w-0 md:max-w-[460px] ml-auto flex flex-col justify-between px-4 sm:px-6 py-3 bg-[#090d14] relative z-20 border-t md:border-t-0 md:border-l border-[#1b222d]">
+      <div class="flex-1 min-w-0 md:max-w-[460px] ml-auto flex flex-col justify-between px-4 sm:px-6 py-3 bg-[#0d1117] relative z-20 border-t md:border-t-0 md:border-l border-white/[0.06]">
         
         <!-- Top Metrics Row & Settings Button -->
         <div class="flex items-start justify-between gap-3 min-w-0">
@@ -720,14 +722,10 @@
               <!-- СЕТЬ -->
               <div class="flex flex-col">
                 <div class="flex items-center gap-1 text-[9px] font-mono font-bold text-sky-400 tracking-wider uppercase">
-                  <svg class="w-2.5 h-2.5 text-sky-400" viewBox="0 0 12 12" fill="currentColor">
-                    <rect x="1" y="6" width="2" height="6" rx="0.5" />
-                    <rect x="5" y="3" width="2" height="9" rx="0.5" />
-                    <rect x="9" y="1" width="2" height="11" rx="0.5" />
-                  </svg>
+                  <ChartBar size={11} weight="bold" class="text-sky-400" />
                   <span>СЕТЬ</span>
                 </div>
-                <span class="text-xs font-mono font-bold text-white tracking-tight">
+                <span class="text-xs font-mono font-semibold text-white tracking-tight">
                   {formatSpeedRu(totalSpeedBytes)}
                 </span>
               </div>
@@ -735,14 +733,10 @@
               <!-- МАКС. -->
               <div class="flex flex-col">
                 <div class="flex items-center gap-1 text-[9px] font-mono font-bold text-sky-400 tracking-wider uppercase">
-                  <svg class="w-2.5 h-2.5 text-sky-400" viewBox="0 0 12 12" fill="currentColor">
-                    <rect x="1" y="6" width="2" height="6" rx="0.5" />
-                    <rect x="5" y="3" width="2" height="9" rx="0.5" />
-                    <rect x="9" y="1" width="2" height="11" rx="0.5" />
-                  </svg>
+                  <ChartLineUp size={11} weight="bold" class="text-sky-400" />
                   <span>МАКС.</span>
                 </div>
-                <span class="text-xs font-mono font-bold text-white tracking-tight">
+                <span class="text-xs font-mono font-semibold text-white tracking-tight">
                   {formatSpeedRu(peakSpeedBytes)}
                 </span>
               </div>
@@ -753,31 +747,31 @@
                   <span class="w-2.5 h-0.5 bg-emerald-400 inline-block"></span>
                   <span>ИСП. ДИСКА</span>
                 </div>
-                <span class="text-xs font-mono font-bold text-white tracking-tight">
+                <span class="text-xs font-mono font-semibold text-white tracking-tight">
                   {formatSpeedRu(isDownloading ? Math.round(totalSpeedBytes * 0.96) : 0)}
                 </span>
               </div>
             </div>
 
             <!-- Row 2: ОГРАНИЧЕНИЕ ЗАГРУЗОК -->
-            <div class="text-[10px] font-mono uppercase tracking-wider text-[#8f98a0] mt-1 flex items-center gap-1 relative">
+            <div class="text-[10px] font-mono uppercase tracking-wider text-[#8e95a2] mt-1 flex items-center gap-1 relative">
               <span>ОГРАНИЧЕНИЕ ЗАГРУЗОК:</span>
               <button
                 type="button"
-                class="text-[#c6d4df] hover:text-white cursor-pointer uppercase transition-colors"
+                class="text-[#cbd5e1] hover:text-white cursor-pointer uppercase transition-colors"
                 onclick={() => (isSpeedMenuOpen = !isSpeedMenuOpen)}
               >
                 {speedLimitKB > 0 ? formatSpeedRu(speedLimitKB * 1024) : 'БЕЗ ОГРАНИЧЕНИЙ'}
               </button>
 
               {#if isSpeedMenuOpen}
-                <div class="absolute left-0 top-5 z-30 w-48 rounded bg-[#161c26] border border-white/10 shadow-2xl py-1 text-xs font-sans normal-case">
-                  <div class="px-3 py-1 text-[10px] font-mono text-[#8f98a0] uppercase tracking-wider border-b border-white/5">
+                <div class="absolute left-0 top-5 z-30 w-48 rounded-lg bg-[#0d1117] border border-white/10 shadow-xl py-1 text-xs font-sans normal-case">
+                  <div class="px-3 py-1 text-[10px] font-mono text-[#8e95a2] uppercase tracking-wider border-b border-white/5">
                     Лимит скорости
                   </div>
                   {#each speedPresets as preset}
                     <button
-                      class="w-full text-left px-3 py-1.5 flex items-center justify-between text-xs hover:bg-white/[0.08] transition-colors cursor-pointer {speedLimitKB === preset.value ? 'text-sky-400 font-bold' : 'text-[#c6d4df]'}"
+                      class="w-full text-left px-3 py-1.5 flex items-center justify-between text-xs hover:bg-white/[0.08] transition-colors cursor-pointer {speedLimitKB === preset.value ? 'text-sky-400 font-bold' : 'text-[#cbd5e1]'}"
                       onclick={() => handleSelectSpeedLimit(preset.value)}
                     >
                       <span>{preset.label}</span>
@@ -794,7 +788,7 @@
           <!-- Gear Settings Button -->
           <button
             type="button"
-            class="w-7 h-7 sm:w-8 sm:h-8 rounded-sm bg-[#171d27] hover:bg-[#202937] text-[#8f98a0] hover:text-white border border-[#2b3648] flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-white/5 hover:bg-white/10 text-[#8e95a2] hover:text-white border border-white/10 flex items-center justify-center transition-colors cursor-pointer shrink-0"
             title="Настройки Ducke"
             onclick={onGoToSettings}
           >
@@ -807,15 +801,15 @@
           <!-- 1: Загрузка данных (Blue) -->
           <div class="space-y-1">
             <div class="flex items-center justify-between text-xs font-mono">
-              <span class="text-[#c6d4df] font-medium">Загрузка данных</span>
-              <div class="flex items-center gap-1 text-xs font-mono text-white font-bold">
+              <span class="text-[#cbd5e1] font-medium">Загрузка данных</span>
+              <div class="flex items-center gap-1 text-xs font-mono text-white font-semibold">
                 <span>{formatBytesRu(currentDownload.downloadedBytes)} / {formatBytesRu(currentDownload.totalBytes)}</span>
-                <Download class="w-3 h-3 text-[#8f98a0]" />
+                <Download class="w-3 h-3 text-[#8e95a2]" />
               </div>
             </div>
-            <div class="h-1 w-full bg-[#1a2330] rounded-none overflow-hidden">
+            <div class="h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden">
               <div
-                class="h-full bg-[#1a9fff] transition-all duration-300"
+                class="h-full bg-sky-400 rounded-full transition-all duration-300"
                 style="width: {percent}%"
               ></div>
             </div>
@@ -824,21 +818,21 @@
           <!-- 2: Установка файлов (Green) -->
           <div class="space-y-1">
             <div class="flex items-center justify-between text-xs font-mono">
-              <span class="text-[#c6d4df] font-medium">Установка файлов</span>
-              <span class="text-xs font-mono text-[#8f98a0]">{percent}%</span>
+              <span class="text-[#cbd5e1] font-medium">Установка файлов</span>
+              <span class="text-xs font-mono text-[#8e95a2]">{percent}%</span>
             </div>
-            <div class="h-1 w-full bg-[#1a2330] rounded-none overflow-hidden">
+            <div class="h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden">
               <div
-                class="h-full bg-[#22c55e] transition-all duration-300"
+                class="h-full bg-emerald-400 rounded-full transition-all duration-300"
                 style="width: {percent}%"
               ></div>
             </div>
           </div>
         </div>
 
-        <!-- Bottom Line: [Осталось примерно 05:09 / Приостановлено] ---------- [Blue Play/Pause Button] -->
+        <!-- Bottom Line: [Осталось примерно 05:09 / Приостановлено] ---------- [Play/Pause Button] -->
         <div class="flex items-center justify-between gap-3 pt-1 min-w-0">
-          <span class="text-xs font-mono text-[#8f98a0] truncate">
+          <span class="text-xs font-mono text-[#8e95a2] truncate">
             {#if isPaused}
               Приостановлено
             {:else if isDownloading}
@@ -869,20 +863,20 @@
           {#if isDownloading || isScanning}
             <button
               type="button"
-              class="w-9 h-9 sm:w-10 sm:h-10 bg-[#1a9fff] hover:bg-[#28a8ff] active:bg-[#1388dc] text-white flex items-center justify-center rounded-sm transition-colors cursor-pointer shrink-0 shadow-md"
+              class="w-8 h-8 sm:w-9 sm:h-9 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 font-bold"
               onclick={() => onPause(currentDownload.downloadId)}
               title="Приостановить"
             >
-              <Pause class="w-4 h-4 fill-white text-white" />
+              <Pause class="w-4 h-4 fill-current" />
             </button>
           {:else}
             <button
               type="button"
-              class="w-9 h-9 sm:w-10 sm:h-10 bg-[#1a9fff] hover:bg-[#28a8ff] active:bg-[#1388dc] text-white flex items-center justify-center rounded-sm transition-colors cursor-pointer shrink-0 shadow-md"
+              class="w-8 h-8 sm:w-9 sm:h-9 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 flex items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 font-bold"
               onclick={() => onResume(currentDownload.downloadId)}
               title="Возобновить"
             >
-              <Play class="w-4 h-4 fill-white text-white ml-0.5" />
+              <Play class="w-4 h-4 fill-current ml-0.5" />
             </button>
           {/if}
         </div>
@@ -892,19 +886,19 @@
     </div>
   {:else}
     <!-- Clean Empty State when no active download -->
-    <div class="relative z-10 w-full rounded-none bg-[#0c1017] border-b border-[#1e2633] border-t-0 border-x-0 px-6 sm:px-8 lg:px-10 py-7 flex flex-col sm:flex-row items-center justify-between gap-6">
+    <div class="relative z-10 w-full rounded-none bg-[#0d1117] border-b border-white/[0.06] border-t-0 border-x-0 px-6 sm:px-8 lg:px-10 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
       <div class="space-y-1 text-center sm:text-left">
-        <h2 class="text-base font-bold text-white uppercase tracking-wider font-mono">Все загрузки завершены</h2>
-        <p class="text-xs text-[#8f98a0]">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">Все загрузки завершены</h2>
+        <p class="text-xs text-[#8e95a2]">
           В очереди нет активных процессов.
           {#if diskSpace}
-            Доступно на накопителе: <span class="text-white font-mono font-bold">{diskSpace.freeGB}</span>.
+            Доступно на накопителе: <span class="text-white font-mono font-medium">{diskSpace.freeGB}</span>.
           {/if}
         </p>
       </div>
       <button
         data-nav-item
-        class="px-4 py-2 rounded bg-[#171d27] hover:bg-[#202937] text-[#c6d4df] hover:text-white text-xs font-mono uppercase border border-[#2b3648] cursor-pointer transition-colors"
+        class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 cursor-pointer transition-colors"
         onclick={onGoToCatalog}
       >
         Каталог игр →
@@ -913,16 +907,16 @@
   {/if}
 
   <!-- Lower Container for Queue and Completed (with standard padding) -->
-  <div class="relative z-10 w-full flex-1 flex flex-col px-6 sm:px-8 lg:px-10 py-7 space-y-7 pb-32">
+  <div class="relative z-10 w-full flex-1 flex flex-col px-6 sm:px-8 lg:px-10 py-6 space-y-6 pb-28">
 
     <!-- ============================================================ -->
     <!-- 2. SECTION "ДАЛЕЕ (X)" (QUEUE)                              -->
     <!-- ============================================================ -->
     <section class="space-y-3">
       <div class="flex items-center gap-3">
-        <span class="text-xs font-mono uppercase font-bold text-[#8f98a0] tracking-wider whitespace-nowrap">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1] whitespace-nowrap">
           ДАЛЕЕ ({queuedDownloads.length})
-        </span>
+        </h2>
         <div class="flex-1 h-px bg-white/[0.06]"></div>
 
         {#if safeActiveDownloads.length > 1}
@@ -930,7 +924,7 @@
             {#if downloadingCount > 0}
               <button
                 data-nav-item
-                class="text-[11px] font-mono uppercase text-[#8f98a0] hover:text-white bg-[#141922] hover:bg-[#1c2330] px-3 py-1 rounded border border-white/[0.06] transition-colors cursor-pointer"
+                class="text-xs font-medium text-[#8e95a2] hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-lg border border-white/10 transition-colors cursor-pointer"
                 onclick={onPauseAll}
               >
                 Приостановить всё
@@ -939,7 +933,7 @@
             {#if pausedCount > 0}
               <button
                 data-nav-item
-                class="text-[11px] font-mono uppercase text-[#8f98a0] hover:text-white bg-[#141922] hover:bg-[#1c2330] px-3 py-1 rounded border border-white/[0.06] transition-colors cursor-pointer"
+                class="text-xs font-medium text-[#8e95a2] hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-lg border border-white/10 transition-colors cursor-pointer"
                 onclick={onResumeAll}
               >
                 Возобновить всё
@@ -950,14 +944,14 @@
       </div>
 
       {#if queuedDownloads.length === 0}
-        <p class="text-xs text-[#64748b] py-2 font-mono">В очереди нет ожидающих загрузок</p>
+        <p class="text-xs text-[#64748b] py-1 font-mono">В очереди нет ожидающих загрузок</p>
       {:else}
         <div class="space-y-1.5">
           {#each queuedDownloads as qItem (qItem.downloadId)}
             {@const qCover = getGameCover(qItem)}
-            <div class="w-full p-2.5 sm:p-3 rounded bg-[#0c1017] hover:bg-[#111722] border border-white/[0.04] hover:border-white/[0.08] transition-colors flex items-center justify-between gap-4 group">
+            <div class="w-full p-2.5 sm:p-3 rounded-lg bg-[#0d1117] hover:bg-[#11141c] border border-white/[0.06] hover:border-white/15 transition-colors flex items-center justify-between gap-4 group">
               <div class="flex items-center gap-3 min-w-0 flex-1">
-                <div class="w-20 h-10 rounded bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
+                <div class="w-20 h-10 rounded-md bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
                   {#if qCover && !imageLoadFailed[qCover]}
                     <img
                       src={qCover}
@@ -976,15 +970,15 @@
                 </div>
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
-                    <h4 class="text-sm font-bold text-white uppercase tracking-wide truncate">{qItem.gameTitle}</h4>
+                    <h3 class="text-xs sm:text-[13px] font-medium text-white truncate">{qItem.gameTitle}</h3>
                     {#if qItem.isTorrent}
-                      <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-white/10 text-white border border-white/15 shrink-0">
+                      <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-white/10 text-white border border-white/15 shrink-0">
                         TORRENT
                       </span>
                     {/if}
                   </div>
-                  <span class="text-[10px] font-mono text-[#8f98a0] uppercase tracking-wider block mt-0.5">
-                    РАЗМЕР: {formatBytesRu(qItem.totalBytes)} · В ОЧЕРЕДИ
+                  <span class="text-[10px] font-mono text-[#8e95a2] uppercase tracking-wider block mt-0.5">
+                    Размер: {formatBytesRu(qItem.totalBytes)} · В очереди
                   </span>
                 </div>
               </div>
@@ -992,7 +986,7 @@
               <div class="flex items-center gap-2 flex-shrink-0">
                 <button
                   data-nav-item
-                  class="h-7 px-2.5 rounded bg-[#171d27] hover:bg-[#1a9fff] hover:text-white text-[#8f98a0] border border-white/[0.06] flex items-center gap-1 text-xs cursor-pointer transition-colors"
+                  class="h-7 px-2.5 rounded-lg bg-white/10 hover:bg-white/15 text-white border border-white/10 flex items-center gap-1.5 text-xs font-medium cursor-pointer transition-colors"
                   title="Начать сейчас"
                   onclick={() => onResume(qItem.downloadId)}
                 >
@@ -1001,7 +995,7 @@
                 </button>
                 <button
                   data-nav-item
-                  class="w-7 h-7 rounded bg-[#171d27] hover:bg-rose-600/30 text-[#8f98a0] hover:text-rose-400 border border-white/[0.06] flex items-center justify-center cursor-pointer transition-colors"
+                  class="w-7 h-7 rounded-lg bg-white/5 hover:bg-rose-500/15 text-[#8e95a2] hover:text-rose-400 border border-white/10 flex items-center justify-center cursor-pointer transition-colors"
                   title="Убрать из очереди"
                   onclick={() => onCancel(qItem.downloadId)}
                 >
@@ -1019,14 +1013,14 @@
     <!-- ============================================================ -->
     <section class="space-y-3">
       <div class="flex items-center gap-3">
-        <span class="text-xs font-mono uppercase font-bold text-[#8f98a0] tracking-wider whitespace-nowrap">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1] whitespace-nowrap">
           ЗАВЕРШЕНО ({safeDownloadHistory.length})
-        </span>
+        </h2>
         <div class="flex-1 h-px bg-white/[0.06]"></div>
         {#if safeDownloadHistory.length > 0}
           <button
             data-nav-item
-            class="bg-[#141922] hover:bg-[#1c2330] text-[#8f98a0] hover:text-white text-[11px] font-mono uppercase px-3 py-1 rounded border border-white/[0.06] transition-colors cursor-pointer"
+            class="bg-white/5 hover:bg-white/10 text-[#8e95a2] hover:text-white text-xs font-medium px-2.5 py-1 rounded-lg border border-white/10 transition-colors cursor-pointer"
             onclick={onClearCompleted}
           >
             Очистить историю
@@ -1035,15 +1029,15 @@
       </div>
 
       {#if safeDownloadHistory.length === 0}
-        <p class="text-xs text-[#64748b] py-2 font-mono">Нет завершенных загрузок</p>
+        <p class="text-xs text-[#64748b] py-1 font-mono">Нет завершенных загрузок</p>
       {:else}
         <div class="space-y-1.5">
           {#each safeDownloadHistory as record (record.id)}
             {@const rCover = getRecordCover(record)}
-            <div class="w-full p-2.5 sm:p-3 rounded bg-[#0c1017] hover:bg-[#111722] border border-white/[0.04] hover:border-white/[0.08] transition-colors flex items-center justify-between gap-4 group">
+            <div class="w-full p-2.5 sm:p-3 rounded-lg bg-[#0d1117] hover:bg-[#11141c] border border-white/[0.06] hover:border-white/15 transition-colors flex items-center justify-between gap-4 group">
               
               <div class="flex items-center gap-3 min-w-0 flex-1">
-                <div class="w-20 h-10 rounded bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
+                <div class="w-20 h-10 rounded-md bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
                   {#if rCover && !imageLoadFailed[rCover]}
                     <img
                       src={rCover}
@@ -1055,21 +1049,21 @@
                       }}
                     />
                   {:else}
-                    <div class="w-full h-full bg-[#141922] flex items-center justify-center text-[9px] font-bold text-[#64748b] uppercase font-mono">
+                    <div class="w-full h-full bg-black/40 flex items-center justify-center text-[9px] font-bold text-[#64748b] uppercase font-mono">
                       Ducke
                     </div>
                   {/if}
                 </div>
 
                 <div class="min-w-0">
-                  <h4 class="text-sm font-bold text-white uppercase tracking-wide truncate">{record.gameTitle}</h4>
-                  <span class="text-[10px] font-mono text-[#8f98a0] uppercase tracking-wider block mt-0.5">
-                    ЗАГРУЖЕНО: {formatBytesRu(record.downloadedBytes || record.totalBytes)} из {formatBytesRu(record.totalBytes || record.downloadedBytes)}
+                  <h3 class="text-xs sm:text-[13px] font-medium text-white truncate">{record.gameTitle}</h3>
+                  <span class="text-[10px] font-mono text-[#8e95a2] uppercase tracking-wider block mt-0.5">
+                    Загружено: {formatBytesRu(record.downloadedBytes || record.totalBytes)} из {formatBytesRu(record.totalBytes || record.downloadedBytes)}
                   </span>
                 </div>
               </div>
 
-              <div class="text-[11px] font-mono text-[#8f98a0] uppercase tracking-wider hidden sm:block whitespace-nowrap">
+              <div class="text-[11px] font-mono text-[#8e95a2] uppercase tracking-wider hidden sm:block whitespace-nowrap">
                 {formatSteamDate(record.updatedAt)}
               </div>
 
@@ -1079,11 +1073,11 @@
                   {#if isLinux && installerMap[record.id]}
                     <button
                       data-nav-item
-                      class="bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                      class="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
                       onclick={() => handleLaunchInstaller(installerMap[record.id], record.id)}
                       title="Запустить установку игры (.run)"
                     >
-                      <Play class="w-3.5 h-3.5 fill-black stroke-[2]" />
+                      <Play class="w-3.5 h-3.5 fill-current" />
                       <span class="font-mono text-[11px]">{installingId === record.id ? 'Запуск...' : 'Установить'}</span>
                     </button>
                   {/if}
@@ -1091,28 +1085,28 @@
                   {#if record.localPath}
                     <button
                       data-nav-item
-                      class="bg-[#171d27] hover:bg-[#202937] text-[#c6d4df] hover:text-white text-xs px-3 py-1.5 rounded border border-white/[0.06] flex items-center gap-1.5 transition-colors cursor-pointer"
+                      class="bg-white/10 hover:bg-white/15 text-white text-xs font-medium px-2.5 py-1 rounded-lg border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
                       onclick={() => onOpenFolder(record.localPath)}
                       title="Открыть папку с файлами"
                     >
-                      <FolderOpen class="w-3.5 h-3.5 text-[#8f98a0]" />
+                      <FolderOpen class="w-3.5 h-3.5 text-[#8e95a2]" />
                       <span class="font-mono text-[11px]">Папка</span>
                     </button>
                   {/if}
                 {:else}
                   <button
                     data-nav-item
-                    class="bg-[#1a9fff] hover:bg-[#2cb2ff] text-white text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1 shadow-sm cursor-pointer transition-colors"
+                    class="bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
                     onclick={() => onResume(record.id)}
                   >
                     <RefreshCw class="w-3 h-3" />
-                    <span class="font-mono text-[11px]">ДОКАЧАТЬ</span>
+                    <span class="font-mono text-[11px]">Докачать</span>
                   </button>
                 {/if}
 
                 <button
                   data-nav-item
-                  class="p-1.5 text-[#64748b] hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all cursor-pointer rounded hover:bg-white/[0.05]"
+                  class="p-1.5 text-[#64748b] hover:text-rose-400 hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
                   onclick={() => onDeleteRecord(record.id, false)}
                   title="Удалить из истории"
                 >

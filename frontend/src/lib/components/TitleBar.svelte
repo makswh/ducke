@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Minus, Square, Copy, X, Tv } from 'lucide-svelte';
+  import { Minus, Square, Copy, X, TelevisionSimple } from 'phosphor-svelte';
   import {
     WindowMinimise,
     WindowToggleMaximise,
@@ -80,7 +80,7 @@
       title="Режим Big Picture (Консольный вид)"
       aria-label="Режим Big Picture"
     >
-      <Tv class="w-3.5 h-3.5 text-sky-400" />
+      <TelevisionSimple size={15} weight="bold" class="text-sky-400" />
       <span class="hidden sm:inline">Big Picture</span>
     </button>
 
@@ -94,7 +94,7 @@
       title="Свернуть"
       aria-label="Свернуть"
     >
-      <Minus class="w-3.5 h-3.5 stroke-[2]" />
+      <Minus size={12} weight="bold" />
     </button>
 
     <!-- Maximize / Restore -->
@@ -106,9 +106,9 @@
       aria-label={isMaximised ? "Восстановить" : "Развернуть"}
     >
       {#if isMaximised}
-        <Copy class="w-3 h-3 stroke-[2] rotate-180" />
+        <Copy size={12} weight="regular" class="rotate-180" />
       {:else}
-        <Square class="w-3 h-3 stroke-[2]" />
+        <Square size={12} weight="regular" />
       {/if}
     </button>
 
@@ -120,7 +120,7 @@
       title="Закрыть"
       aria-label="Закрыть"
     >
-      <X class="w-3.5 h-3.5 stroke-[2]" />
+      <X size={12} weight="bold" />
     </button>
   </div>
 </header>

@@ -1,17 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import {
-    Bookmark,
-    Search,
-    Download,
-    Gamepad2,
-    Check,
-    Clock,
-    CheckCircle2,
-    Trash2,
-    X,
-    Star
-  } from 'lucide-svelte';
+  import { BookmarkSimple, X, GameController, DownloadSimple as Download } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
   import {
     GetFavorites,
@@ -20,6 +9,7 @@
   } from '../../../../wailsjs/go/main/App';
   import { EventsOn } from '../../../../wailsjs/runtime/runtime';
   import type { GameEntity } from '../../types/game';
+  import { getDisplayTitle } from '../../utils/titleUtils';
 
   let {
     games = [] as any[],
@@ -36,6 +26,7 @@
   let isLoading = $state<boolean>(true);
   let isMounted = true;
   let unsubFavorites: any = null;
+  let unsubEnriched: any = null;
 
   let brokenCovers = $state<Record<string, boolean>>({});
 
@@ -117,7 +108,7 @@
     const g = f?.game || (f?.cleanTitle ? f : {});
     const gameId = Number(g.id || f?.gameId || f?.id || 0);
     const steamAppId = Number(g.steamAppId || f?.steamAppId || 0);
-    const cleanTitle = g.cleanTitle || f?.cleanTitle || g.rawName || g.steamTitle || '';
+    const cleanTitle = getDisplayTitle(g) || f?.cleanTitle || g.rawName || '';
 
     const { byId, byAppId, byTitle } = catalogLookup;
     const match = (gameId ? byId.get(gameId) : null) ||
@@ -237,11 +228,7 @@
   }
 
   function getCleanTitle(game: any): string {
-    if (!game) return '';
-    if (game.steamTitle && !/^Steam App \d+$/i.test(game.steamTitle)) {
-      return game.steamTitle;
-    }
-    return game.cleanTitle || game.displayTitle || game.folderName || '';
+    return getDisplayTitle(game);
   }
 
   function getInitials(title: string): string {
@@ -260,11 +247,32 @@
     unsubFavorites = EventsOn('favorites:updated', () => {
       if (isMounted) loadFavorites();
     });
+    unsubEnriched = EventsOn('game:enriched', (enrichedGame: any) => {
+      if (!enrichedGame || !isMounted) return;
+      favorites = favorites.map((item) => {
+        const g = item.game || item;
+        const matchesId = item.gameId === enrichedGame.id || g.id === enrichedGame.id;
+        const matchesSteam = enrichedGame.steamAppId && (g.steamAppId === enrichedGame.steamAppId || item.steamAppId === enrichedGame.steamAppId);
+        const matchesCanonical = enrichedGame.canonicalKey && g.canonicalKey && enrichedGame.canonicalKey === g.canonicalKey;
+        if (matchesId || matchesSteam || matchesCanonical) {
+          return {
+            ...item,
+            game: {
+              ...(item.game || {}),
+              ...enrichedGame,
+              favoriteStatus: item.status || g.favoriteStatus
+            }
+          };
+        }
+        return item;
+      });
+    });
   });
 
   onDestroy(() => {
     isMounted = false;
     if (typeof unsubFavorites === 'function') unsubFavorites();
+    if (typeof unsubEnriched === 'function') unsubEnriched();
   });
 </script>
 
@@ -349,7 +357,7 @@
             searchQuery = '';
           }}
         >
-          <X class="w-3.5 h-3.5" />
+          <X size={14} weight="bold" />
         </button>
       </div>
     {/if}
@@ -365,7 +373,7 @@
     {:else if filteredFavorites.length === 0}
       <div class="h-80 flex flex-col items-center justify-center text-center space-y-4 text-[#8e95a2]">
         <div class="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center text-white/30 shadow-inner">
-          <Bookmark class="w-8 h-8" />
+          <BookmarkSimple size={32} weight="duotone" class="text-white/30" />
         </div>
         <div class="space-y-1">
           <p class="text-base font-bold text-white">
@@ -426,7 +434,7 @@
               {:else}
                 <div class="w-full h-full flex flex-col items-center justify-between p-4 text-center bg-gradient-to-b from-[#181d28] via-[#10141d] to-[#0a0c12]">
                   <div class="w-full flex justify-end">
-                    <Gamepad2 class="w-4 h-4 text-white/20" />
+                    <GameController size={16} weight="regular" class="text-white/20" />
                   </div>
                   <div class="my-auto flex flex-col items-center space-y-2">
                     <div class="w-12 h-12 rounded-2xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-base font-black text-white/80 shadow-inner">
@@ -440,9 +448,11 @@
               {/if}
 
               <!-- Status Badge Overlay Top Left -->
-              <div class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider z-20 shadow-md {getStatusBadgeStyle(item.status)}">
-                {getStatusLabel(item.status)}
-              </div>
+              {#if selectedTab === 'all'}
+                <div class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider z-20 shadow-md {getStatusBadgeStyle(item.status)}">
+                  {getStatusLabel(item.status)}
+                </div>
+              {/if}
 
               <!-- Downloading Badge Overlay Top Right -->
               {#if isDownloading}

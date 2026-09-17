@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"gamevault/pkg/logger"
 	"gamevault/pkg/metadata"
 	"gamevault/pkg/remote"
+	"gamevault/pkg/steam"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -36,10 +38,11 @@ type App struct {
 	db                 *database.Database
 	cfgManager         *config.ConfigManager
 	steamService       *metadata.SteamService
+	steamManager       *steam.Manager
 	downloader         *downloader.DownloadManager
 	collectionsService *collections.StopGameService
 	catalogMu           sync.Mutex
-	torrentMu           sync.Mutex
+	torrentMu           sync.RWMutex
 	torrentCache        []database.GameEntity
 	torrentCacheByID    map[int64]int
 	torrentCacheByAppID map[int][]int
@@ -76,12 +79,20 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.appDataDir = appDataDir
 
-	appLogger := logger.InitLogger(2000)
+	appLogger := logger.InitLogger(3000)
 	appLogger.SetHook(func(entry logger.LogEntry) {
 		if a.ctx != nil {
 			wailsRuntime.EventsEmit(a.ctx, "log:entry", entry)
 		}
 	})
+
+	// Setup persistent file logging in %APPDATA%/Ducke/logs/ducke.log immediately
+	logDir := filepath.Join(appDataDir, "logs")
+	_ = os.MkdirAll(logDir, 0755)
+	logFile := filepath.Join(logDir, "ducke.log")
+	if err := appLogger.SetLogFile(logFile); err != nil {
+		log.Printf("[System] Failed to initialize file logger at %s: %v", logFile, err)
+	}
 
 	cfgMgr, err := config.NewConfigManager(appDataDir)
 	if err != nil {
@@ -90,16 +101,28 @@ func (a *App) startup(ctx context.Context) {
 	a.cfgManager = cfgMgr
 
 	appLogger.SetEnabled(cfgMgr.GetSettings().EnableLogs)
-	log.Printf("[System] Ducke started (AppData: %s, LogsEnabled: %v)", appDataDir, cfgMgr.GetSettings().EnableLogs)
+	log.Printf("[System] ===========================================")
+	log.Printf("[System] Ducke v1.1.5 starting up")
+	log.Printf("[System] AppData: %s", appDataDir)
+	log.Printf("[System] LogFile: %s", logFile)
+	log.Printf("[System] Runtime: %s %s (%d CPUs)", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+	log.Printf("[System] Settings: LogsEnabled=%v, TorrentSources=%d", cfgMgr.GetSettings().EnableLogs, len(cfgMgr.GetSettings().TorrentSources))
+	for _, src := range cfgMgr.GetSettings().TorrentSources {
+		log.Printf("[System] -> Source: \"%s\" (enabled=%v, items=%d, url=%s)", src.Name, src.Enabled, src.ItemCount, src.URL)
+	}
+	log.Printf("[System] ===========================================")
 
+	dbStart := time.Now()
 	db, err := database.InitDB(appDataDir)
 	if err != nil {
 		log.Fatalf("failed to init database: %v", err)
 	}
 	a.db = db
+	log.Printf("[System] SQLite database ready (took %v)", time.Since(dbStart))
 
 	a.steamService = metadata.NewSteamService(db)
 	a.collectionsService = collections.NewStopGameService(db)
+	a.steamManager = steam.NewManager()
 
 	// Initialize downloader and stream progress via Wails Events
 	a.downloader = downloader.NewDownloadManager(db, cfgMgr, func(event downloader.DownloadProgressEvent) {
@@ -108,7 +131,10 @@ func (a *App) startup(ctx context.Context) {
 
 	// Pre-warm torrent catalog cache into memory in background immediately
 	go func() {
-		_, _ = a.GetTorrentCatalog(false)
+		log.Printf("[Torrent] Starting background catalog pre-warming...")
+		pwStart := time.Now()
+		games, err := a.GetTorrentCatalog(false)
+		log.Printf("[Torrent] Background catalog pre-warming finished (games=%d, err=%v, took %v)", len(games), err, time.Since(pwStart))
 		if a.ctx != nil {
 			wailsRuntime.EventsEmit(a.ctx, "torrents:updated", nil)
 		}
@@ -116,7 +142,8 @@ func (a *App) startup(ctx context.Context) {
 
 	// Start background enrichment without blocking SQLite startup queries
 	go func() {
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(6000 * time.Millisecond) // Give frontend quiet time to fetch initial catalog
+		log.Printf("[System] Starting background enrichment worker...")
 		a.triggerBackgroundEnrichment()
 	}()
 }
@@ -435,15 +462,121 @@ func (a *App) SetFavoriteLaunchConfig(gameID int64, exePath, launchArgs string) 
 	return nil
 }
 
-// SelectGameExeFile opens a file dialog filtered to .exe files and returns the chosen path
-func (a *App) SelectGameExeFile() string {
-	path, err := wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{
+type FavoriteLaunchConfig struct {
+	ExePath    string `json:"exePath"`
+	LaunchArgs string `json:"launchArgs"`
+}
+
+// GetFavoriteLaunchConfig returns saved custom exe path and launch arguments for a game
+func (a *App) GetFavoriteLaunchConfig(gameID int64) (FavoriteLaunchConfig, error) {
+	if a.db == nil {
+		return FavoriteLaunchConfig{}, fmt.Errorf("database not initialized")
+	}
+	exePath, launchArgs, err := a.db.GetFavoriteLaunchConfig(gameID)
+	if err != nil {
+		return FavoriteLaunchConfig{}, err
+	}
+	return FavoriteLaunchConfig{
+		ExePath:    exePath,
+		LaunchArgs: launchArgs,
+	}, nil
+}
+
+// FindGameExecutables scans the game's downloaded directory for possible game executables
+func (a *App) FindGameExecutables(gameID int64) ([]string, error) {
+	details, err := a.GetGamePageDetails(gameID)
+	if err != nil {
+		return nil, err
+	}
+	folderPath := details.LocalPath
+	if folderPath == "" {
+		return nil, fmt.Errorf("локальная папка игры не найдена")
+	}
+
+	fi, err := os.Stat(folderPath)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.IsDir() {
+		ext := strings.ToLower(filepath.Ext(folderPath))
+		if ext == ".exe" || ext == ".bat" || ext == ".cmd" {
+			return []string{folderPath}, nil
+		}
+		return nil, nil
+	}
+
+	isExcludedExe := func(name string) bool {
+		lower := strings.ToLower(name)
+		excludedSubstrings := []string{
+			"unins", "setup", "crash", "reporter", "update", "vcredist",
+			"dxwebsetup", "directx", "dotnet", "redist", "eula",
+			"install", "config", "benchmark", "loader", "patcher",
+		}
+		for _, s := range excludedSubstrings {
+			if strings.Contains(lower, s) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var candidates []string
+	var secondaryCandidates []string
+
+	baseDepth := strings.Count(filepath.Clean(folderPath), string(os.PathSeparator))
+	_ = filepath.WalkDir(folderPath, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		currentDepth := strings.Count(filepath.Clean(path), string(os.PathSeparator))
+		if d.IsDir() {
+			if currentDepth-baseDepth > 3 {
+				return filepath.SkipDir
+			}
+			lowerDir := strings.ToLower(d.Name())
+			if lowerDir == "$recycle.bin" || lowerDir == ".git" || lowerDir == "_redist" || lowerDir == "redist" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if ext == ".exe" || ext == ".bat" || ext == ".cmd" {
+			if isExcludedExe(d.Name()) {
+				secondaryCandidates = append(secondaryCandidates, path)
+			} else {
+				candidates = append(candidates, path)
+			}
+		}
+		return nil
+	})
+
+	if len(candidates) > 0 {
+		return candidates, nil
+	}
+	return secondaryCandidates, nil
+}
+
+// SelectGameExeFile opens a file dialog filtered to executable files and returns the chosen path
+func (a *App) SelectGameExeFile(defaultDir string) string {
+	opts := wailsRuntime.OpenDialogOptions{
 		Title: "Выберите исполняемый файл игры",
 		Filters: []wailsRuntime.FileFilter{
-			{DisplayName: "Исполняемые файлы (*.exe)", Pattern: "*.exe"},
+			{DisplayName: "Исполняемые файлы (*.exe, *.bat, *.cmd)", Pattern: "*.exe;*.bat;*.cmd"},
 			{DisplayName: "Все файлы (*.*)", Pattern: "*.*"},
 		},
-	})
+	}
+	defaultDir = strings.TrimSpace(defaultDir)
+	if defaultDir != "" {
+		if fi, err := os.Stat(defaultDir); err == nil {
+			if fi.IsDir() {
+				opts.DefaultDirectory = defaultDir
+			} else {
+				opts.DefaultDirectory = filepath.Dir(defaultDir)
+			}
+		}
+	}
+	path, err := wailsRuntime.OpenFileDialog(a.ctx, opts)
 	if err != nil {
 		return ""
 	}
@@ -455,15 +588,227 @@ func (a *App) SelectGameExeFile() string {
 func (a *App) LaunchGameWithCustomConfig(gameID int64) error {
 	exePath, launchArgs, err := a.db.GetFavoriteLaunchConfig(gameID)
 	if err == nil && exePath != "" {
-		var args []string
-		if launchArgs != "" {
-			args = strings.Fields(launchArgs)
-		}
-		cmd := exec.Command(exePath, args...)
-		cmd.Dir = filepath.Dir(exePath)
-		return cmd.Start()
+		return launchExecutable(exePath, launchArgs)
 	}
 	return a.LaunchGameByGameID(gameID)
+}
+
+// AddGameToSteam adds or updates a favorite game shortcut in Steam library with covers, banner, hero, logo
+func (a *App) AddGameToSteam(gameID int64) (*steam.SteamExportResult, error) {
+	if a.steamManager == nil {
+		a.steamManager = steam.NewManager()
+	}
+
+	game, err := a.db.GetGameByID(gameID)
+	if err != nil || game == nil {
+		return nil, fmt.Errorf("игра не найдена: %w", err)
+	}
+
+	exePath, launchArgs, _ := a.db.GetFavoriteLaunchConfig(gameID)
+
+	// If no custom exe is set, check if we can find one automatically from local path
+	if exePath == "" {
+		candidates, err := a.FindGameExecutables(gameID)
+		if err == nil && len(candidates) > 0 {
+			exePath = candidates[0]
+		}
+	}
+
+	if exePath == "" {
+		return nil, fmt.Errorf("для добавления в Steam необходимо указать исполняемый файл (.exe) в настройках игры")
+	}
+
+	details, _ := a.GetGamePageDetails(gameID)
+
+	// Clean title for Steam display: prioritize official Steam metadata title
+	cleanTitle := a.resolveGameSteamTitle(game)
+	if details != nil {
+		dSteamTitle := strings.TrimSpace(details.Game.SteamTitle)
+		if dSteamTitle != "" && !strings.HasPrefix(strings.ToLower(dSteamTitle), "steam app ") {
+			cleanTitle = cleanSteamTitle(dSteamTitle)
+		}
+	}
+	if cleanTitle == "" {
+		cleanTitle = cleanSteamTitle(game.RawName)
+	}
+
+	// Artwork URLs
+	coverURL := game.CapsuleImage
+	heroURL := game.BackgroundImage
+	bannerURL := game.HeaderImage
+	var logoURL string
+	if details != nil {
+		logoURL = details.LogoURL
+		if details.BannerURL != "" {
+			bannerURL = details.BannerURL
+		}
+		if details.CoverURL != "" {
+			coverURL = details.CoverURL
+		}
+		if details.BackgroundURL != "" {
+			heroURL = details.BackgroundURL
+		}
+	}
+
+	// Fallback to official Steam CDN if steamAppId > 0
+	if game.SteamAppID > 0 {
+		if coverURL == "" {
+			coverURL = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/library_600x900_2x.jpg", game.SteamAppID)
+		}
+		if heroURL == "" {
+			heroURL = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/library_hero.jpg", game.SteamAppID)
+		}
+		if logoURL == "" {
+			logoURL = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/logo.png", game.SteamAppID)
+		}
+		if bannerURL == "" {
+			bannerURL = fmt.Sprintf("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%d/header.jpg", game.SteamAppID)
+		}
+	}
+
+	req := steam.AddShortcutRequest{
+		AppName:       cleanTitle,
+		ExePath:       exePath,
+		LaunchOptions: launchArgs,
+		CoverURL:      coverURL,
+		HeroURL:       heroURL,
+		LogoURL:       logoURL,
+		BannerURL:     bannerURL,
+		Tags:          []string{"Ducke"},
+	}
+
+	if len(game.Genres) > 0 {
+		req.Tags = append(req.Tags, game.Genres...)
+	}
+
+	return a.steamManager.AddOrUpdateGame(req)
+}
+
+// CheckGameInSteam checks if the game is already in user's Steam library
+func (a *App) CheckGameInSteam(gameID int64) (bool, error) {
+	if a.steamManager == nil {
+		a.steamManager = steam.NewManager()
+	}
+
+	game, err := a.db.GetGameByID(gameID)
+	if err != nil || game == nil {
+		return false, err
+	}
+
+	exePath, _, _ := a.db.GetFavoriteLaunchConfig(gameID)
+	cleanTitle := a.resolveGameSteamTitle(game)
+
+	inSteam, _, err := a.steamManager.IsGameInSteam(cleanTitle, exePath)
+	return inSteam, err
+}
+
+// RemoveGameFromSteam removes game shortcut and artwork from user's Steam library
+func (a *App) RemoveGameFromSteam(gameID int64) error {
+	if a.steamManager == nil {
+		a.steamManager = steam.NewManager()
+	}
+
+	game, err := a.db.GetGameByID(gameID)
+	if err != nil || game == nil {
+		return err
+	}
+
+	exePath, _, _ := a.db.GetFavoriteLaunchConfig(gameID)
+	cleanTitle := a.resolveGameSteamTitle(game)
+
+	inSteam, appID, err := a.steamManager.IsGameInSteam(cleanTitle, exePath)
+	if err != nil || !inSteam {
+		return err
+	}
+
+	return a.steamManager.RemoveGameShortcut(appID)
+}
+
+var (
+	rxSpacedAbbr7  = regexp.MustCompile(`\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b`)
+	rxSpacedAbbr6  = regexp.MustCompile(`\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b`)
+	rxSpacedAbbr5  = regexp.MustCompile(`\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b`)
+	rxSpacedAbbr4  = regexp.MustCompile(`\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b`)
+	rxSpacedAbbr3  = regexp.MustCompile(`\b([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\s+([A-Za-zА-Яа-я])\b`)
+
+	rxAllBrackets  = regexp.MustCompile(`\[[^\]]*\]`)
+	rxParenYears   = regexp.MustCompile(`\(\s*\d{4}(?:\s*[-–—/]\s*\d{4})?\s*\)`)
+	rxParenTags    = regexp.MustCompile(`(?i)\((?:repack|rip|версия|от|by|portable|gog|pc|[\d.,\s/\\+-]+)[^\)]*\)`)
+	rxVersionTag   = regexp.MustCompile(`(?i)\b(?:v\s*\d+([._\s]\d+)*|build\s*\d+|patch\s*\d+|update\s*\d*|hotfix)\b`)
+	rxStandalone   = regexp.MustCompile(`(?i)\b(repack|репак|rip|рип|portable|unpacked|steamrip|gog|xatab|fitgirl|dodi|decepticon|elamigos|codex|empress|multi\d*)\b`)
+	rxTrailingPC   = regexp.MustCompile(`(?i)\s*\b(pc|mac|linux|win|windows)\s*$`)
+	rxTrailingSize = regexp.MustCompile(`(?i)(?:[\s\-_]+)?(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб|g|m|t))(?:\)|\])?$`)
+	rxMultiSpace   = regexp.MustCompile(`\s+`)
+)
+
+func cleanSteamTitle(rawTitle string) string {
+	if rawTitle == "" {
+		return ""
+	}
+	s := strings.TrimSpace(rawTitle)
+
+	// 1. Spaced abbreviations like S T A L K E R
+	s = rxSpacedAbbr7.ReplaceAllString(s, "$1.$2.$3.$4.$5.$6.$7.")
+	s = rxSpacedAbbr6.ReplaceAllString(s, "$1.$2.$3.$4.$5.$6.")
+	s = rxSpacedAbbr5.ReplaceAllString(s, "$1.$2.$3.$4.$5.")
+	s = rxSpacedAbbr4.ReplaceAllString(s, "$1.$2.$3.$4.")
+	s = rxSpacedAbbr3.ReplaceAllString(s, "$1.$2.$3.")
+
+	// 2. Strip all square brackets [ ... ] (e.g. [DL], [В разработке], [P], [RUS / ENG], [v1.2])
+	s = rxAllBrackets.ReplaceAllString(s, " ")
+
+	// 3. Strip years in parentheses (2019) or (2003-2020)
+	s = rxParenYears.ReplaceAllString(s, " ")
+
+	// 4. Strip release notes in parentheses (repack by ...)
+	s = rxParenTags.ReplaceAllString(s, " ")
+
+	// 5. Dual titles (e.g. "Game / Игра") - done after stripping brackets so brackets with slashes don't break
+	if strings.Contains(s, " / ") {
+		parts := strings.Split(s, " / ")
+		if len(parts) >= 2 && len(strings.TrimSpace(parts[0])) >= 3 {
+			s = parts[0]
+		}
+	} else if strings.Contains(s, " | ") {
+		parts := strings.Split(s, " | ")
+		if len(parts) >= 2 && len(strings.TrimSpace(parts[0])) >= 3 {
+			s = parts[0]
+		}
+	}
+
+	// 6. Strip version markers (v 1 3 3, build 1234, etc.)
+	s = rxVersionTag.ReplaceAllString(s, " ")
+
+	// 7. Strip standalone release words (RePack, portable, etc.)
+	s = rxStandalone.ReplaceAllString(s, " ")
+
+	// 8. Strip trailing platform markers (PC, Linux, Windows) and sizes
+	s = rxTrailingPC.ReplaceAllString(s, " ")
+	s = rxTrailingSize.ReplaceAllString(s, " ")
+
+	// 9. Strip curly braces and boundary separators
+	s = strings.ReplaceAll(s, "{", "")
+	s = strings.ReplaceAll(s, "}", "")
+	s = strings.Trim(s, " -_:/\\")
+
+	s = rxMultiSpace.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
+}
+
+func (a *App) resolveGameSteamTitle(game *database.GameEntity) string {
+	if game == nil {
+		return ""
+	}
+	steamTitle := strings.TrimSpace(game.SteamTitle)
+	if steamTitle != "" && !strings.HasPrefix(strings.ToLower(steamTitle), "steam app ") {
+		return cleanSteamTitle(steamTitle)
+	}
+
+	raw := strings.TrimSpace(game.CleanTitle)
+	if raw == "" {
+		raw = strings.TrimSpace(game.RawName)
+	}
+	return cleanSteamTitle(raw)
 }
 
 func (a *App) UpdateSteamAppID(gameID int64, appID int) error {
@@ -1202,24 +1547,46 @@ func (a *App) updateTorrentCacheItem(enriched *database.GameEntity) {
 }
 
 func (a *App) GetTorrentCatalog(forceRefresh bool) ([]database.GameEntity, error) {
+	start := time.Now()
+	if !forceRefresh {
+		a.torrentMu.RLock()
+		if a.torrentCacheValid && a.torrentCache != nil {
+			res := make([]database.GameEntity, len(a.torrentCache))
+			copy(res, a.torrentCache)
+			count := len(res)
+			a.torrentMu.RUnlock()
+			log.Printf("[Torrent] GetTorrentCatalog: returned %d cached games (took %v)", count, time.Since(start))
+			return res, nil
+		}
+		a.torrentMu.RUnlock()
+	}
+
 	a.torrentMu.Lock()
 	defer a.torrentMu.Unlock()
 
+	// Double-check under write lock
 	if !forceRefresh && a.torrentCacheValid && a.torrentCache != nil {
 		res := make([]database.GameEntity, len(a.torrentCache))
 		copy(res, a.torrentCache)
+		log.Printf("[Torrent] GetTorrentCatalog: returned %d cached games under lock (took %v)", len(res), time.Since(start))
 		return res, nil
 	}
 
+	log.Printf("[Torrent] GetTorrentCatalog: fetching from database (forceRefresh=%v)...", forceRefresh)
 	if forceRefresh {
 		_ = a.SyncTorrentSources()
 		a.triggerBackgroundEnrichment()
 	}
 
+	qStart := time.Now()
 	games, err := a.db.GetTorrentGames()
+	log.Printf("[Torrent] db.GetTorrentGames finished: %d games returned (took %v, err=%v)", len(games), time.Since(qStart), err)
+
 	if err == nil && len(games) == 0 && len(a.cfgManager.GetSettings().TorrentSources) > 0 {
+		log.Printf("[Torrent] 0 games in DB, triggering sync of %d configured torrent sources...", len(a.cfgManager.GetSettings().TorrentSources))
 		_ = a.SyncTorrentSources()
 		games, err = a.db.GetTorrentGames()
+		log.Printf("[Torrent] After source sync, db.GetTorrentGames returned %d games (err=%v)", len(games), err)
 	}
 
 	if err == nil {
@@ -1228,15 +1595,26 @@ func (a *App) GetTorrentCatalog(forceRefresh bool) ([]database.GameEntity, error
 		a.torrentCacheValid = true
 		res := make([]database.GameEntity, len(games))
 		copy(res, games)
+		log.Printf("[Torrent] GetTorrentCatalog: catalog cache populated with %d games (total took %v)", len(games), time.Since(start))
 		return res, nil
 	}
 
+	log.Printf("[Torrent] GetTorrentCatalog: failed with error: %v (took %v)", err, time.Since(start))
 	return games, err
 }
 
-// ServeHTTP implements http.Handler for streaming large data directly to WebView2
+// AssetHandler implements http.Handler for streaming large data directly to WebView2
 // completely bypassing Windows ExecuteScript IPC message payload limits.
-func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// It is kept separate from App so Wails does not treat it as an exported IPC method.
+type AssetHandler struct {
+	app *App
+}
+
+func NewAssetHandler(app *App) *AssetHandler {
+	return &AssetHandler{app: app}
+}
+
+func (h *AssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/torrent-catalog") {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1244,7 +1622,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		forceRefresh := r.URL.Query().Get("refresh") == "1"
 
-		games, err := a.GetTorrentCatalog(forceRefresh)
+		games, err := h.app.GetTorrentCatalog(forceRefresh)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1257,28 +1635,40 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) GetTorrentCatalogCount() int {
-	a.torrentMu.Lock()
-	if !a.torrentCacheValid || a.torrentCache == nil {
-		a.torrentMu.Unlock()
-		_, _ = a.GetTorrentCatalog(false)
-		a.torrentMu.Lock()
+	start := time.Now()
+	a.torrentMu.RLock()
+	if a.torrentCacheValid && a.torrentCache != nil {
+		count := len(a.torrentCache)
+		a.torrentMu.RUnlock()
+		log.Printf("[Torrent] GetTorrentCatalogCount: returned %d (cached, took %v)", count, time.Since(start))
+		return count
 	}
+	a.torrentMu.RUnlock()
+
+	log.Printf("[Torrent] GetTorrentCatalogCount: cache not ready, triggering GetTorrentCatalog(false)...")
+	_, _ = a.GetTorrentCatalog(false)
+
+	a.torrentMu.RLock()
 	count := len(a.torrentCache)
-	a.torrentMu.Unlock()
+	a.torrentMu.RUnlock()
+	log.Printf("[Torrent] GetTorrentCatalogCount: returned %d after warm-up (took %v)", count, time.Since(start))
 	return count
 }
 
 func (a *App) GetTorrentCatalogChunk(offset int, limit int) []database.GameEntity {
-	a.torrentMu.Lock()
+	start := time.Now()
+	a.torrentMu.RLock()
 	if !a.torrentCacheValid || a.torrentCache == nil {
-		a.torrentMu.Unlock()
+		a.torrentMu.RUnlock()
+		log.Printf("[Torrent] GetTorrentCatalogChunk(offset=%d, limit=%d): cache not ready, warming up...", offset, limit)
 		_, _ = a.GetTorrentCatalog(false)
-		a.torrentMu.Lock()
+		a.torrentMu.RLock()
 	}
-	defer a.torrentMu.Unlock()
+	defer a.torrentMu.RUnlock()
 
 	total := len(a.torrentCache)
 	if offset < 0 || offset >= total || limit <= 0 {
+		log.Printf("[Torrent] GetTorrentCatalogChunk(offset=%d, limit=%d): out of bounds (total=%d)", offset, limit, total)
 		return []database.GameEntity{}
 	}
 	end := offset + limit
@@ -1287,6 +1677,7 @@ func (a *App) GetTorrentCatalogChunk(offset int, limit int) []database.GameEntit
 	}
 	res := make([]database.GameEntity, end-offset)
 	copy(res, a.torrentCache[offset:end])
+	log.Printf("[Torrent] GetTorrentCatalogChunk: offset=%d, limit=%d -> returned %d items (total=%d, took %v)", offset, limit, len(res), total, time.Since(start))
 	return res
 }
 
@@ -1481,10 +1872,7 @@ func (a *App) LaunchGame(folderOrFilePath string) error {
 	if !fi.IsDir() {
 		ext := strings.ToLower(filepath.Ext(folderOrFilePath))
 		if ext == ".exe" || ext == ".bat" || ext == ".cmd" {
-			dir := filepath.Dir(folderOrFilePath)
-			cmd := exec.Command(folderOrFilePath)
-			cmd.Dir = dir
-			return cmd.Start()
+			return launchExecutable(folderOrFilePath, "")
 		}
 		return a.OpenLocalFolder(filepath.Dir(folderOrFilePath))
 	}
@@ -1510,9 +1898,7 @@ func (a *App) LaunchGame(folderOrFilePath string) error {
 		}
 
 		if len(candidates) == 1 {
-			cmd := exec.Command(candidates[0])
-			cmd.Dir = folderOrFilePath
-			return cmd.Start()
+			return launchExecutable(candidates[0], "")
 		}
 	}
 
@@ -1645,7 +2031,7 @@ type AppInfo struct {
 func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
 		Name:    "Ducke",
-		Version: "1.1.2",
+		Version: "1.1.5",
 	}
 }
 

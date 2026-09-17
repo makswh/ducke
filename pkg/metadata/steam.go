@@ -1858,7 +1858,7 @@ func (s *SteamService) StopBackgroundEnrichment() {
 
 // populateMissingIcons iterates over games with missing icon_url and fetches authentic icons in parallel
 func (s *SteamService) populateMissingIcons(onGameUpdated func(gameID int64, appID int)) {
-	time.Sleep(300 * time.Millisecond) // brief moment for initial DB queries to settle
+	time.Sleep(8000 * time.Millisecond) // Give startup and frontend catalog loading priority before fetching icons
 	if s.db == nil {
 		return
 	}

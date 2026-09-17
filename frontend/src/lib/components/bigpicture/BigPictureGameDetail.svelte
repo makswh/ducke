@@ -3,25 +3,25 @@
   import {
     ArrowLeft,
     Play,
-    Download,
+    DownloadSimple as Download,
     Check,
     Star,
     Folder,
     FolderOpen,
-    Volume2,
-    VolumeX,
+    SpeakerHigh as Volume2,
+    SpeakerSlash as VolumeX,
     Pause,
-    ChevronLeft,
-    ChevronRight,
-    ChevronDown,
+    CaretLeft as ChevronLeft,
+    CaretRight as ChevronRight,
+    CaretDown as ChevronDown,
     X,
-    Search,
-    RefreshCw,
-    Edit3,
+    MagnifyingGlass as Search,
+    ArrowsClockwise as RefreshCw,
+    PencilSimple as Edit3,
     Disc,
     ArrowDown,
-    Film
-  } from 'lucide-svelte';
+    FilmStrip as Film
+  } from 'phosphor-svelte';
   import Hls from 'hls.js';
   import { sound } from '../../navigation/audio';
   import * as AppAPI from '../../../../wailsjs/go/main/App';

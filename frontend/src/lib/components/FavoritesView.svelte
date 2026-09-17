@@ -1,26 +1,23 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import {
-    Bookmark,
-    Search,
+    BookmarkSimple,
+    MagnifyingGlass,
     Clock,
-    Gamepad2,
-    CheckCircle2,
-    Layers,
-    X,
-    Folder,
-    FolderOpen,
-    Disc,
-    Star,
-    ChevronDown,
+    GameController,
+    CheckCircle,
+    CaretDown,
     Check,
-    ArrowUpDown
-  } from 'lucide-svelte';
+    ArrowsDownUp,
+    X,
+    SquaresFour
+  } from 'phosphor-svelte';
 
 
   import GameDetailView from './GameDetailView.svelte';
   import { GetFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig } from '../../../wailsjs/go/main/App';
   import { EventsOn } from '../../../wailsjs/runtime/runtime';
+  import { getDisplayTitle } from '../utils/titleUtils';
 
 
   let {
@@ -64,16 +61,39 @@
   }
 
   let unsubFavorites: any = null;
+  let unsubEnriched: any = null;
 
   onMount(() => {
     loadFavorites();
     unsubFavorites = EventsOn('favorites:updated', () => {
       loadFavorites();
     });
+    unsubEnriched = EventsOn('game:enriched', (enrichedGame: any) => {
+      if (!enrichedGame) return;
+      favorites = favorites.map((item) => {
+        const g = item.game;
+        if (!g) return item;
+        const matchesId = item.gameId === enrichedGame.id || g.id === enrichedGame.id;
+        const matchesSteam = enrichedGame.steamAppId && g.steamAppId === enrichedGame.steamAppId;
+        const matchesCanonical = enrichedGame.canonicalKey && g.canonicalKey && enrichedGame.canonicalKey === g.canonicalKey;
+        if (matchesId || matchesSteam || matchesCanonical) {
+          return {
+            ...item,
+            game: {
+              ...g,
+              ...enrichedGame,
+              favoriteStatus: item.status || g.favoriteStatus
+            }
+          };
+        }
+        return item;
+      });
+    });
   });
 
   onDestroy(() => {
     if (unsubFavorites) unsubFavorites();
+    if (unsubEnriched) unsubEnriched();
   });
 
   // Filter and sort items
@@ -89,8 +109,9 @@
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       list = list.filter((item) => {
-        const title = (item.game?.cleanTitle || item.game?.rawName || item.game?.steamTitle || '').toLowerCase();
-        return title.includes(q);
+        const title = getDisplayTitle(item.game).toLowerCase();
+        const raw = (item.game?.rawName || '').toLowerCase();
+        return title.includes(q) || raw.includes(q);
       });
     }
 
@@ -98,7 +119,7 @@
     if (selectedSort === 'rating') {
       list.sort((a, b) => (b.game?.reviewPercent || 0) - (a.game?.reviewPercent || 0));
     } else if (selectedSort === 'name') {
-      list.sort((a, b) => (a.game?.cleanTitle || '').localeCompare(b.game?.cleanTitle || ''));
+      list.sort((a, b) => getDisplayTitle(a.game).localeCompare(getDisplayTitle(b.game)));
     } else if (selectedSort === 'size') {
       list.sort((a, b) => (b.game?.sizeBytes || 0) - (a.game?.sizeBytes || 0));
     }
@@ -198,7 +219,7 @@
       <!-- Title & Count -->
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <Bookmark class="w-3.5 h-3.5 text-sky-400" />
+          <BookmarkSimple size={15} weight="fill" class="text-sky-400" />
           <h1 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">Избранное</h1>
         </div>
         <span class="text-[10px] font-mono font-semibold text-[#8e95a2] bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
@@ -208,7 +229,7 @@
 
       <!-- Search Input with Clear Button -->
       <div class="relative flex items-center">
-        <Search class="w-3.5 h-3.5 text-[#6b7280] absolute left-2.5 pointer-events-none" />
+        <MagnifyingGlass size={14} weight="bold" class="text-[#6b7280] absolute left-2.5 pointer-events-none" />
         <input
           data-nav-item
           type="text"
@@ -222,7 +243,7 @@
             class="absolute right-2 text-[#6b7280] hover:text-white cursor-pointer"
             onclick={() => (searchQuery = '')}
           >
-            <X class="w-3.5 h-3.5" />
+            <X size={13} weight="bold" />
           </button>
         {/if}
       </div>
@@ -242,20 +263,20 @@
           >
             <div class="flex items-center gap-1.5 truncate">
               {#if selectedTab === 'planned'}
-                <Clock class="w-3 h-3 text-sky-400 flex-shrink-0" />
+                <Clock size={14} weight="fill" class="text-sky-400 flex-shrink-0" />
                 <span class="truncate">Планы ({counts.planned})</span>
               {:else if selectedTab === 'playing'}
-                <Gamepad2 class="w-3 h-3 text-amber-400 flex-shrink-0" />
+                <GameController size={14} weight="fill" class="text-amber-400 flex-shrink-0" />
                 <span class="truncate">Прохожу ({counts.playing})</span>
               {:else if selectedTab === 'completed'}
-                <CheckCircle2 class="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                <CheckCircle size={14} weight="fill" class="text-emerald-400 flex-shrink-0" />
                 <span class="truncate">Прошел ({counts.completed})</span>
               {:else}
-                <Bookmark class="w-3 h-3 text-sky-400 flex-shrink-0" />
+                <BookmarkSimple size={14} weight="fill" class="text-sky-400 flex-shrink-0" />
                 <span class="truncate">Все ({counts.all})</span>
               {/if}
             </div>
-            <ChevronDown class="w-3 h-3 text-[#6b7280] flex-shrink-0 ml-1 transition-transform {isStatusMenuOpen ? 'rotate-180' : ''}" />
+            <CaretDown size={13} weight="bold" class="text-[#6b7280] flex-shrink-0 ml-1 transition-transform {isStatusMenuOpen ? 'rotate-180' : ''}" />
           </button>
 
           {#if isStatusMenuOpen}
@@ -278,13 +299,13 @@
                 }}
               >
                 <div class="flex items-center gap-2">
-                  <Bookmark class="w-3.5 h-3.5 {selectedTab === 'all' ? 'text-sky-400' : 'text-[#6b7280]'}" />
+                  <BookmarkSimple size={15} weight={selectedTab === 'all' ? 'fill' : 'regular'} class={selectedTab === 'all' ? 'text-sky-400' : 'text-[#6b7280]'} />
                   <span>Все игры</span>
                 </div>
                 <div class="flex items-center gap-1.5">
                   <span class="text-[10px] text-[#8e95a2] font-mono px-1.5 py-0.5 rounded bg-white/[0.04]">{counts.all}</span>
                   {#if selectedTab === 'all'}
-                    <Check class="w-3 h-3 text-sky-400 flex-shrink-0" />
+                    <Check size={13} weight="bold" class="text-sky-400 flex-shrink-0" />
                   {/if}
                 </div>
               </button>
@@ -298,13 +319,13 @@
                 }}
               >
                 <div class="flex items-center gap-2">
-                  <Clock class="w-3.5 h-3.5 text-sky-400" />
+                  <Clock size={15} weight={selectedTab === 'planned' ? 'fill' : 'regular'} class="text-sky-400" />
                   <span>В планах</span>
                 </div>
                 <div class="flex items-center gap-1.5">
                   <span class="text-[10px] text-[#8e95a2] font-mono px-1.5 py-0.5 rounded bg-white/[0.04]">{counts.planned}</span>
                   {#if selectedTab === 'planned'}
-                    <Check class="w-3 h-3 text-sky-400 flex-shrink-0" />
+                    <Check size={13} weight="bold" class="text-sky-400 flex-shrink-0" />
                   {/if}
                 </div>
               </button>
@@ -318,13 +339,13 @@
                 }}
               >
                 <div class="flex items-center gap-2">
-                  <Gamepad2 class="w-3.5 h-3.5 text-amber-400" />
+                  <GameController size={15} weight={selectedTab === 'playing' ? 'fill' : 'regular'} class="text-amber-400" />
                   <span>Прохожу</span>
                 </div>
                 <div class="flex items-center gap-1.5">
                   <span class="text-[10px] text-[#8e95a2] font-mono px-1.5 py-0.5 rounded bg-white/[0.04]">{counts.playing}</span>
                   {#if selectedTab === 'playing'}
-                    <Check class="w-3 h-3 text-sky-400 flex-shrink-0" />
+                    <Check size={13} weight="bold" class="text-sky-400 flex-shrink-0" />
                   {/if}
                 </div>
               </button>
@@ -338,13 +359,13 @@
                 }}
               >
                 <div class="flex items-center gap-2">
-                  <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400" />
+                  <CheckCircle size={15} weight={selectedTab === 'completed' ? 'fill' : 'regular'} class="text-emerald-400" />
                   <span>Прошел</span>
                 </div>
                 <div class="flex items-center gap-1.5">
                   <span class="text-[10px] text-[#8e95a2] font-mono px-1.5 py-0.5 rounded bg-white/[0.04]">{counts.completed}</span>
                   {#if selectedTab === 'completed'}
-                    <Check class="w-3 h-3 text-sky-400 flex-shrink-0" />
+                    <Check size={13} weight="bold" class="text-sky-400 flex-shrink-0" />
                   {/if}
                 </div>
               </button>
@@ -364,10 +385,10 @@
             }}
           >
             <div class="flex items-center gap-1.5 truncate">
-              <ArrowUpDown class="w-3 h-3 text-sky-400 flex-shrink-0" />
+              <ArrowsDownUp size={13} weight="bold" class="text-sky-400 flex-shrink-0" />
               <span class="truncate">{getSortLabel(selectedSort)}</span>
             </div>
-            <ChevronDown class="w-3 h-3 text-[#6b7280] flex-shrink-0 ml-1 transition-transform {isSortMenuOpen ? 'rotate-180' : ''}" />
+            <CaretDown size={13} weight="bold" class="text-[#6b7280] flex-shrink-0 ml-1 transition-transform {isSortMenuOpen ? 'rotate-180' : ''}" />
           </button>
 
           {#if isSortMenuOpen}
@@ -460,11 +481,13 @@
             <div class="relative z-10 p-2.5 px-3 h-full flex flex-col justify-between">
               <div class="flex items-center justify-between gap-2">
                 <h3 class="text-xs font-semibold leading-snug truncate {isSelected ? 'text-white' : 'text-[#d1d5db] group-hover:text-white'}">
-                  {g.cleanTitle || g.rawName}
+                  {getDisplayTitle(g)}
                 </h3>
-                <span class="text-[9px] font-bold px-1.5 py-0.2 rounded border flex-shrink-0 {getStatusBadgeStyle(item.status)}">
-                  {getStatusLabel(item.status)}
-                </span>
+                {#if selectedTab === 'all'}
+                  <span class="text-[9px] font-bold px-1.5 py-0.2 rounded border flex-shrink-0 {getStatusBadgeStyle(item.status)}">
+                    {getStatusLabel(item.status)}
+                  </span>
+                {/if}
               </div>
 
               <div class="flex items-center justify-between text-[10px]">
@@ -494,7 +517,7 @@
       <!-- Empty State -->
       <div class="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4 select-none">
         <div class="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center text-[#64748b]">
-          <Bookmark class="w-7 h-7 stroke-[1.5]" />
+          <BookmarkSimple size={28} weight="duotone" class="text-[#64748b]" />
         </div>
         <div class="space-y-1 max-w-sm">
           <h3 class="text-sm font-bold text-white">Список избранного пуст</h3>
@@ -508,7 +531,7 @@
           class="px-5 py-2.5 rounded-xl bg-white text-slate-950 text-xs font-bold hover:bg-white/90 transition-transform active:scale-95 cursor-pointer flex items-center gap-2"
           onclick={onOpenCatalog}
         >
-          <Layers class="w-4 h-4" />
+          <SquaresFour size={16} weight="bold" />
           <span>Перейти в каталог</span>
         </button>
       </div>

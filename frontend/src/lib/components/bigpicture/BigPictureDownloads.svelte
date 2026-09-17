@@ -5,13 +5,18 @@
     Play,
     X,
     FolderOpen,
-    Trash2,
+    Trash,
+    Trash as Trash2,
     HardDrive,
-    Download,
-    RefreshCw,
+    DownloadSimple,
+    DownloadSimple as Download,
+    ArrowClockwise,
+    ArrowClockwise as RefreshCw,
     Check,
-    ArrowRight
-  } from 'lucide-svelte';
+    ArrowRight,
+    ChartBar,
+    ChartLineUp
+  } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
 
   interface DownloadItem {
@@ -80,11 +85,14 @@
     isMounted = false;
   });
 
+  const inFlightCovers = new Set<string>();
+  const inFlightLogos = new Set<string>();
+
   async function resolveMissingLogo(title: string, gameId?: number) {
     if (!title || !isMounted) return;
     const key = title.trim().toLowerCase();
-    if (resolvedLogos[key] !== undefined) return;
-    resolvedLogos[key] = '';
+    if (resolvedLogos[key] !== undefined || inFlightLogos.has(key)) return;
+    inFlightLogos.add(key);
 
     try {
       const app = (window as any)?.go?.main?.App;
@@ -97,12 +105,14 @@
 
         const searchTitle = title.replace(/\[.*?\]|\(.*?\)/g, '').trim() || title;
         const url = await app.ResolveGameLogo(gId, searchTitle, appId);
-        if (url && isMounted) {
-          resolvedLogos[key] = url;
+        if (isMounted) {
+          resolvedLogos[key] = url || '';
         }
+      } else if (isMounted) {
+        resolvedLogos[key] = '';
       }
     } catch {
-      // Ignore if no logo available
+      if (isMounted) resolvedLogos[key] = '';
     }
   }
 
@@ -128,8 +138,8 @@
   async function resolveMissingCover(title: string, gameId?: number) {
     if (!title || !isMounted) return;
     const key = title.trim().toLowerCase();
-    if (resolvedCovers[key] !== undefined) return;
-    resolvedCovers[key] = '';
+    if (resolvedCovers[key] !== undefined || inFlightCovers.has(key)) return;
+    inFlightCovers.add(key);
 
     try {
       const app = (window as any)?.go?.main?.App;
@@ -148,12 +158,14 @@
           url = await app.ResolveGameCover(gId, searchTitle, appId);
         }
 
-        if (url && isMounted) {
-          resolvedCovers[key] = url;
+        if (isMounted) {
+          resolvedCovers[key] = url || '';
         }
+      } else if (isMounted) {
+        resolvedCovers[key] = '';
       }
     } catch {
-      // Normal fallback when cover is not available; resolvedCovers[key] remains '' to prevent repeat attempts
+      if (isMounted) resolvedCovers[key] = '';
     }
   }
 
@@ -649,11 +661,7 @@
               <!-- СЕТЬ -->
               <div class="flex flex-col">
                 <div class="flex items-center gap-1 text-[10px] font-mono font-bold text-sky-400 tracking-wider uppercase">
-                  <svg class="w-2.5 h-2.5 text-sky-400" viewBox="0 0 12 12" fill="currentColor">
-                    <rect x="1" y="6" width="2" height="6" rx="0.5" />
-                    <rect x="5" y="3" width="2" height="9" rx="0.5" />
-                    <rect x="9" y="1" width="2" height="11" rx="0.5" />
-                  </svg>
+                  <ChartBar size={12} weight="bold" class="text-sky-400" />
                   <span>СЕТЬ</span>
                 </div>
                 <span class="text-sm font-mono font-bold text-white tracking-tight">
@@ -664,11 +672,7 @@
               <!-- МАКС. -->
               <div class="flex flex-col">
                 <div class="flex items-center gap-1 text-[10px] font-mono font-bold text-sky-400 tracking-wider uppercase">
-                  <svg class="w-2.5 h-2.5 text-sky-400" viewBox="0 0 12 12" fill="currentColor">
-                    <rect x="1" y="6" width="2" height="6" rx="0.5" />
-                    <rect x="5" y="3" width="2" height="9" rx="0.5" />
-                    <rect x="9" y="1" width="2" height="11" rx="0.5" />
-                  </svg>
+                  <ChartLineUp size={12} weight="bold" class="text-sky-400" />
                   <span>МАКС.</span>
                 </div>
                 <span class="text-sm font-mono font-bold text-white tracking-tight">

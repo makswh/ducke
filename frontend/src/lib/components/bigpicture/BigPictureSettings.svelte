@@ -2,27 +2,34 @@
   import { onMount, untrack } from 'svelte';
   import {
     HardDrive,
-    Server,
-    DownloadCloud,
+    HardDrives as Server,
+    Database,
+    CloudArrowDown,
+    CloudArrowDown as DownloadCloud,
     Info,
     Check,
     Star,
-    RefreshCw,
+    ArrowClockwise,
+    ArrowClockwise as RefreshCw,
     FolderOpen,
     Folder,
     Monitor,
     Power,
     Eye,
-    EyeOff,
+    EyeSlash,
+    EyeSlash as EyeOff,
     FileCode,
     Plus,
-    Trash2,
-    CheckCircle2,
+    Trash,
+    Trash as Trash2,
+    CheckCircle,
+    CheckCircle as CheckCircle2,
     Terminal,
-    Download,
+    DownloadSimple,
+    DownloadSimple as Download,
     Magnet,
     X
-  } from 'lucide-svelte';
+  } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
   import * as AppAPI from '../../../../wailsjs/go/main/App';
   import { EventsOn, EventsOff } from '../../../../wailsjs/runtime/runtime';
@@ -109,7 +116,7 @@
   });
 
   let selectedServerId = $state<string>('');
-  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.0' });
+  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.5' });
   let storageDrives = $state<StorageDrive[]>([]);
   let isTestingConnection = $state<boolean>(false);
   let testResult = $state<{ success: boolean; message: string } | null>(null);

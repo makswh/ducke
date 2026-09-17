@@ -1,16 +1,21 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import {
-    Search,
-    Download,
+    MagnifyingGlass,
+    MagnifyingGlass as Search,
+    DownloadSimple,
+    DownloadSimple as Download,
     Check,
-    Gamepad2,
+    GameController,
+    GameController as Gamepad2,
     HardDrive,
     X,
-    ArrowUpDown,
-    Layers,
-    ChevronDown
-  } from 'lucide-svelte';
+    ArrowsDownUp,
+    SquaresFour,
+    SquaresFour as Layers,
+    CaretDown,
+    CaretDown as ChevronDown
+  } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
   import { gamepad } from '../../navigation/gamepad';
   import { deduplicateGames } from '../../utils/gameDeduplication';
@@ -443,7 +448,7 @@
               searchQuery = '';
             }}
           >
-            <X class="w-3.5 h-3.5" />
+            <X size={14} />
           </button>
         </div>
       {/if}
@@ -458,7 +463,7 @@
             isSortDropdownOpen = !isSortDropdownOpen;
           }}
         >
-          <ArrowUpDown class="w-3.5 h-3.5 text-sky-400" />
+          <ArrowsDownUp size={14} class="text-sky-400" />
           <span>{getSortLabel(selectedSort)}</span>
           <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isSortDropdownOpen ? 'rotate-180' : ''}" />
         </button>

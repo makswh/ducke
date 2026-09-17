@@ -2,29 +2,29 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     Play,
-    Download,
+    DownloadSimple as Download,
     Folder,
     Star,
     Check,
-    Gamepad2,
-    Film,
+    GameController as Gamepad2,
+    FilmStrip as Film,
     Image as ImageIcon,
-    ChevronLeft,
-    ChevronRight,
+    CaretLeft as ChevronLeft,
+    CaretRight as ChevronRight,
     X,
-    Maximize2,
-    Volume2,
-    VolumeX,
+    ArrowsOut as Maximize2,
+    SpeakerHigh as Volume2,
+    SpeakerSlash as VolumeX,
     HardDrive,
     Info,
     Calendar,
-    Layers,
+    SquaresFour as Layers,
     Clock,
     Pause,
-    MoreHorizontal,
+    DotsThree as MoreHorizontal,
     ArrowDown,
-    RefreshCw
-  } from 'lucide-svelte';
+    ArrowsClockwise as RefreshCw
+  } from 'phosphor-svelte';
   import Hls from 'hls.js';
   import { sound } from '../../navigation/audio';
   import { deduplicateGames, cleanCanonicalKey } from '../../utils/gameDeduplication';

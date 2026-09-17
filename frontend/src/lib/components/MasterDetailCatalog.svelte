@@ -1,18 +1,26 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import {
-    Gamepad2,
+    GameController,
+    GameController as Gamepad2,
     HardDrive,
-    Search,
+    MagnifyingGlass,
+    MagnifyingGlass as Search,
     X,
-    Layers,
+    SquaresFour,
+    SquaresFour as Layers,
     Tag,
-    ChevronDown,
+    CaretDown,
     FolderOpen,
-    Check
-  } from 'lucide-svelte';
+    Check,
+    Sliders,
+    Star,
+    Calendar,
+    ArrowLeft
+  } from 'phosphor-svelte';
   import type { GameEntity } from '../types/game';
   import { deduplicateGames } from '../utils/gameDeduplication';
+  import { getDisplayTitle } from '../utils/titleUtils';
   import GameDetailView from './GameDetailView.svelte';
 
   let {
@@ -25,9 +33,12 @@
     onSelectFolder = async (): Promise<string> => ''
   } = $props();
 
-  const SAVED_FILTER_KEY = 'ducke_catalog_selected_filter';
-  const SAVED_GENRE_KEY = 'ducke_catalog_selected_genre';
   const SAVED_SORT_KEY = 'ducke_catalog_selected_sort';
+  const SAVED_GENRE_KEY = 'ducke_catalog_selected_genre';
+  const SAVED_TAGS_KEY = 'ducke_catalog_selected_tags';
+  const SAVED_RATING_KEY = 'ducke_catalog_selected_rating';
+  const SAVED_SIZE_KEY = 'ducke_catalog_selected_size';
+  const SAVED_YEAR_KEY = 'ducke_catalog_selected_year';
 
   function getStoredFilter(key: string, fallback: string): string {
     try {
@@ -39,37 +50,124 @@
     return fallback;
   }
 
-  let selectedFilter = $state<string>(getStoredFilter(SAVED_FILTER_KEY, 'all'));
-  let selectedGenre = $state<string>(getStoredFilter(SAVED_GENRE_KEY, 'all'));
-  let genreSearchQuery = $state<string>('');
-  let isGenreMenuOpen = $state<boolean>(false);
   let selectedSort = $state<'date_desc' | 'name' | 'size_desc' | 'size_asc' | 'rating_desc' | 'popular_desc'>(
     getStoredFilter(SAVED_SORT_KEY, 'date_desc') as any
   );
-
-  $effect(() => {
+  let selectedGenre = $state<string>(getStoredFilter(SAVED_GENRE_KEY, 'all'));
+  let selectedTags = $state<string[]>(() => {
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(SAVED_FILTER_KEY, selectedFilter);
+      const v = localStorage.getItem(SAVED_TAGS_KEY);
+      if (v) {
+        const parsed = JSON.parse(v);
+        if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === 'string');
       }
     } catch {}
+    return [];
   });
+  let selectedRating = $state<string>(getStoredFilter(SAVED_RATING_KEY, 'all'));
+  let selectedSize = $state<string>(getStoredFilter(SAVED_SIZE_KEY, 'all'));
+  let selectedYear = $state<string>(getStoredFilter(SAVED_YEAR_KEY, 'all'));
+  let filterController = $state<boolean>(false);
+  let filterCollections = $state<boolean>(false);
 
-  $effect(() => {
-    try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(SAVED_GENRE_KEY, selectedGenre);
-      }
-    } catch {}
-  });
+  // Очищаем сохраненные ключи, чтобы фильтры гарантированно не включались по умолчанию
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('ducke_catalog_filter_controller');
+      localStorage.removeItem('ducke_catalog_filter_collections');
+    }
+  } catch {}
+
+  let isFilterHubOpen = $state<boolean>(false);
+  let genreSearchQuery = $state<string>('');
+  let tagSearchQuery = $state<string>('');
+
+  const ratingOptions = [
+    { id: 'all', label: 'Любая оценка' },
+    { id: '95', label: 'Крайне положительные (95%+)' },
+    { id: '80', label: 'Очень положительные (80%+)' },
+    { id: '70', label: 'В основном положительные (70%+)' },
+    { id: 'mixed', label: 'Смешанные (40–69%)' },
+    { id: 'negative', label: 'Отрицательные (< 40%)' }
+  ];
+
+  const sizeOptions = [
+    { id: 'all', label: 'Любой размер' },
+    { id: 'under5gb', label: 'До 5 ГБ' },
+    { id: '5to20gb', label: '5 — 20 ГБ' },
+    { id: '20to50gb', label: '20 — 50 ГБ' },
+    { id: 'over50gb', label: 'Более 50 ГБ' }
+  ];
+
+  const yearOptions = [
+    { id: 'all', label: 'Любой год' },
+    { id: '2024_plus', label: '2024 — 2025' },
+    { id: '2020_2023', label: '2020 — 2023' },
+    { id: '2015_2019', label: '2015 — 2019' },
+    { id: 'before_2015', label: 'До 2015' }
+  ];
 
   $effect(() => {
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(SAVED_SORT_KEY, selectedSort);
+        localStorage.setItem(SAVED_GENRE_KEY, selectedGenre);
+        localStorage.setItem(SAVED_TAGS_KEY, JSON.stringify(selectedTags));
+        localStorage.setItem(SAVED_RATING_KEY, selectedRating);
+        localStorage.setItem(SAVED_SIZE_KEY, selectedSize);
+        localStorage.setItem(SAVED_YEAR_KEY, selectedYear);
       }
     } catch {}
   });
+
+  let activeFilterCount = $derived.by(() => {
+    let count = 0;
+    if (selectedGenre !== 'all') count++;
+    if (Array.isArray(selectedTags) && selectedTags.length > 0) count += selectedTags.length;
+    if (selectedRating !== 'all') count++;
+    if (selectedSize !== 'all') count++;
+    if (selectedYear !== 'all') count++;
+    if (filterController) count++;
+    if (filterCollections) count++;
+    return count;
+  });
+
+  function resetAllFilters() {
+    selectedGenre = 'all';
+    selectedTags = [];
+    selectedRating = 'all';
+    selectedSize = 'all';
+    selectedYear = 'all';
+    filterController = false;
+    filterCollections = false;
+    genreSearchQuery = '';
+    tagSearchQuery = '';
+  }
+
+  function toggleTag(tag: string) {
+    const list = Array.isArray(selectedTags) ? selectedTags : [];
+    if (list.includes(tag)) {
+      selectedTags = list.filter((t) => t !== tag);
+    } else {
+      selectedTags = [...list, tag];
+    }
+  }
+
+  function getRatingLabel(val: string): string {
+    const opt = ratingOptions.find((o) => o.id === val);
+    return opt ? opt.label : val;
+  }
+
+  function getSizeLabel(val: string): string {
+    const opt = sizeOptions.find((o) => o.id === val);
+    return opt ? opt.label : val;
+  }
+
+  function getYearLabel(val: string): string {
+    const opt = yearOptions.find((o) => o.id === val);
+    return opt ? opt.label : val;
+  }
+
   let selectedGameId = $state<number | null>(null);
   let imageLoadFailed = $state<Record<string, boolean>>({});
 
@@ -98,31 +196,34 @@
 
   // Deduplicate only when raw 'games' array reference changes and precompute search corpus & flags
   let deduplicatedList = $derived.by(() => {
-    const list = deduplicateGames(games || []);
+    const rawGames = Array.isArray(games) ? games : [];
+    const list = deduplicateGames(rawGames);
     return list.map((g) => {
-      const gList = (g.genres || []).map((x: string) => x.toLowerCase().trim()).filter(Boolean);
-      const tList = (g.tags || []).map((x: string) => x.toLowerCase().trim()).filter(Boolean);
-      const pList = (g.publishers || []).map((x: string) => x.toLowerCase().trim()).filter(Boolean);
-      const vList = (g.variants || []).map((v: any) => `${v.rawName || ''} ${v.torrentSource || ''}`.toLowerCase().trim()).filter(Boolean);
+      const gList = (Array.isArray(g.genres) ? g.genres : []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
+      const tList = (Array.isArray(g.tags) ? g.tags : []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
+      const pList = (Array.isArray(g.publishers) ? g.publishers : []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
+      const vList = (Array.isArray(g.variants) ? g.variants : []).map((v: any) => `${v?.rawName || ''} ${v?.torrentSource || ''}`.toLowerCase().trim()).filter(Boolean);
       const searchCorpus = `${g.cleanTitle || ''} ${g.steamTitle || ''} ${gList.join(' ')} ${tList.join(' ')} ${pList.join(' ')} ${vList.join(' ')}`.toLowerCase();
 
       const hasController = g.controllerSupport === 'full' || g.controllerSupport === 'partial';
-      const isRpg = gList.some((x: string) => x.includes('rpg') || x.includes('ролев'));
-      const isAction = gList.some((x: string) => x.includes('action') || x.includes('экшен'));
       const isCollection = !!(g.isCollection || (g.parentPath && g.parentPath !== ''));
-      const isUnder10gb = (g.sizeBytes || 0) > 0 && (g.sizeBytes || 0) <= 10 * 1024 * 1024 * 1024;
-      const isOver50gb = (g.sizeBytes || 0) >= 50 * 1024 * 1024 * 1024;
+      
+      let releaseYear: number | null = null;
+      if (g.releaseDate) {
+        const m = g.releaseDate.match(/\b(19\d\d|20\d\d)\b/);
+        if (m) releaseYear = parseInt(m[1], 10);
+      }
 
       return {
         ...g,
         _searchCorpus: searchCorpus,
         _genreLowerSet: new Set(gList),
+        _tagLowerSet: new Set(tList),
         _hasController: hasController,
-        _isRpg: isRpg,
-        _isAction: isAction,
         _isCollection: isCollection,
-        _isUnder10gb: isUnder10gb,
-        _isOver50gb: isOver50gb
+        _releaseYear: releaseYear,
+        _reviewPercent: g.reviewPercent || 0,
+        _sizeBytes: g.sizeBytes || 0
       };
     });
   });
@@ -146,27 +247,46 @@
 
   let filteredGenreList = $derived.by(() => {
     if (!genreSearchQuery.trim()) return availableGenres;
-    const q = genreSearchQuery.toLowerCase();
+    const q = genreSearchQuery.toLowerCase().trim();
     return availableGenres.filter((item) => item.name.toLowerCase().includes(q));
   });
 
-  function getFilterLabel(filter: string): string {
-    switch (filter) {
-      case 'controller': return 'С геймпадом';
-      case 'rpg': return 'RPG / Ролевые';
-      case 'action': return 'Экшены';
-      case 'collections': return 'Саги / Сборники';
-      case 'under10gb': return '< 10 ГБ';
-      case 'over50gb': return '> 50 ГБ';
-      default: return 'Все жанры';
+  let availableTags = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const g of deduplicatedList) {
+      if (g.tags && Array.isArray(g.tags)) {
+        for (const raw of g.tags) {
+          const tag = raw.trim();
+          if (tag) {
+            counts.set(tag, (counts.get(tag) || 0) + 1);
+          }
+        }
+      }
     }
-  }
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  });
+
+  let filteredTagList = $derived.by(() => {
+    if (!tagSearchQuery.trim()) {
+      return availableTags.slice(0, 30);
+    }
+    const q = tagSearchQuery.toLowerCase().trim();
+    return availableTags.filter((item) => item.name.toLowerCase().includes(q)).slice(0, 50);
+  });
 
   // Single-pass filter over deduplicated list
   let filteredGames = $derived.by(() => {
     const q = debouncedSearchQuery.trim().toLowerCase();
-    const selGenre = selectedGenre !== 'all' ? selectedGenre.toLowerCase() : null;
-    const selFilter = selectedFilter;
+    const selGenre = selectedGenre && selectedGenre !== 'all' ? selectedGenre.toLowerCase() : null;
+    const rawTags = Array.isArray(selectedTags) ? selectedTags : [];
+    const selTags = rawTags.map((t) => (typeof t === 'string' ? t.toLowerCase() : '')).filter(Boolean);
+    const selRating = selectedRating;
+    const selSize = selectedSize;
+    const selYear = selectedYear;
+    const reqController = filterController;
+    const reqCollections = filterCollections;
 
     let result = deduplicatedList.filter((g) => {
       // 1. Fast search match using precomputed corpus
@@ -174,30 +294,56 @@
         return false;
       }
 
-      // 2. Fast genre match using Set O(1)
+      // 2. Genre match using Set O(1)
       if (selGenre && !g._genreLowerSet.has(selGenre)) {
         return false;
       }
 
-      // 3. Fast filter presets using precomputed booleans
-      if (selFilter === 'controller') {
-        return g._hasController;
+      // 3. Tags match using Set O(1)
+      if (selTags.length > 0) {
+        for (const t of selTags) {
+          if (!g._tagLowerSet.has(t)) return false;
+        }
       }
-      if (selFilter === 'rpg') {
-        return g._isRpg;
+
+      // 4. Steam Rating match
+      if (selRating === '95') {
+        if (g._reviewPercent < 95 || (g.totalReviews || 0) < 10) return false;
+      } else if (selRating === '80') {
+        if (g._reviewPercent < 80 || (g.totalReviews || 0) < 5) return false;
+      } else if (selRating === '70') {
+        if (g._reviewPercent < 70) return false;
+      } else if (selRating === 'mixed') {
+        if (g._reviewPercent < 40 || g._reviewPercent >= 70) return false;
+      } else if (selRating === 'negative') {
+        if (g._reviewPercent >= 40 || (g.totalReviews || 0) === 0) return false;
       }
-      if (selFilter === 'action') {
-        return g._isAction;
+
+      // 5. Size Range match
+      if (selSize === 'under5gb') {
+        if (g._sizeBytes <= 0 || g._sizeBytes > 5 * 1024 * 1024 * 1024) return false;
+      } else if (selSize === '5to20gb') {
+        if (g._sizeBytes < 5 * 1024 * 1024 * 1024 || g._sizeBytes > 20 * 1024 * 1024 * 1024) return false;
+      } else if (selSize === '20to50gb') {
+        if (g._sizeBytes < 20 * 1024 * 1024 * 1024 || g._sizeBytes > 50 * 1024 * 1024 * 1024) return false;
+      } else if (selSize === 'over50gb') {
+        if (g._sizeBytes < 50 * 1024 * 1024 * 1024) return false;
       }
-      if (selFilter === 'collections') {
-        return g._isCollection;
+
+      // 6. Release Year match
+      if (selYear === '2024_plus') {
+        if (!g._releaseYear || g._releaseYear < 2024) return false;
+      } else if (selYear === '2020_2023') {
+        if (!g._releaseYear || g._releaseYear < 2020 || g._releaseYear > 2023) return false;
+      } else if (selYear === '2015_2019') {
+        if (!g._releaseYear || g._releaseYear < 2015 || g._releaseYear > 2019) return false;
+      } else if (selYear === 'before_2015') {
+        if (!g._releaseYear || g._releaseYear >= 2015) return false;
       }
-      if (selFilter === 'under10gb') {
-        return g._isUnder10gb;
-      }
-      if (selFilter === 'over50gb') {
-        return g._isOver50gb;
-      }
+
+      // 7. Features
+      if (reqController && !g._hasController) return false;
+      if (reqCollections && !g._isCollection) return false;
 
       return true;
     });
@@ -289,25 +435,6 @@
     return filteredGames[0];
   });
 
-  function isPlaceholderTitle(title: string | undefined | null): boolean {
-    if (!title) return true;
-    const t = title.trim();
-    return t === '' || /^Steam App \d+$/i.test(t);
-  }
-
-  function getDisplayTitle(game: GameEntity | null): string {
-    if (!game) return '';
-    const raw = (!isPlaceholderTitle(game.steamTitle))
-      ? game.steamTitle!
-      : (game.cleanTitle && game.cleanTitle.trim() !== '' ? game.cleanTitle : (game.rawName || ''));
-    return raw
-      .replace(/^[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]\s*/gi, '')
-      .replace(/\s*[\{\[\(]\s*(linux|win|windows|mac|macos|pc|gog|steam|portable|repack|native|unpack|unpacked)\s*[\}\]\)]$/gi, '')
-      .replace(/[\{\}]/g, '')
-      .replace(/[\s\-_]+(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб|g|m|t))(?:\)|\])?$/i, '')
-      .replace(/(?:\[|\()?(\d+([.,]\d+)?\s*(?:gb|mb|tb|гб|мб|тб))(?:\)|\])?$/i, '')
-      .trim();
-  }
 
   function formatSizeDisplay(game: GameEntity | null): string {
     if (!game) return '';
@@ -361,9 +488,19 @@
     return filteredGames.slice(startIndex, endIndex);
   });
 
-  // Reset scroll position when filter, genre, sort, or search changes
+  // Reset scroll position when any filter, sort, or search changes
   $effect(() => {
-    const _ = [debouncedSearchQuery, selectedGenre, selectedFilter, selectedSort];
+    const _ = [
+      debouncedSearchQuery,
+      selectedGenre,
+      selectedTags.length,
+      selectedRating,
+      selectedSize,
+      selectedYear,
+      filterController,
+      filterCollections,
+      selectedSort
+    ];
     if (listContainer) {
       listContainer.scrollTop = 0;
       scrollTop = 0;
@@ -383,7 +520,18 @@
     });
     ro.observe(listContainer);
 
-    return () => ro.disconnect();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFilterHubOpen) {
+        isFilterHubOpen = false;
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   });
 </script>
 
@@ -401,7 +549,7 @@
 
       <!-- Search Input -->
       <div class="relative flex items-center">
-        <Search class="w-3.5 h-3.5 text-[#6b7280] absolute left-2.5 pointer-events-none" />
+        <MagnifyingGlass size={14} class="text-[#6b7280] absolute left-2.5 pointer-events-none" />
         <input
           data-nav-item
           data-nav-search
@@ -415,226 +563,461 @@
             class="absolute right-2 text-[#6b7280] hover:text-white cursor-pointer"
             onclick={() => (searchQuery = '')}
           >
-            <X class="w-3.5 h-3.5" />
+            <X size={14} />
           </button>
         {/if}
       </div>
 
       <!-- Filter & Sort Controls -->
       <div class="flex items-center gap-1.5 relative">
-        <!-- Genre / Category Selector Dropdown Button & Anchored Menu -->
-        <div class="relative flex-1 min-w-0">
-          <button
-            type="button"
-            data-nav-item
-            data-nav-filter
-            class="w-full h-8 flex items-center justify-between bg-[#07080a] hover:bg-white/[0.04] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2.5 rounded-lg border {selectedGenre !== 'all' || selectedFilter !== 'all' ? 'border-sky-500/60 text-white' : 'border-white/[0.08]'} transition-colors cursor-pointer truncate"
-            onclick={() => {
-              isGenreMenuOpen = !isGenreMenuOpen;
-              genreSearchQuery = '';
-            }}
-          >
-            <div class="flex items-center gap-1.5 truncate">
-              <Tag class="w-3 h-3 text-sky-400 flex-shrink-0" />
-              <span class="truncate">
-                {selectedGenre !== 'all' ? selectedGenre : (selectedFilter !== 'all' ? getFilterLabel(selectedFilter) : 'Все жанры')}
+        <!-- Filter Button opening Offcanvas Drawer -->
+        <button
+          type="button"
+          data-nav-item
+          data-nav-filter
+          class="flex-1 h-8 flex items-center justify-between px-2.5 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer truncate {activeFilterCount > 0 ? 'bg-white/10 border-white/20 text-white shadow-sm' : 'bg-[#07080a] hover:bg-white/[0.04] border-white/[0.08] text-[#9ca3af] hover:text-white'}"
+          onclick={() => {
+            isFilterHubOpen = true;
+          }}
+        >
+          <div class="flex items-center gap-1.5 truncate">
+            <Sliders size={12} class="flex-shrink-0 {activeFilterCount > 0 ? 'text-white' : 'text-[#6b7280]'}" />
+            <span class="truncate">Фильтры</span>
+            {#if activeFilterCount > 0}
+              <span class="px-1.5 py-0.2 rounded bg-white/15 text-white font-mono text-[10px] font-semibold">
+                {activeFilterCount}
               </span>
-            </div>
-            <ChevronDown class="w-3 h-3 text-[#6b7280] flex-shrink-0 ml-1 transition-transform {isGenreMenuOpen ? 'rotate-180' : ''}" />
-          </button>
-
-          <!-- Genre Dropdown Menu Popup - Anchored Under the Button -->
-          {#if isGenreMenuOpen}
-            <!-- Backdrop to click outside -->
-            <button
-              type="button"
-              aria-label="Закрыть меню жанров"
-              class="fixed inset-0 z-30 cursor-default bg-transparent border-none p-0 m-0 w-full h-full"
-              onclick={() => (isGenreMenuOpen = false)}
-            ></button>
-
-            <!-- Popup Container -->
-            <div class="absolute left-0 top-full mt-1.5 w-[280px] z-40 bg-[#0e1219] border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[340px]">
-              {#if availableGenres.length > 5}
-                <div class="p-2 border-b border-white/[0.06] bg-black/40">
-                  <div class="relative flex items-center">
-                    <Search class="w-3 h-3 text-[#6b7280] absolute left-2.5 pointer-events-none" />
-                    <input
-                      type="text"
-                      bind:value={genreSearchQuery}
-                      placeholder="Поиск жанра..."
-                      class="w-full bg-[#07080a] text-white text-[11px] placeholder-[#5a6170] rounded-md pl-7 pr-7 py-1 border border-white/10 focus:border-sky-500 focus:outline-none"
-                      onclick={(e) => e.stopPropagation()}
-                    />
-                    {#if genreSearchQuery}
-                      <button
-                        type="button"
-                        class="absolute right-2 text-[#6b7280] hover:text-white cursor-pointer"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          genreSearchQuery = '';
-                        }}
-                      >
-                        <X class="w-3 h-3" />
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-              {/if}
-
-              <!-- Scrollable list -->
-              <div class="overflow-y-auto p-1.5 space-y-0.5 max-h-[280px] text-xs">
-                <!-- All games option -->
-                <button
-                  type="button"
-                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedGenre === 'all' && selectedFilter === 'all' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
-                  onclick={() => {
-                    selectedGenre = 'all';
-                    selectedFilter = 'all';
-                    isGenreMenuOpen = false;
-                  }}
-                >
-                  <div class="flex items-center gap-2">
-                    <Layers class="w-3.5 h-3.5 {selectedGenre === 'all' && selectedFilter === 'all' ? 'text-sky-400' : 'text-[#6b7280]'}" />
-                    <span>Все игры</span>
-                  </div>
-                  <span class="text-[10px] text-[#8e95a2] font-mono px-1.5 py-0.5 rounded bg-white/[0.04]">{deduplicatedList.length}</span>
-                </button>
-
-                <!-- Dynamic genres -->
-                {#if filteredGenreList.length > 0}
-                  <div class="px-2 pt-2.5 pb-1 text-[9px] font-bold uppercase tracking-wider text-[#6b7280]">Жанры ({filteredGenreList.length})</div>
-                  {#each filteredGenreList as item}
-                    {@const isCurrent = selectedGenre.toLowerCase() === item.name.toLowerCase()}
-                    <button
-                      type="button"
-                      class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {isCurrent ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
-                      onclick={() => {
-                        selectedGenre = item.name;
-                        isGenreMenuOpen = false;
-                      }}
-                    >
-                      <div class="flex items-center gap-1.5 truncate">
-                        {#if isCurrent}
-                          <Check class="w-3 h-3 text-sky-400 flex-shrink-0" />
-                        {/if}
-                        <span class="truncate">{item.name}</span>
-                      </div>
-                      <span class="text-[10px] text-[#8e95a2] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] ml-2 flex-shrink-0">{item.count}</span>
-                    </button>
-                  {/each}
-                {/if}
-
-                <!-- Special Presets Section -->
-                <div class="px-2 pt-2.5 pb-1 text-[9px] font-bold uppercase tracking-wider text-[#6b7280]">Особенности</div>
-                <button
-                  type="button"
-                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedFilter === 'controller' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
-                  onclick={() => {
-                    selectedFilter = 'controller';
-                    selectedGenre = 'all';
-                    isGenreMenuOpen = false;
-                  }}
-                >
-                  <div class="flex items-center gap-2">
-                    <Gamepad2 class="w-3.5 h-3.5 text-[#9ca3af]" />
-                    <span>С геймпадом</span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedFilter === 'collections' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
-                  onclick={() => {
-                    selectedFilter = 'collections';
-                    selectedGenre = 'all';
-                    isGenreMenuOpen = false;
-                  }}
-                >
-                  <div class="flex items-center gap-2">
-                    <FolderOpen class="w-3.5 h-3.5 text-[#9ca3af]" />
-                    <span>Саги / Сборники</span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedFilter === 'under10gb' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
-                  onclick={() => {
-                    selectedFilter = 'under10gb';
-                    selectedGenre = 'all';
-                    isGenreMenuOpen = false;
-                  }}
-                >
-                  <div class="flex items-center gap-2">
-                    <HardDrive class="w-3.5 h-3.5 text-[#9ca3af]" />
-                    <span>&lt; 10 ГБ</span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedFilter === 'over50gb' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
-                  onclick={() => {
-                    selectedFilter = 'over50gb';
-                    selectedGenre = 'all';
-                    isGenreMenuOpen = false;
-                  }}
-                >
-                  <div class="flex items-center gap-2">
-                    <HardDrive class="w-3.5 h-3.5 text-[#9ca3af]" />
-                    <span>&gt; 50 ГБ</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-          {/if}
-        </div>
+            {/if}
+          </div>
+          <CaretDown size={12} class="text-[#6b7280] flex-shrink-0 ml-1" />
+        </button>
 
         <!-- Sort selector -->
         <select
           data-nav-item
           bind:value={selectedSort}
-          class="h-8 bg-[#07080a] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2 rounded-lg border border-white/[0.08] focus:outline-none focus:border-white/20 cursor-pointer flex-shrink-0 transition-colors"
+          class="flex-1 h-8 bg-[#07080a] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2 rounded-lg border border-white/[0.08] focus:outline-none focus:border-white/20 cursor-pointer truncate transition-colors"
         >
           <option value="date_desc">Новые</option>
-          <option value="popular_desc">По популярности</option>
-          <option value="rating_desc">По оценке Steam</option>
+          <option value="popular_desc">Популярные</option>
+          <option value="rating_desc">Оценка Steam</option>
           <option value="name">А — Я</option>
           <option value="size_desc">Большие</option>
           <option value="size_asc">Лёгкие</option>
         </select>
       </div>
 
-      <!-- Active Filter Pill -->
-      {#if selectedGenre !== 'all' || selectedFilter !== 'all'}
-        <div class="flex items-center gap-1.5 flex-wrap pt-0.5">
+      <!-- Active Filter Chips Tray (Strictly NO horizontal scroll: wrapped flex layout) -->
+      {#if activeFilterCount > 0}
+        <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
           {#if selectedGenre !== 'all'}
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-white">
-              <span>{selectedGenre}</span>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-slate-200">
+              <span class="truncate max-w-[120px]">{selectedGenre}</span>
               <button
                 type="button"
                 class="hover:text-rose-400 cursor-pointer ml-0.5"
                 onclick={() => (selectedGenre = 'all')}
-                title="Сбросить фильтр по жанру"
+                title="Сбросить жанр"
               >
                 <X class="w-3 h-3" />
               </button>
             </span>
           {/if}
-          {#if selectedFilter !== 'all'}
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-white">
-              <span>{getFilterLabel(selectedFilter)}</span>
+
+          {#each (Array.isArray(selectedTags) ? selectedTags : []) as tag}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-slate-200">
+              <span class="truncate max-w-[120px]">{tag}</span>
               <button
                 type="button"
                 class="hover:text-rose-400 cursor-pointer ml-0.5"
-                onclick={() => (selectedFilter = 'all')}
+                onclick={() => toggleTag(tag)}
+                title="Сбросить тег"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </span>
+          {/each}
+
+          {#if selectedRating !== 'all'}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-slate-200">
+              <span>{getRatingLabel(selectedRating)}</span>
+              <button
+                type="button"
+                class="hover:text-rose-400 cursor-pointer ml-0.5"
+                onclick={() => (selectedRating = 'all')}
+                title="Сбросить оценку"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </span>
+          {/if}
+
+          {#if selectedSize !== 'all'}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-slate-200">
+              <span>{getSizeLabel(selectedSize)}</span>
+              <button
+                type="button"
+                class="hover:text-rose-400 cursor-pointer ml-0.5"
+                onclick={() => (selectedSize = 'all')}
+                title="Сбросить размер"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </span>
+          {/if}
+
+          {#if selectedYear !== 'all'}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-slate-200">
+              <span>{getYearLabel(selectedYear)}</span>
+              <button
+                type="button"
+                class="hover:text-rose-400 cursor-pointer ml-0.5"
+                onclick={() => (selectedYear = 'all')}
+                title="Сбросить год"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </span>
+          {/if}
+
+          {#if filterController}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-slate-200">
+              <span>Геймпад</span>
+              <button
+                type="button"
+                class="hover:text-rose-400 cursor-pointer ml-0.5"
+                onclick={() => (filterController = false)}
                 title="Сбросить фильтр"
               >
                 <X class="w-3 h-3" />
               </button>
             </span>
           {/if}
+
+          {#if filterCollections}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[10px] font-medium text-slate-200">
+              <span>Сборники</span>
+              <button
+                type="button"
+                class="hover:text-rose-400 cursor-pointer ml-0.5"
+                onclick={() => (filterCollections = false)}
+                title="Сбросить фильтр"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </span>
+          {/if}
+
+          <button
+            type="button"
+            class="text-[10px] text-[#8e95a2] hover:text-rose-400 underline transition-colors cursor-pointer ml-1"
+            onclick={resetAllFilters}
+          >
+            Сбросить всё
+          </button>
         </div>
       {/if}
     </div>
+
+    <!-- Offcanvas Filter Panel (Exact same width as sidebar, slides over) -->
+    {#if isFilterHubOpen}
+      <div
+        class="absolute inset-0 z-40 bg-[#07080a] flex flex-col border-r border-white/[0.08] animate-in fade-in slide-in-from-left-2 duration-150"
+      >
+        <!-- Offcanvas Header -->
+        <div class="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between bg-[#0b0e14] flex-shrink-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onclick={() => (isFilterHubOpen = false)}
+              class="flex items-center gap-1.5 px-2 py-1 -ml-1 rounded-md text-xs text-[#8e95a2] hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
+            >
+              <ArrowLeft class="w-3.5 h-3.5" />
+              <span>Назад</span>
+            </button>
+            <span class="text-white/20">/</span>
+            <span class="text-xs font-semibold text-white truncate">Фильтры</span>
+            {#if activeFilterCount > 0}
+              <span class="px-1.5 py-0.2 rounded bg-white/10 text-white font-mono text-[10px]">
+                {activeFilterCount}
+              </span>
+            {/if}
+          </div>
+
+          {#if activeFilterCount > 0}
+            <button
+              type="button"
+              onclick={resetAllFilters}
+              class="text-[11px] text-[#8e95a2] hover:text-rose-400 transition-colors cursor-pointer flex-shrink-0"
+            >
+              Сбросить
+            </button>
+          {/if}
+        </div>
+
+        <!-- Offcanvas Scrollable Content (No horizontal scroll, clean Steam aesthetic) -->
+        <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-5 text-xs select-none">
+          
+          <!-- 1. Оценка Steam -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#64748b]">Оценка Steam</span>
+              {#if selectedRating !== 'all'}
+                <button
+                  type="button"
+                  onclick={() => (selectedRating = 'all')}
+                  class="text-[10px] text-[#8e95a2] hover:text-white cursor-pointer"
+                >
+                  Сброс
+                </button>
+              {/if}
+            </div>
+            <div class="space-y-1">
+              {#each ratingOptions as opt}
+                <button
+                  type="button"
+                  onclick={() => (selectedRating = opt.id)}
+                  class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left transition-colors cursor-pointer {selectedRating === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-transparent'}"
+                >
+                  <span>{opt.label}</span>
+                  {#if selectedRating === opt.id}
+                    <Check class="w-3.5 h-3.5 text-white" />
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- 2. Размер на диске -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#64748b]">Размер на диске</span>
+              {#if selectedSize !== 'all'}
+                <button
+                  type="button"
+                  onclick={() => (selectedSize = 'all')}
+                  class="text-[10px] text-[#8e95a2] hover:text-white cursor-pointer"
+                >
+                  Сброс
+                </button>
+              {/if}
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              {#each sizeOptions as opt}
+                <button
+                  type="button"
+                  onclick={() => (selectedSize = opt.id)}
+                  class="px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer truncate {selectedSize === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.05]'}"
+                >
+                  <span class="truncate">{opt.label}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- 3. Дата выхода -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#64748b]">Дата выхода</span>
+              {#if selectedYear !== 'all'}
+                <button
+                  type="button"
+                  onclick={() => (selectedYear = 'all')}
+                  class="text-[10px] text-[#8e95a2] hover:text-white cursor-pointer"
+                >
+                  Сброс
+                </button>
+              {/if}
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              {#each yearOptions as opt}
+                <button
+                  type="button"
+                  onclick={() => (selectedYear = opt.id)}
+                  class="px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer truncate {selectedYear === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.05]'}"
+                >
+                  <span class="truncate">{opt.label}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- 4. Жанры -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#64748b]">Жанры</span>
+              {#if selectedGenre !== 'all'}
+                <button
+                  type="button"
+                  onclick={() => (selectedGenre = 'all')}
+                  class="text-[10px] text-[#8e95a2] hover:text-white cursor-pointer truncate max-w-[150px]"
+                >
+                  Сброс ({selectedGenre})
+                </button>
+              {/if}
+            </div>
+
+            <!-- Search genre -->
+            <div class="relative mb-2">
+              <Search class="w-3.5 h-3.5 text-[#6b7280] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                bind:value={genreSearchQuery}
+                placeholder="Поиск жанра..."
+                class="w-full bg-[#0d1117] text-white text-xs placeholder-[#5a6170] rounded-lg pl-8 pr-7 py-1.5 border border-white/10 focus:border-white/20 focus:outline-none"
+              />
+              {#if genreSearchQuery}
+                <button
+                  type="button"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-[#6b7280] hover:text-white cursor-pointer"
+                  onclick={() => (genreSearchQuery = '')}
+                >
+                  <X class="w-3.5 h-3.5" />
+                </button>
+              {/if}
+            </div>
+
+            <!-- Vertical genre list -->
+            <div class="max-h-[160px] overflow-y-auto space-y-0.5 pr-1 no-scrollbar">
+              <button
+                type="button"
+                onclick={() => (selectedGenre = 'all')}
+                class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer {selectedGenre === 'all' ? 'bg-white/10 text-white font-semibold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
+              >
+                <span>Все жанры</span>
+                <span class="text-[10px] font-mono text-[#64748b]">{deduplicatedList.length}</span>
+              </button>
+              {#each filteredGenreList as item}
+                {@const isCurrent = selectedGenre.toLowerCase() === item.name.toLowerCase()}
+                <button
+                  type="button"
+                  onclick={() => (selectedGenre = item.name)}
+                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer {isCurrent ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
+                >
+                  <div class="flex items-center gap-2 truncate">
+                    {#if isCurrent}
+                      <Check class="w-3.5 h-3.5 text-white flex-shrink-0" />
+                    {/if}
+                    <span class="truncate">{item.name}</span>
+                  </div>
+                  <span class="text-[10px] font-mono text-[#64748b] ml-1 flex-shrink-0">{item.count}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- 5. Теги Steam -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#64748b]">Теги Steam</span>
+              {#if Array.isArray(selectedTags) && selectedTags.length > 0}
+                <button
+                  type="button"
+                  onclick={() => (selectedTags = [])}
+                  class="text-[10px] text-[#8e95a2] hover:text-white cursor-pointer"
+                >
+                  Сброс ({selectedTags.length})
+                </button>
+              {/if}
+            </div>
+
+            <!-- Search tag -->
+            <div class="relative mb-2">
+              <Search class="w-3.5 h-3.5 text-[#6b7280] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                bind:value={tagSearchQuery}
+                placeholder="Поиск тега..."
+                class="w-full bg-[#0d1117] text-white text-xs placeholder-[#5a6170] rounded-lg pl-8 pr-7 py-1.5 border border-white/10 focus:border-white/20 focus:outline-none"
+              />
+              {#if tagSearchQuery}
+                <button
+                  type="button"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-[#6b7280] hover:text-white cursor-pointer"
+                  onclick={() => (tagSearchQuery = '')}
+                >
+                  <X class="w-3.5 h-3.5" />
+                </button>
+              {/if}
+            </div>
+
+            <!-- Vertical tags list -->
+            <div class="max-h-[160px] overflow-y-auto space-y-0.5 pr-1 no-scrollbar">
+              {#each filteredTagList as item}
+                {@const isSelected = Array.isArray(selectedTags) && selectedTags.includes(item.name)}
+                <button
+                  type="button"
+                  onclick={() => toggleTag(item.name)}
+                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
+                >
+                  <div class="flex items-center gap-2 truncate">
+                    <span class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 {isSelected ? 'bg-white text-black border-white' : 'border-white/20 bg-transparent'}">
+                      {#if isSelected}
+                        <Check class="w-2.5 h-2.5" />
+                      {/if}
+                    </span>
+                    <span class="truncate">{item.name}</span>
+                  </div>
+                  <span class="text-[10px] font-mono text-[#64748b] ml-1 flex-shrink-0">{item.count}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- 6. Особенности -->
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-wider text-[#64748b] mb-2">
+              Особенности
+            </div>
+            <div class="space-y-1.5">
+              <button
+                type="button"
+                onclick={() => (filterController = !filterController)}
+                class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors cursor-pointer {filterController ? 'bg-white/10 border border-white/15 text-white font-medium' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.04]'}"
+              >
+                <div class="flex items-center gap-2">
+                  <Gamepad2 class="w-3.5 h-3.5 text-[#8e95a2]" />
+                  <span>С поддержкой геймпада</span>
+                </div>
+                <span class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 {filterController ? 'bg-white text-black border-white' : 'border-white/20 bg-transparent'}">
+                  {#if filterController}
+                    <Check class="w-2.5 h-2.5" />
+                  {/if}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onclick={() => (filterCollections = !filterCollections)}
+                class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors cursor-pointer {filterCollections ? 'bg-white/10 border border-white/15 text-white font-medium' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.04]'}"
+              >
+                <div class="flex items-center gap-2">
+                  <FolderOpen class="w-3.5 h-3.5 text-[#8e95a2]" />
+                  <span>Саги и сборники</span>
+                </div>
+                <span class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 {filterCollections ? 'bg-white text-black border-white' : 'border-white/20 bg-transparent'}">
+                  {#if filterCollections}
+                    <Check class="w-2.5 h-2.5" />
+                  {/if}
+                </span>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Offcanvas Sticky Footer -->
+        <div class="p-3 border-t border-white/[0.08] bg-[#0b0e14] flex items-center gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onclick={() => (isFilterHubOpen = false)}
+            class="w-full py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-semibold text-center transition-colors cursor-pointer border border-white/15"
+          >
+            Показать {filteredGames.length} игр
+          </button>
+        </div>
+      </div>
+    {/if}
 
     <!-- Master Game List Items (Virtual List) -->
     <div
@@ -740,7 +1123,7 @@
 
   <!-- 2. MAIN DETAIL VIEW -->
   <GameDetailView
-    game={selectedGame}
+    bind:game={selectedGame}
     {isLoading}
     {loadingStatusText}
     {downloadPath}

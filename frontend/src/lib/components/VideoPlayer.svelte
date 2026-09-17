@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import Hls from 'hls.js';
-  import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, AlertCircle, RefreshCw } from 'lucide-svelte';
+  import { Play, Pause, SpeakerHigh, SpeakerX, ArrowsOut, ArrowsIn, Warning, ArrowClockwise } from 'phosphor-svelte';
 
   interface Props {
     src?: string;
@@ -386,14 +386,14 @@
   <!-- Buffering Spinner (Only shown when buffering during playback) -->
   {#if isBuffering && isPlaying}
     <div class="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none z-20">
-      <RefreshCw class="w-8 h-8 text-white animate-spin drop-shadow-md" />
+      <ArrowClockwise size={32} weight="regular" class="text-white animate-spin drop-shadow-md" />
     </div>
   {/if}
 
   <!-- Error State Overlay -->
   {#if hasError}
     <div class="absolute inset-0 flex flex-col items-center justify-center bg-black/90 p-4 text-center z-20 space-y-2">
-      <AlertCircle class="w-8 h-8 text-rose-400" />
+      <Warning size={32} weight="regular" class="text-rose-400" />
       <p class="text-xs font-semibold text-white">{errorMessage || 'Не удалось воспроизвести видео'}</p>
       <button
         type="button"
@@ -418,7 +418,7 @@
       aria-label="Воспроизвести"
     >
       <div class="w-14 h-14 rounded-full bg-black/80 border border-white/25 flex items-center justify-center text-white shadow-2xl hover:scale-110 transition-transform">
-        <Play class="w-6 h-6 ml-0.5 fill-white" />
+        <Play size={24} weight="fill" class="ml-0.5 fill-white" />
       </div>
     </button>
   {/if}
@@ -435,9 +435,9 @@
         title={isPlaying ? "Пауза" : "Воспроизведение"}
       >
         {#if isPlaying}
-          <Pause class="w-4 h-4 fill-white" />
+          <Pause size={16} weight="fill" class="fill-white" />
         {:else}
-          <Play class="w-4 h-4 fill-white ml-0.5" />
+          <Play size={16} weight="fill" class="fill-white ml-0.5" />
         {/if}
       </button>
 
@@ -450,9 +450,9 @@
         title={isMuted ? "Включить звук" : "Выключить звук"}
       >
         {#if isMuted}
-          <VolumeX class="w-4 h-4 text-rose-400" />
+          <SpeakerX size={16} weight="regular" class="text-rose-400" />
         {:else}
-          <Volume2 class="w-4 h-4" />
+          <SpeakerHigh size={16} weight="regular" />
         {/if}
       </button>
 
@@ -485,9 +485,9 @@
         title={isFullscreen ? "Оконный режим (Esc)" : "Во весь экран (F)"}
       >
         {#if isFullscreen}
-          <Minimize2 class="w-4 h-4" />
+          <ArrowsIn size={16} weight="regular" />
         {:else}
-          <Maximize2 class="w-4 h-4" />
+          <ArrowsOut size={16} weight="regular" />
         {/if}
       </button>
     </div>
