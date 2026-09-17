@@ -2,11 +2,33 @@
 # Ducke - Git Ignore Configuration
 # ====================================================================
 
-# Build & packaging directories
+# Build & packaging output directories
 build/
+bin/
+dist/
+out/
+release/
+releases/
+target/
 
-# Agents configuration
+# Packaged binaries & release archives (not needed for compilation)
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.7z
+*.rar
+*.flatpak
+*.AppImage
+*.deb
+*.rpm
+
+# AI & Agent configurations / cache
 .agents/
+.gemini/
+.claude/
+.cursor/
+.windsurf/
 
 # Executables & libraries
 *.exe
@@ -15,26 +37,42 @@ build/
 *.so
 *.so.*
 *.dylib
+*.a
+*.o
 *.test
 *.out
 *.prof
+*.cov
+*.coverage
+coverage.txt
+coverage.html
+coverage.out
 
 # Flatpak & Linux packaging temporary files
 .flatpak-builder/
 _build/
 
-# Node.js & Frontend dependencies/dist
+# Node.js & Frontend dependencies/dist/cache
 node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/package.json.md5
+frontend/*.package.json.md5
 .npm/
 .eslintcache
 .vite-temp/
+.svelte-kit/
+.turbo/
+.cache/
+*.tsbuildinfo
 
-# Application runtime database & logs
+# Application runtime database, state & logs
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
+*.sqlite3
 ducke.db
 gamevault.db
 ducke_settings.json
@@ -42,10 +80,22 @@ ducke_settings.json
 logs/
 test_*.json
 
+# Temporary & backup files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.patch
+*.diff
+
 # Environment variables & local secrets
 .env
 .env.*
 *.local
+secrets/
 
 # Operating System files
 .DS_Store
