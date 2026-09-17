@@ -1,6 +1,6 @@
-﻿//go:build !windows
+//go:build !windows
 
-package main
+package launcher
 
 import (
 	"os/exec"
@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// launchExecutable launches an executable file with optional arguments on non-Windows systems
-func launchExecutable(exePath string, launchArgs string) error {
+// LaunchExecutable launches an executable file with optional arguments on non-Windows systems
+func LaunchExecutable(exePath string, launchArgs string) error {
 	dir := filepath.Dir(exePath)
 
 	var args []string

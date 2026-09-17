@@ -29,6 +29,9 @@ target/
 .claude/
 .cursor/
 .windsurf/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
 
 # Executables & libraries
 *.exe

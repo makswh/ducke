@@ -24,6 +24,7 @@ import (
 	"gamevault/pkg/config"
 	"gamevault/pkg/database"
 	"gamevault/pkg/downloader"
+	"gamevault/pkg/launcher"
 	"gamevault/pkg/logger"
 	"gamevault/pkg/metadata"
 	"gamevault/pkg/remote"
@@ -588,7 +589,7 @@ func (a *App) SelectGameExeFile(defaultDir string) string {
 func (a *App) LaunchGameWithCustomConfig(gameID int64) error {
 	exePath, launchArgs, err := a.db.GetFavoriteLaunchConfig(gameID)
 	if err == nil && exePath != "" {
-		return launchExecutable(exePath, launchArgs)
+		return launcher.LaunchExecutable(exePath, launchArgs)
 	}
 	return a.LaunchGameByGameID(gameID)
 }
@@ -1872,7 +1873,7 @@ func (a *App) LaunchGame(folderOrFilePath string) error {
 	if !fi.IsDir() {
 		ext := strings.ToLower(filepath.Ext(folderOrFilePath))
 		if ext == ".exe" || ext == ".bat" || ext == ".cmd" {
-			return launchExecutable(folderOrFilePath, "")
+			return launcher.LaunchExecutable(folderOrFilePath, "")
 		}
 		return a.OpenLocalFolder(filepath.Dir(folderOrFilePath))
 	}
@@ -1898,7 +1899,7 @@ func (a *App) LaunchGame(folderOrFilePath string) error {
 		}
 
 		if len(candidates) == 1 {
-			return launchExecutable(candidates[0], "")
+			return launcher.LaunchExecutable(candidates[0], "")
 		}
 	}
 

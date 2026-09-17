@@ -1,6 +1,6 @@
-﻿//go:build windows
+//go:build windows
 
-package main
+package launcher
 
 import (
 	"fmt"
@@ -16,10 +16,10 @@ var (
 	procShellExecute = shell32DLL.NewProc("ShellExecuteW")
 )
 
-// launchExecutable launches an executable file with optional arguments and directory.
+// LaunchExecutable launches an executable file with optional arguments and directory.
 // On Windows, if CreateProcess fails (e.g. error 740 / elevation required for setup.exe / installer),
 // it transparently falls back to ShellExecuteW with standard or "runas" elevation so Windows prompts UAC.
-func launchExecutable(exePath string, launchArgs string) error {
+func LaunchExecutable(exePath string, launchArgs string) error {
 	dir := filepath.Dir(exePath)
 
 	var args []string
