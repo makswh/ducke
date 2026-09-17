@@ -23,6 +23,11 @@ target/
 *.deb
 *.rpm
 
+# Local automation & release scripts
+release.bat
+release.ps1
+scripts/
+
 # AI & Agent configurations / cache
 .agents/
 .gemini/
