@@ -20,7 +20,8 @@
     PencilSimple as Edit3,
     Disc,
     ArrowDown,
-    FilmStrip as Film
+    FilmStrip as Film,
+    UploadSimple
   } from 'phosphor-svelte';
   import Hls from 'hls.js';
   import { sound } from '../../navigation/audio';
@@ -97,6 +98,83 @@
       shortName: 'FTP',
       badgeClass: 'bg-white/[0.04] border-white/10 text-[#cbd5e1]'
     };
+  });
+
+  let variantSeeds = $state<Record<number, { seeders: number; leechers: number; loading: boolean }>>({});
+  let lastSeedsFetchedGameId = 0;
+
+  function formatSeedsCount(seeds: number): string {
+    const mod10 = seeds % 10;
+    const mod100 = seeds % 100;
+    if (mod100 >= 11 && mod100 <= 19) {
+      return `${seeds} сидов`;
+    }
+    if (mod10 === 1) {
+      return `${seeds} сид`;
+    }
+    if (mod10 >= 2 && mod10 <= 4) {
+      return `${seeds} сида`;
+    }
+    return `${seeds} сидов`;
+  }
+
+  async function loadTorrentSeedsForGame(g: any) {
+    if (!g) return;
+    const gid = g.id;
+    lastSeedsFetchedGameId = gid;
+
+    const allVariants = (g.variants && g.variants.length > 0) ? g.variants : [g];
+    const queries: { id: number; magnetUri: string }[] = [];
+
+    for (const v of allVariants) {
+      const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
+      if (isTorrent && v.magnetUri) {
+        queries.push({ id: v.id, magnetUri: v.magnetUri });
+        if (!variantSeeds[v.id]) {
+          variantSeeds[v.id] = { seeders: 0, leechers: 0, loading: true };
+        }
+      }
+    }
+
+    if (queries.length === 0) return;
+
+    try {
+      const results = await AppAPI.GetTorrentSeedsBatch(queries as any);
+      if (lastSeedsFetchedGameId === gid && results) {
+        for (const [idStr, res] of Object.entries(results)) {
+          const id = Number(idStr);
+          variantSeeds[id] = {
+            seeders: res.seeders || 0,
+            leechers: res.leechers || 0,
+            loading: false
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[Seeds] Failed to fetch torrent seeds:', err);
+      if (lastSeedsFetchedGameId === gid) {
+        for (const q of queries) {
+          if (variantSeeds[q.id]?.loading) {
+            variantSeeds[q.id].loading = false;
+          }
+        }
+      }
+    }
+  }
+
+  $effect(() => {
+    const g = activeGame || game;
+    if (g?.id && g.id !== lastSeedsFetchedGameId) {
+      loadTorrentSeedsForGame(g);
+    }
+  });
+
+  let currentVariantSeedInfo = $derived.by(() => {
+    const v = activeVariant || activeGame || game;
+    if (!v) return null;
+    const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
+    if (!isTorrent) return null;
+    return variantSeeds[v.id] || null;
   });
 
   // Docked content tabs: 'about' | 'screenshots' | 'specs' | 'variants'
@@ -977,11 +1055,39 @@
         } else if (dir === 'LEFT') {
           prevTrailer();
         }
-      } else {
-        if (dir === 'UP' && movieList.length > 0) {
-          enterTheaterMode();
+      } else if (lightboxImage) {
+        if (dir === 'RIGHT') {
+          nextLightboxImage();
+        } else if (dir === 'LEFT') {
+          prevLightboxImage();
         }
       }
+    };
+
+    const handleBtnX = (e: CustomEvent) => {
+      if (isTheaterMode) {
+        toggleMute();
+        e.preventDefault();
+        return;
+      }
+      if (isCompleted) {
+        handleOpenGameFolder();
+        e.preventDefault();
+        return;
+      }
+      if (activeVariantsList && activeVariantsList.length > 1) {
+        isVariantDropdownOpen = !isVariantDropdownOpen;
+        e.preventDefault();
+        return;
+      }
+      handleBrowseFolder();
+      e.preventDefault();
+    };
+
+    const handleBtnY = (e: CustomEvent) => {
+      if (isTheaterMode) return;
+      isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
+      e.preventDefault();
     };
 
     const handleGoBack = (e: CustomEvent) => {
@@ -1014,14 +1120,26 @@
     };
 
     const handleSubtabPrev = (e: Event) => {
-      if (!isTheaterMode && !lightboxImage && !isSteamModalOpen) {
+      if (isTheaterMode) {
+        prevTrailer();
+        e.preventDefault();
+      } else if (lightboxImage) {
+        prevLightboxImage();
+        e.preventDefault();
+      } else if (!isSteamModalOpen) {
         cycleTab(-1);
         e.preventDefault();
       }
     };
 
     const handleSubtabNext = (e: Event) => {
-      if (!isTheaterMode && !lightboxImage && !isSteamModalOpen) {
+      if (isTheaterMode) {
+        nextTrailer();
+        e.preventDefault();
+      } else if (lightboxImage) {
+        nextLightboxImage();
+        e.preventDefault();
+      } else if (!isSteamModalOpen) {
         cycleTab(1);
         e.preventDefault();
       }
@@ -1030,6 +1148,8 @@
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('pointerdown', handleWindowPointerDown, true);
     window.addEventListener('app:gamepad-dir', handleGamepadDir as EventListener);
+    window.addEventListener('app:btn-x', handleBtnX as EventListener);
+    window.addEventListener('app:btn-y', handleBtnY as EventListener);
     window.addEventListener('app:go-back', handleGoBack as EventListener, true);
     window.addEventListener('app:subtab-prev', handleSubtabPrev as EventListener);
     window.addEventListener('app:subtab-next', handleSubtabNext as EventListener);
@@ -1041,6 +1161,8 @@
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('pointerdown', handleWindowPointerDown, true);
       window.removeEventListener('app:gamepad-dir', handleGamepadDir as EventListener);
+      window.removeEventListener('app:btn-x', handleBtnX as EventListener);
+      window.removeEventListener('app:btn-y', handleBtnY as EventListener);
       window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
       window.removeEventListener('app:subtab-prev', handleSubtabPrev as EventListener);
       window.removeEventListener('app:subtab-next', handleSubtabNext as EventListener);
@@ -1318,8 +1440,20 @@
                       >
                         <div class="min-w-0 flex-1 pointer-events-none">
                           <div class="truncate text-white text-xs">{variant.rawName}</div>
-                          <div class="text-[10px] text-[#64748b] font-mono">
-                            Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? (formatTorrentSourceName(variant.torrentSource) || 'Торрент') : 'FTP-сервер'}
+                          <div class="text-[10px] text-[#64748b] font-mono flex items-center gap-2 mt-0.5">
+                            <span>Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? (formatTorrentSourceName(variant.torrentSource) || 'Торрент') : 'FTP-сервер'}</span>
+                            {#if variant.sourceType === 'torrent' || variant.magnetUri}
+                              <span class="text-white/20">•</span>
+                              {#if variantSeeds[variant.id]?.loading}
+                                <span class="text-[#64748b] animate-pulse">сиды: ...</span>
+                              {:else if variantSeeds[variant.id]}
+                                {@const s = variantSeeds[variant.id].seeders}
+                                <span class="inline-flex items-center gap-0.5 {s > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
+                                  <UploadSimple class="w-3 h-3 stroke-[2.5]" />
+                                  <span>{formatSeedsCount(s)}</span>
+                                </span>
+                              {/if}
+                            {/if}
                           </div>
                         </div>
                         <div class="flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] pointer-events-none {isSel ? 'text-sky-400 font-bold' : 'text-[#64748b]'}">
@@ -1345,6 +1479,18 @@
                 <span class="truncate max-w-[160px]">{customDownloadPath || downloadPath || 'Папка'}</span>
                 <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">X</span>
               </button>
+            {/if}
+
+            <!-- Live Seeds Indicator (if active variant is torrent) -->
+            {#if currentVariantSeedInfo}
+              <div class="px-3 py-3 rounded-xl bg-white/10 border border-white/15 text-xs font-mono flex items-center gap-1.5 select-none {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#8e95a2]'}">
+                <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                {#if currentVariantSeedInfo.loading}
+                  <span class="animate-pulse text-[#64748b]">...</span>
+                {:else}
+                  <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
+                {/if}
+              </div>
             {/if}
 
             <!-- Favorite Toggle Dropdown (Y) -->
@@ -1673,8 +1819,20 @@
                   >
                     <div class="min-w-0 flex-1">
                       <div class="text-xs font-semibold text-white truncate">{variant.rawName}</div>
-                      <div class="text-[10px] text-[#64748b] font-mono mt-0.5">
-                        Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? (formatTorrentSourceName(variant.torrentSource) || 'Торрент') : 'FTP-сервер'}
+                      <div class="text-[10px] text-[#64748b] font-mono flex items-center gap-2 mt-0.5">
+                        <span>Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? (formatTorrentSourceName(variant.torrentSource) || 'Торрент') : 'FTP-сервер'}</span>
+                        {#if variant.sourceType === 'torrent' || variant.magnetUri}
+                          <span class="text-white/20">•</span>
+                          {#if variantSeeds[variant.id]?.loading}
+                            <span class="text-[#64748b] animate-pulse">сиды: ...</span>
+                          {:else if variantSeeds[variant.id]}
+                            {@const s = variantSeeds[variant.id].seeders}
+                            <span class="inline-flex items-center gap-0.5 {s > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
+                              <UploadSimple class="w-3 h-3 stroke-[2.5]" />
+                              <span>{formatSeedsCount(s)}</span>
+                            </span>
+                          {/if}
+                        {/if}
                       </div>
                     </div>
 

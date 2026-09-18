@@ -42,7 +42,8 @@
     Trash as Trash2,
     Copy,
     Gear as Settings,
-    SteamLogo
+    SteamLogo,
+    UploadSimple
   } from 'phosphor-svelte';
   import VideoPlayer from './VideoPlayer.svelte';
   import type {
@@ -54,7 +55,7 @@
     GamePageDetails
   } from '../types/game';
   import { EventsOn } from '../../../wailsjs/runtime/runtime';
-  import { SetFavoriteStatus, RemoveFromFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig, AddGameToSteam, CheckGameInSteam, RemoveGameFromSteam } from '../../../wailsjs/go/main/App';
+  import { SetFavoriteStatus, RemoveFromFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig, AddGameToSteam, CheckGameInSteam, RemoveGameFromSteam, GetTorrentSeedsBatch } from '../../../wailsjs/go/main/App';
   import { isPlaceholderTitle, cleanTorrentTitle, getDisplayTitle } from '../utils/titleUtils';
 
 
@@ -467,6 +468,84 @@
       shortName: 'FTP',
       badgeClass: 'bg-white/[0.04] border-white/10 text-[#cbd5e1]'
     };
+  });
+
+  let variantSeeds = $state<Record<number, { seeders: number; leechers: number; loading: boolean }>>({});
+  let lastSeedsFetchedGameId = 0;
+
+  function formatSeedsCount(seeds: number): string {
+    const mod10 = seeds % 10;
+    const mod100 = seeds % 100;
+    if (mod100 >= 11 && mod100 <= 19) {
+      return `${seeds} сидов`;
+    }
+    if (mod10 === 1) {
+      return `${seeds} сид`;
+    }
+    if (mod10 >= 2 && mod10 <= 4) {
+      return `${seeds} сида`;
+    }
+    return `${seeds} сидов`;
+  }
+
+  async function loadTorrentSeedsForGame(g: GameEntity | null | undefined) {
+    if (!g) return;
+    const gid = g.id;
+    lastSeedsFetchedGameId = gid;
+
+    const allVariants = (g.variants && g.variants.length > 0) ? g.variants : [g];
+    const queries: { id: number; magnetUri: string }[] = [];
+
+    for (const v of allVariants) {
+      const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
+      if (isTorrent && v.magnetUri) {
+        queries.push({ id: v.id, magnetUri: v.magnetUri });
+        if (!variantSeeds[v.id]) {
+          variantSeeds[v.id] = { seeders: 0, leechers: 0, loading: true };
+        }
+      }
+    }
+
+    if (queries.length === 0) return;
+
+    try {
+      const results = await GetTorrentSeedsBatch(queries as any);
+      if (lastSeedsFetchedGameId === gid && results) {
+        for (const [idStr, res] of Object.entries(results)) {
+          const id = Number(idStr);
+          variantSeeds[id] = {
+            seeders: res.seeders || 0,
+            leechers: res.leechers || 0,
+            loading: false
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[Seeds] Failed to fetch torrent seeds:', err);
+      if (lastSeedsFetchedGameId === gid) {
+        for (const q of queries) {
+          if (variantSeeds[q.id]?.loading) {
+            variantSeeds[q.id].loading = false;
+          }
+        }
+      }
+    }
+  }
+
+  $effect(() => {
+    const vg = pageDetails?.game || game;
+    if (vg?.id && vg.id !== lastSeedsFetchedGameId) {
+      loadTorrentSeedsForGame(vg);
+    }
+  });
+
+  let currentVariantSeedInfo = $derived.by(() => {
+    const vg = pageDetails?.game || game;
+    const v = activeVariant || vg;
+    if (!v) return null;
+    const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
+    if (!isTorrent) return null;
+    return variantSeeds[v.id] || null;
   });
 
   $effect(() => {
@@ -1906,8 +1985,20 @@
                               >
                                 <div class="min-w-0 flex-1 pointer-events-none">
                                   <div class="truncate text-white text-xs">{variant.rawName}</div>
-                                  <div class="text-[10px] text-[#6b7280] font-mono">
-                                    Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? `Торрент (${formatSourceName(variant.torrentSource) || 'Каталог'})` : 'FTP-сервер'}
+                                  <div class="flex items-center gap-2 text-[10px] text-[#6b7280] font-mono mt-0.5">
+                                    <span>Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? `Торрент (${formatSourceName(variant.torrentSource) || 'Каталог'})` : 'FTP-сервер'}</span>
+                                    {#if variant.sourceType === 'torrent' || variant.magnetUri}
+                                      <span class="text-white/20">•</span>
+                                      {#if variantSeeds[variant.id]?.loading}
+                                        <span class="text-[#64748b] animate-pulse">сиды: ...</span>
+                                      {:else if variantSeeds[variant.id]}
+                                        {@const s = variantSeeds[variant.id].seeders}
+                                        <span class="inline-flex items-center gap-0.5 {s > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
+                                          <UploadSimple class="w-3 h-3 stroke-[2.5]" />
+                                          <span>{formatSeedsCount(s)}</span>
+                                        </span>
+                                      {/if}
+                                    {/if}
                                   </div>
                                 </div>
                                 <div class="flex items-center gap-2 flex-shrink-0 font-mono text-[11px] pointer-events-none {isSelected ? 'text-[var(--game-accent)] font-bold' : 'text-[#6b7280]'}">
@@ -1929,7 +2020,7 @@
                   {/if}
                 </div>
 
-                <!-- Minimalist Sleek Metadata Line: Folder Path • Source • Release Name -->
+                <!-- Minimalist Sleek Metadata Line: Folder Path • Source • Seeders • Release Name -->
                 <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[#8e95a2] pt-0.5">
                   <button
                     type="button"
@@ -1944,6 +2035,18 @@
                   {#if downloadSourceInfo}
                     <span class="text-white/20 select-none">•</span>
                     <span class="text-[#8e95a2]">{downloadSourceInfo.shortName}</span>
+                  {/if}
+
+                  {#if currentVariantSeedInfo}
+                    <span class="text-white/20 select-none">•</span>
+                    {#if currentVariantSeedInfo.loading}
+                      <span class="text-[#64748b] font-mono text-[11px] animate-pulse">поиск сидов...</span>
+                    {:else}
+                      <span class="inline-flex items-center gap-1 font-mono text-[11px] {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
+                        <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
+                      </span>
+                    {/if}
                   {/if}
 
                   {#if (activeVariant?.rawName || g.rawName)}

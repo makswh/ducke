@@ -1143,6 +1143,18 @@ func (a *App) GetDownloadHistory() ([]database.DownloadRecord, error) {
 	return a.db.GetAllDownloads()
 }
 
+// GetTorrentSeedsBatch queries live or cached seeders and leechers for a list of torrent queries
+func (a *App) GetTorrentSeedsBatch(queries []downloader.TorrentSeedQuery) map[int64]downloader.TorrentSeedResult {
+	if a.downloader == nil {
+		return map[int64]downloader.TorrentSeedResult{}
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.downloader.GetTorrentSeedsBatch(ctx, queries)
+}
+
 // ==========================================
 // Configuration & Settings Methods
 // ==========================================

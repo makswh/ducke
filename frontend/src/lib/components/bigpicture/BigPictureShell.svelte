@@ -274,47 +274,146 @@
   </div>
 
   <!-- SteamOS Gamepad Footer HUD -->
-  {#if !isTheaterActive}
-    <footer class="h-10 px-8 flex items-center justify-between bg-[#050608] border-t border-white/[0.06] text-[#8e95a2] text-xs font-medium z-30 select-none flex-shrink-0">
-      <div class="flex items-center gap-6">
+  <footer class="h-10 px-8 flex items-center justify-between bg-[#050608] border-t border-white/[0.06] text-[#8e95a2] text-xs font-medium z-30 select-none flex-shrink-0">
+    <div class="flex items-center gap-5 sm:gap-6 flex-wrap">
+      {#if isTheaterActive}
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
+          <span>Пауза</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
+          <span>Выход</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
+          <span>Звук</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span>Трейлеры</span>
+        </div>
+      {:else if selectedGame}
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
+          <span>Скачать / Играть</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
+          <span>Назад</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
+          <span>Версии / Папка</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
+          <span>В избранное</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span>Разделы</span>
+        </div>
+      {:else if activeTab === 'home'}
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
+          <span>Подробнее</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
+          <span>Назад</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
+          <span>Скачать / Играть</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
+          <span>Избранное</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span>Вкладки</span>
+        </div>
+      {:else if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
+          <span>Открыть</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
+          <span>Главная</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
+          <span>Поиск</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
+          <span>Сортировка</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span>Вкладки</span>
+        </div>
+      {:else if activeTab === 'favorites'}
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
+          <span>Открыть</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
+          <span>Главная</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
+          <span>Сменить статус</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span>Вкладки</span>
+        </div>
+      {:else if activeTab === 'downloads'}
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
+          <span>Действие</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
+          <span>Главная</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span>Вкладки</span>
+        </div>
+      {:else if activeTab === 'settings'}
         <div class="flex items-center gap-1.5">
           <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
           <span>Выбрать</span>
         </div>
         <div class="flex items-center gap-1.5">
           <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-          <span>Назад</span>
+          <span>Главная</span>
         </div>
-        {#if activeTab === 'home'}
-          <div class="flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
-            <span>Действие</span>
-          </div>
-          <div class="flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
-            <span>Избранное</span>
-          </div>
-        {:else if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
-          <div class="flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
-            <span>Поиск</span>
-          </div>
-        {/if}
+        <div class="flex items-center gap-1.5">
+          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">← →</span>
+          <span>Сайдбар / Настройки</span>
+        </div>
         <div class="flex items-center gap-1.5">
           <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
           <span>Вкладки</span>
         </div>
-      </div>
-      
-      <div class="flex items-center gap-4 text-[11px] text-[#64748b]">
-        <span>Ducke Console</span>
-        {#if isGamepadConnected}
-          <span class="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Геймпад подключен
-          </span>
-        {/if}
-      </div>
-    </footer>
-  {/if}
+      {/if}
+    </div>
+    
+    <div class="flex items-center gap-4 text-[11px] text-[#64748b]">
+      <span>Ducke Console</span>
+      {#if isGamepadConnected}
+        <span class="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          Геймпад подключен
+        </span>
+      {/if}
+    </div>
+  </footer>
 </div>

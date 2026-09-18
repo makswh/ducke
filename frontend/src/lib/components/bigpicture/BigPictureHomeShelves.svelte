@@ -202,12 +202,42 @@
         } else if (dir === 'LEFT') {
           prevTrailer();
         }
-      } else {
-        if (dir === 'UP') {
-          if (movieList.length > 0) {
-            enterTheaterMode();
-          }
-        }
+      }
+    };
+
+    const handleBtnX = (e: CustomEvent) => {
+      if (isTheaterMode) {
+        toggleMute();
+        e.preventDefault();
+        return;
+      }
+      handlePrimaryAction();
+      e.preventDefault();
+    };
+
+    const handleBtnY = (e: CustomEvent) => {
+      if (isTheaterMode) return;
+      handleToggleFavorite();
+      e.preventDefault();
+    };
+
+    const handleSubtabPrev = (e: CustomEvent) => {
+      if (isTheaterMode) {
+        prevTrailer();
+        e.preventDefault();
+      } else if (lightboxImage) {
+        cycleLightbox(-1);
+        e.preventDefault();
+      }
+    };
+
+    const handleSubtabNext = (e: CustomEvent) => {
+      if (isTheaterMode) {
+        nextTrailer();
+        e.preventDefault();
+      } else if (lightboxImage) {
+        cycleLightbox(1);
+        e.preventDefault();
       }
     };
 
@@ -225,6 +255,10 @@
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('app:gamepad-dir', handleGamepadDir as EventListener);
+    window.addEventListener('app:btn-x', handleBtnX as EventListener);
+    window.addEventListener('app:btn-y', handleBtnY as EventListener);
+    window.addEventListener('app:subtab-prev', handleSubtabPrev as EventListener);
+    window.addEventListener('app:subtab-next', handleSubtabNext as EventListener);
     window.addEventListener('app:go-back', handleGoBack as EventListener, true);
 
     return () => {
@@ -239,6 +273,10 @@
       if (detailsTimer) clearTimeout(detailsTimer);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('app:gamepad-dir', handleGamepadDir as EventListener);
+      window.removeEventListener('app:btn-x', handleBtnX as EventListener);
+      window.removeEventListener('app:btn-y', handleBtnY as EventListener);
+      window.removeEventListener('app:subtab-prev', handleSubtabPrev as EventListener);
+      window.removeEventListener('app:subtab-next', handleSubtabNext as EventListener);
       window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
     };
   });

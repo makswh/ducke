@@ -142,6 +142,10 @@ export function GetTorrentCatalogCount() {
   return window['go']['main']['App']['GetTorrentCatalogCount']();
 }
 
+export function GetTorrentSeedsBatch(arg1) {
+  return window['go']['main']['App']['GetTorrentSeedsBatch'](arg1);
+}
+
 export function GetTorrentSources() {
   return window['go']['main']['App']['GetTorrentSources']();
 }

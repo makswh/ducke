@@ -79,6 +79,8 @@ export function GetTorrentCatalogChunk(arg1:number,arg2:number):Promise<Array<da
 
 export function GetTorrentCatalogCount():Promise<number>;
 
+export function GetTorrentSeedsBatch(arg1:Array<downloader.TorrentSeedQuery>):Promise<Record<number, downloader.TorrentSeedResult>>;
+
 export function GetTorrentSources():Promise<Array<config.TorrentSourceConfig>>;
 
 export function ImportFileZillaFile():Promise<Array<config.ServerConfig>>;

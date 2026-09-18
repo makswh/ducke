@@ -25,6 +25,7 @@ type DownloadManager struct {
 	queue         *QueueController
 	onEvent       func(event DownloadProgressEvent)
 	torrentEngine *TorrentEngine
+	scraper       *TrackerScraper
 	ticker        *time.Ticker
 	stopTicker    chan struct{}
 }
@@ -48,6 +49,7 @@ func NewDownloadManager(
 		queue:         NewQueueController(1), // Default: 1 active game downloading at a time (Steam-style)
 		onEvent:       onEvent,
 		torrentEngine: te,
+		scraper:       NewTrackerScraper(),
 		stopTicker:    make(chan struct{}),
 	}
 
@@ -986,4 +988,12 @@ func (dm *DownloadManager) Shutdown() {
 	if dm.torrentEngine != nil {
 		_ = dm.torrentEngine.Close()
 	}
+}
+
+// GetTorrentSeedsBatch queries live or cached seed counts for a batch of torrent variants
+func (dm *DownloadManager) GetTorrentSeedsBatch(ctx context.Context, queries []TorrentSeedQuery) map[int64]TorrentSeedResult {
+	if dm.scraper == nil {
+		dm.scraper = NewTrackerScraper()
+	}
+	return dm.scraper.ScrapeBatch(ctx, queries)
 }

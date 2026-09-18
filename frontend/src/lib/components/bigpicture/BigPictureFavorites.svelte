@@ -227,6 +227,8 @@
     }
   }
 
+  import { gamepad } from '../../navigation/gamepad';
+
   function getCleanTitle(game: any): string {
     return getDisplayTitle(game);
   }
@@ -244,6 +246,33 @@
   onMount(() => {
     isMounted = true;
     loadFavorites();
+
+    const handleBtnY = (e: CustomEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (!activeEl) return;
+      const gameIdStr = activeEl.getAttribute('data-game-id');
+      if (gameIdStr) {
+        const gameId = Number(gameIdStr);
+        const item = favorites.find((f) => Number(f.gameId || f.id) === gameId);
+        if (item) {
+          e.preventDefault();
+          const nextStatusMap: Record<string, string> = {
+            'planned': 'playing',
+            'playing': 'completed',
+            'completed': ''
+          };
+          const next = nextStatusMap[item.status] || 'planned';
+          if (next) {
+            handleSetStatus(gameId, next);
+          } else {
+            handleRemove(gameId);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('app:btn-y', handleBtnY as EventListener);
+
     unsubFavorites = EventsOn('favorites:updated', () => {
       if (isMounted) loadFavorites();
     });
@@ -267,6 +296,14 @@
         return item;
       });
     });
+
+    setTimeout(() => {
+      gamepad.retryFocusZone('grid');
+    }, 150);
+
+    return () => {
+      window.removeEventListener('app:btn-y', handleBtnY as EventListener);
+    };
   });
 
   onDestroy(() => {
@@ -411,6 +448,7 @@
 
           <button
             data-nav-item
+            data-game-id={item.gameId || item.id || (game?.id)}
             class="group relative flex flex-col rounded-2xl overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-2 focus:ring-white focus:outline-none focus:z-20 hover:scale-103 bg-[#0d1017] border border-white/[0.05]"
             onclick={() => {
               if (game) {

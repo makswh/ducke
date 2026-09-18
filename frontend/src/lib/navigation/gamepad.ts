@@ -187,6 +187,26 @@ export class GamepadEngine {
 
     // Console-grade Repeat State Machine
     if (currentDir) {
+      // Check if current focused element is a range slider
+      if (this.currentFocusedEl instanceof HTMLInputElement && this.currentFocusedEl.type === 'range') {
+        if (currentDir === 'LEFT' || currentDir === 'RIGHT') {
+          if (this.heldDirection !== currentDir || (now - this.heldStartTime >= GamepadEngine.INITIAL_REPEAT_DELAY_MS && now - this.lastStepTime >= GamepadEngine.REPEAT_INTERVAL_MS)) {
+            if (currentDir === 'LEFT') {
+              this.currentFocusedEl.stepDown();
+            } else {
+              this.currentFocusedEl.stepUp();
+            }
+            this.currentFocusedEl.dispatchEvent(new Event('input', { bubbles: true }));
+            this.currentFocusedEl.dispatchEvent(new Event('change', { bubbles: true }));
+            sound.playFocus();
+            this.heldDirection = currentDir;
+            if (this.heldStartTime === 0) this.heldStartTime = now;
+            this.lastStepTime = now;
+          }
+          return;
+        }
+      }
+
       if (this.heldDirection !== currentDir) {
         // First immediate tap (0ms latency)
         this.heldDirection = currentDir;
@@ -246,20 +266,28 @@ export class GamepadEngine {
       }
     });
 
-    // (X) Square / X: Focus Search Input / Toggle Search
+    // (X) Square / X: Contextual Quick Action (Play / Download / Version / Search)
     this.handleButtonPress(gp, 2, () => {
       sound.playSelect();
-      window.dispatchEvent(new CustomEvent('app:toggle-search'));
-      this.focusSearchInput();
-      this.onSearch?.();
+      const ev = new CustomEvent('app:btn-x', { cancelable: true });
+      const handled = !window.dispatchEvent(ev);
+      if (!handled) {
+        window.dispatchEvent(new CustomEvent('app:toggle-search'));
+        this.focusSearchInput();
+        this.onSearch?.();
+      }
     });
 
-    // (Y) Triangle / Y: Focus Filter Selector / Toggle Filter
+    // (Y) Triangle / Y: Contextual Status / Filter / Favorite
     this.handleButtonPress(gp, 3, () => {
       sound.playSelect();
-      window.dispatchEvent(new CustomEvent('app:toggle-filter'));
-      this.focusFilterSelect();
-      this.onFilter?.();
+      const ev = new CustomEvent('app:btn-y', { cancelable: true });
+      const handled = !window.dispatchEvent(ev);
+      if (!handled) {
+        window.dispatchEvent(new CustomEvent('app:toggle-filter'));
+        this.focusFilterSelect();
+        this.onFilter?.();
+      }
     });
 
     // LB (4): Previous Sub-tab / Previous Media / Previous Top Tab
@@ -290,14 +318,22 @@ export class GamepadEngine {
       }
     });
 
-    // LT (6): Switch Zone Left
+    // LT (6): Jump to Top Header or Previous Zone
     this.handleButtonPress(gp, 6, () => {
-      this.switchZoneRelative(-1);
+      const ev = new CustomEvent('app:trigger-lt', { cancelable: true });
+      const notCancelled = window.dispatchEvent(ev);
+      if (notCancelled) {
+        this.switchZoneRelative(-1);
+      }
     });
 
-    // RT (7): Switch Zone Right
+    // RT (7): Jump to Content Area or Next Zone
     this.handleButtonPress(gp, 7, () => {
-      this.switchZoneRelative(1);
+      const ev = new CustomEvent('app:trigger-rt', { cancelable: true });
+      const notCancelled = window.dispatchEvent(ev);
+      if (notCancelled) {
+        this.switchZoneRelative(1);
+      }
     });
 
     // Select / View (8): Search or Quick Action

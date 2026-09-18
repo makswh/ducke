@@ -264,10 +264,22 @@
       }
     };
 
+    const handleBtnY = (e: CustomEvent) => {
+      sound.playFocus();
+      isSortDropdownOpen = !isSortDropdownOpen;
+      e.preventDefault();
+    };
+
     window.addEventListener('app:go-back', handleGoBack as EventListener, true);
+    window.addEventListener('app:btn-y', handleBtnY as EventListener);
+
+    setTimeout(() => {
+      gamepad.retryFocusZone('grid');
+    }, 150);
 
     return () => {
       window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
+      window.removeEventListener('app:btn-y', handleBtnY as EventListener);
     };
   });
 
