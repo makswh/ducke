@@ -1419,7 +1419,7 @@
           
           <!-- Background Priority Search & Enriching Status Pill -->
           {#if isEnrichingCurrentGame}
-            <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/[0.06] border border-white/10 text-sky-400 text-xs font-medium w-fit">
+            <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded bg-white/[0.06] border border-white/10 text-sky-400 text-xs font-medium w-fit">
               <RefreshCw class="w-3.5 h-3.5 animate-spin flex-shrink-0" />
               <span>Очистка названия и поиск данных об игре...</span>
             </div>
@@ -1462,13 +1462,13 @@
             {/if}
 
             {#if isFocusedFavorite}
-              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
+              <span class="px-2.5 py-0.5 rounded-sm bg-white/[0.06] border border-white/10 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
                 <Star class="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                 <span>Избранное</span>
               </span>
             {/if}
 
-            <span class="px-2.5 py-0.5 rounded-md border border-white/10 bg-white/[0.06] text-[#cbd5e1] text-xs font-semibold flex items-center gap-1.5">
+            <span class="px-2.5 py-0.5 rounded-sm border border-white/10 bg-white/[0.06] text-[#cbd5e1] text-xs font-semibold flex items-center gap-1.5">
               <span>Источник: {effectiveFocusedGame.sourceType === 'torrent' || effectiveFocusedGame.magnetUri ? `Торрент (${formatTorrentSourceName(effectiveFocusedGame.torrentSource) || 'Каталог'})` : 'FTP-сервер'}</span>
             </span>
 
@@ -1514,7 +1514,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-7 py-3 rounded-xl bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+              class="px-7 py-3 rounded bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
               onclick={handlePrimaryAction}
             >
               {#if isFocusedInstalled}
@@ -1534,7 +1534,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+              class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
               onclick={handleSecondaryAction}
               title={isFocusedInstalled ? 'Открыть папку с игрой' : 'Начать скачивание игры'}
             >
@@ -1552,7 +1552,7 @@
             <button
               data-nav-item
               type="button"
-              class="p-3 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+              class="p-3 rounded bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
               onclick={handleToggleFavorite}
               title={isFocusedFavorite ? 'В избранном' : 'Добавить в избранное'}
             >
@@ -1564,7 +1564,7 @@
               <button
                 data-nav-item
                 type="button"
-                class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+                class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
                 onclick={enterTheaterMode}
                 title="Смотреть трейлер во весь экран [↑]"
               >
@@ -1578,7 +1578,7 @@
             <button
               data-nav-item
               type="button"
-              class="p-3 rounded-xl bg-white/10 hover:bg-white/20 text-[#cbd5e1] hover:text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+              class="p-3 rounded bg-white/10 hover:bg-white/20 text-[#cbd5e1] hover:text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
               onclick={() => onSelectGame(effectiveFocusedGame)}
               title="Все свойства и настройки"
             >
@@ -1596,7 +1596,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="w-20 sm:w-24 aspect-video rounded-xl overflow-hidden border border-white/15 bg-black/50 hover:border-white hover:scale-105 focus:border-white focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
+                  class="w-20 sm:w-24 aspect-video rounded-sm overflow-hidden border border-white/15 bg-black/50 hover:border-white hover:scale-105 focus:border-white focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
                   onclick={() => openLightbox(idx)}
                   onmouseenter={() => {
                     activeScreenshotPreview = sc;
@@ -1634,7 +1634,7 @@
         <button
           data-nav-item
           type="button"
-          class="px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'all' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
+          class="px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'all' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
           onclick={() => {
             sound.playTab();
             selectedFilter = 'all';
@@ -1646,7 +1646,7 @@
         <button
           data-nav-item
           type="button"
-          class="px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'installed' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
+          class="px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'installed' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
           onclick={() => {
             sound.playTab();
             selectedFilter = 'installed';
@@ -1658,7 +1658,7 @@
         <button
           data-nav-item
           type="button"
-          class="px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'favorites' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
+          class="px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'favorites' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
           onclick={() => {
             sound.playTab();
             selectedFilter = 'favorites';
@@ -1671,7 +1671,7 @@
           <button
             data-nav-item
             type="button"
-            class="px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'catalog' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
+            class="px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'catalog' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
             onclick={() => switchFilter('catalog')}
           >
             Каталог (FTP)
@@ -1682,7 +1682,7 @@
           <button
             data-nav-item
             type="button"
-            class="px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'torrents' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
+            class="px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'torrents' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
             onclick={() => switchFilter('torrents')}
           >
             Торренты
@@ -1726,15 +1726,15 @@
           {@const coverUrl = getGameCover(g)}
           {@const categoryBorderClass = 
             isCardFocused
-              ? (dl ? 'border-2 border-white ring-2 ring-sky-400' : isInst ? 'border-2 border-white ring-2 ring-emerald-500' : isFav ? 'border-2 border-white ring-2 ring-amber-400' : 'border-2 border-white ring-2 ring-white/40')
-              : (dl ? 'border-2 border-sky-400/80' : isInst ? 'border-2 border-emerald-500/80' : isFav ? 'border-2 border-amber-400/80' : 'border-2 border-white/10')
+              ? (dl ? 'border border-white ring-1 ring-sky-400' : isInst ? 'border border-white ring-1 ring-emerald-500' : isFav ? 'border border-white ring-1 ring-amber-400' : 'border border-white ring-1 ring-white/40')
+              : (dl ? 'border border-sky-400/80' : isInst ? 'border border-emerald-500/80' : isFav ? 'border border-amber-400/80' : 'border border-white/10')
           }
 
           <button
             bind:this={cardRefs[idx]}
             data-nav-item
             type="button"
-            class="my-2 w-28 sm:w-32 md:w-36 aspect-[3/4] rounded-2xl overflow-hidden relative flex-shrink-0 cursor-pointer transition-all duration-150 text-left focus:outline-none {categoryBorderClass} {isCardFocused ? 'scale-105 shadow-2xl z-20 opacity-100' : 'opacity-75 hover:opacity-100 hover:scale-[1.02] bg-[#0d1117]'}"
+            class="my-2 w-28 sm:w-32 md:w-36 aspect-[3/4] rounded overflow-hidden relative flex-shrink-0 cursor-pointer transition-all duration-150 text-left focus:outline-none {categoryBorderClass} {isCardFocused ? 'scale-105 shadow-2xl z-20 opacity-100' : 'opacity-75 hover:opacity-100 hover:scale-[1.02] bg-[#0d1117]'}"
             onclick={() => {
               sound.playSelect();
               if (focusedIndex !== idx) {
@@ -1767,7 +1767,7 @@
                   <Gamepad2 class="w-3.5 h-3.5 text-white/20" />
                 </div>
                 <div class="my-auto flex flex-col items-center gap-1.5 px-1">
-                  <div class="w-9 h-9 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-xs font-black text-white/80">
+                  <div class="w-9 h-9 rounded-sm bg-white/[0.06] border border-white/10 flex items-center justify-center text-xs font-black text-white/80">
                     {getInitials(g.cleanTitle)}
                   </div>
                   <span class="text-[11px] font-bold text-white line-clamp-2 leading-snug">{cleanTitleDisplay(g.cleanTitle)}</span>
@@ -1802,7 +1802,7 @@
     >
       <!-- Top Bar: Title & Back Button -->
       <div class="flex items-center justify-between pointer-events-none w-full">
-        <div class="pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-[#07080a]/95 text-white text-xs font-bold border border-white/15 shadow-2xl max-w-lg">
+        <div class="pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded bg-[#07080a]/95 text-white text-xs font-bold border border-white/15 shadow-2xl max-w-lg">
           <Film class="w-4 h-4 text-sky-400 flex-shrink-0" />
           <span class="truncate">{activeMovie?.name || 'Трейлер'}</span>
           {#if movieList.length > 1}
@@ -1813,7 +1813,7 @@
         <button
           data-nav-item
           type="button"
-          class="pointer-events-auto px-4 py-2 rounded-xl bg-black/85 hover:bg-black text-white/90 hover:text-white text-xs font-semibold flex items-center gap-2.5 border border-white/15 cursor-pointer transition-all shadow-2xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+          class="pointer-events-auto px-4 py-2 rounded bg-black/85 hover:bg-black text-white/90 hover:text-white text-xs font-semibold flex items-center gap-2.5 border border-white/15 cursor-pointer transition-all shadow-2xl active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
           onclick={(e) => {
             e.stopPropagation();
             exitTheaterMode();
@@ -1828,11 +1828,11 @@
 
       <!-- Bottom: Subtle unobtrusive bar -->
       <div class="flex items-center justify-between pointer-events-none w-full" role="presentation">
-        <div class="pointer-events-auto flex items-center gap-2.5 bg-[#07080a]/95 p-2 rounded-2xl border border-white/15 shadow-2xl">
+        <div class="pointer-events-auto flex items-center gap-2.5 bg-[#07080a]/95 p-2 rounded border border-white/15 shadow-2xl">
           <button
             data-nav-item
             type="button"
-            class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+            class="p-2.5 rounded bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
             onclick={togglePlayPause}
             title="Пауза / Воспроизведение [Пробел]"
           >
@@ -1846,7 +1846,7 @@
           <button
             data-nav-item
             type="button"
-            class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+            class="p-2.5 rounded bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
             onclick={toggleMute}
             title="Звук [M]"
           >
@@ -1862,7 +1862,7 @@
             <button
               data-nav-item
               type="button"
-              class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+              class="p-2.5 rounded bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
               onclick={prevTrailer}
               title="Предыдущий [←]"
             >
@@ -1871,7 +1871,7 @@
             <button
               data-nav-item
               type="button"
-              class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+              class="p-2.5 rounded bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
               onclick={nextTrailer}
               title="Следующий [→]"
             >
@@ -1899,7 +1899,7 @@
       <button
         data-nav-item
         type="button"
-        class="absolute top-6 right-6 p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-2 focus:ring-white/40 focus:outline-none"
+        class="absolute top-6 right-6 p-2.5 rounded bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-1 focus:ring-white/40 focus:outline-none"
         onclick={(e) => {
           e.stopPropagation();
           closeLightbox();
@@ -1914,7 +1914,7 @@
         <button
           data-nav-item
           type="button"
-          class="absolute left-6 top-1/2 -translate-y-1/2 p-3.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-2 focus:ring-white/40 focus:outline-none"
+          class="absolute left-6 top-1/2 -translate-y-1/2 p-3.5 rounded bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-1 focus:ring-white/40 focus:outline-none"
           onclick={(e) => {
             e.stopPropagation();
             prevLightboxImage();
@@ -1927,7 +1927,7 @@
         <button
           data-nav-item
           type="button"
-          class="absolute right-6 top-1/2 -translate-y-1/2 p-3.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-2 focus:ring-white/40 focus:outline-none"
+          class="absolute right-6 top-1/2 -translate-y-1/2 p-3.5 rounded bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-1 focus:ring-white/40 focus:outline-none"
           onclick={(e) => {
             e.stopPropagation();
             nextLightboxImage();
@@ -1940,7 +1940,7 @@
 
       <!-- Main Fullscreen Image -->
       <div
-        class="max-w-6xl max-h-[85vh] rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-black"
+        class="max-w-6xl max-h-[85vh] rounded-md overflow-hidden border border-white/20 shadow-2xl bg-black"
         onclick={(e) => e.stopPropagation()}
         role="presentation"
       >
@@ -1952,7 +1952,7 @@
       </div>
 
       <!-- Counter -->
-      <div class="absolute bottom-6 px-3.5 py-1 rounded-full bg-white/10 text-xs font-mono text-[#cbd5e1] border border-white/15">
+      <div class="absolute bottom-6 px-3.5 py-1 rounded-sm bg-white/10 text-xs font-mono text-[#cbd5e1] border border-white/15">
         {lightboxIndex + 1} / {gameScreenshots.length}
       </div>
     </div>

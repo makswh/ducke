@@ -1032,9 +1032,9 @@
       </div>
     </div>
 
-    <!-- Toast Notification (Modern Pro Pill) -->
+    <!-- Toast Notification (Steam Style) -->
     {#if toastMessage}
-      <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-[#21252c] border border-white/[0.1] text-white text-xs font-semibold shadow-2xl animate-fade-in flex items-center gap-2">
+      <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded bg-[#21252c] border border-white/[0.1] text-white text-xs font-semibold shadow-2xl animate-fade-in flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
         <span>{toastMessage}</span>
       </div>

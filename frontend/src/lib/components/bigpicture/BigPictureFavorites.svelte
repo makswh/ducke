@@ -320,14 +320,14 @@
       <!-- Tab: All -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'all' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'all' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'all';
         }}
       >
         <span>Все</span>
-        <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-white/10 font-mono">
+        <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-white/10 font-mono">
           {counts.all}
         </span>
       </button>
@@ -335,7 +335,7 @@
       <!-- Tab: Planned -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'planned' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'planned' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'planned';
@@ -343,7 +343,7 @@
       >
         <span>В планах</span>
         {#if counts.planned > 0}
-          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-400 text-black font-black font-mono">
+          <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-amber-400 text-black font-black font-mono">
             {counts.planned}
           </span>
         {/if}
@@ -352,7 +352,7 @@
       <!-- Tab: Playing -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'playing' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'playing' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'playing';
@@ -360,7 +360,7 @@
       >
         <span>Прохожу</span>
         {#if counts.playing > 0}
-          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500 text-black font-black font-mono">
+          <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-sky-500 text-black font-black font-mono">
             {counts.playing}
           </span>
         {/if}
@@ -369,7 +369,7 @@
       <!-- Tab: Completed -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'completed' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'completed' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'completed';
@@ -377,7 +377,7 @@
       >
         <span>Пройдено</span>
         {#if counts.completed > 0}
-          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500 text-black font-black font-mono">
+          <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-emerald-500 text-black font-black font-mono">
             {counts.completed}
           </span>
         {/if}
@@ -386,7 +386,7 @@
 
     <!-- Active Search Filter Indicator -->
     {#if searchQuery}
-      <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
+      <div class="flex items-center gap-2 px-3 py-1.5 rounded-sm bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
         <span>Поиск: "{searchQuery}"</span>
         <button
           class="hover:text-white cursor-pointer"
@@ -404,12 +404,12 @@
   <div class="flex-1 overflow-y-auto p-8 pt-6 relative focus:outline-none">
     {#if isLoading && favorites.length === 0}
       <div class="h-64 flex flex-col items-center justify-center text-center space-y-3 text-[#8e95a2]">
-        <div class="w-10 h-10 rounded-full border-2 border-sky-400 border-t-transparent animate-spin"></div>
+        <div class="w-10 h-10 rounded-full border border-sky-400 border-t-transparent animate-spin"></div>
         <p class="text-sm font-semibold text-white">Загрузка бэклога...</p>
       </div>
     {:else if filteredFavorites.length === 0}
       <div class="h-80 flex flex-col items-center justify-center text-center space-y-4 text-[#8e95a2]">
-        <div class="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center text-white/30 shadow-inner">
+        <div class="w-16 h-16 rounded bg-white/[0.04] border border-white/10 flex items-center justify-center text-white/30 shadow-inner">
           <BookmarkSimple size={32} weight="duotone" class="text-white/30" />
         </div>
         <div class="space-y-1">
@@ -430,7 +430,7 @@
         </div>
         <button
           data-nav-item
-          class="px-6 py-2.5 rounded-xl bg-white/10 text-white hover:bg-white/20 text-xs font-bold transition-all cursor-pointer shadow-md active:scale-95"
+          class="px-6 py-2.5 rounded bg-white/10 text-white hover:bg-white/20 text-xs font-bold transition-all cursor-pointer shadow-md active:scale-95"
           onclick={() => {
             sound.playSelect();
             onGoToCatalog();
@@ -449,7 +449,7 @@
           <button
             data-nav-item
             data-game-id={item.gameId || item.id || (game?.id)}
-            class="group relative flex flex-col rounded-2xl overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-2 focus:ring-white focus:outline-none focus:z-20 hover:scale-103 bg-[#0d1017] border border-white/[0.05]"
+            class="group relative flex flex-col rounded overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-1 focus:ring-white focus:outline-none focus:z-20 hover:scale-102 bg-[#0d1017] border border-white/[0.05]"
             onclick={() => {
               if (game) {
                 sound.playSelect();
@@ -475,7 +475,7 @@
                     <GameController size={16} weight="regular" class="text-white/20" />
                   </div>
                   <div class="my-auto flex flex-col items-center space-y-2">
-                    <div class="w-12 h-12 rounded-2xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-base font-black text-white/80 shadow-inner">
+                    <div class="w-12 h-12 rounded-sm bg-white/[0.06] border border-white/10 flex items-center justify-center text-base font-black text-white/80 shadow-inner">
                       {getInitials(getCleanTitle(game))}
                     </div>
                     <span class="text-xs font-bold text-[#e2e8f0] line-clamp-3 leading-snug px-1">
@@ -487,14 +487,14 @@
 
               <!-- Status Badge Overlay Top Left -->
               {#if selectedTab === 'all'}
-                <div class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md text-[9px] uppercase tracking-wider z-20 shadow-md {getStatusBadgeStyle(item.status)}">
+                <div class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-sm text-[9px] uppercase tracking-wider z-20 shadow-md {getStatusBadgeStyle(item.status)}">
                   {getStatusLabel(item.status)}
                 </div>
               {/if}
 
               <!-- Downloading Badge Overlay Top Right -->
               {#if isDownloading}
-                <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
+                <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-sm bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
                   <Download class="w-3 h-3" />
                   <span>СКАЧИВАЕТСЯ</span>
                 </div>
@@ -502,14 +502,14 @@
 
               <!-- Review score bottom left -->
               {#if game?.reviewPercent && game.reviewPercent > 0}
-                <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-[#07080a]/95 text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
+                <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-sm bg-[#07080a]/95 text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
                   <span>★ {game.reviewPercent}%</span>
                 </div>
               {/if}
 
               <!-- Size badge bottom right -->
               {#if game?.sizeDisplay}
-                <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-[#07080a]/95 text-[10px] font-mono text-white/90 border border-white/10 z-20">
+                <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-sm bg-[#07080a]/95 text-[10px] font-mono text-white/90 border border-white/10 z-20">
                   {game.sizeDisplay}
                 </div>
               {/if}

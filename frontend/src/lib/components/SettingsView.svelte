@@ -486,7 +486,7 @@
     <nav class="flex-1 p-2 space-y-1 overflow-y-auto">
       <button
         data-nav-item
-        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'storage' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'storage' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'storage')}
       >
         <HardDrive size={15} class="flex-shrink-0 {activeSubTab === 'storage' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
@@ -495,7 +495,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'server' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'server' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'server')}
       >
         <Database size={15} class="flex-shrink-0 {activeSubTab === 'server' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
@@ -504,7 +504,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'torrents' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'torrents' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'torrents')}
       >
         <Magnet size={15} class="flex-shrink-0 {activeSubTab === 'torrents' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
@@ -518,7 +518,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'downloads' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'downloads' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'downloads')}
       >
         <DownloadCloud size={15} class="flex-shrink-0 {activeSubTab === 'downloads' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
@@ -527,7 +527,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'interface' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'interface' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'interface')}
       >
         <Sliders size={15} class="flex-shrink-0 {activeSubTab === 'interface' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
@@ -537,7 +537,7 @@
       {#if localSettings.enableLogs}
         <button
           data-nav-item
-          class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'logs' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'logs' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
           onclick={() => {
             activeSubTab = 'logs';
             loadLogs();
@@ -555,7 +555,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'about' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs font-medium transition-colors cursor-pointer text-left {activeSubTab === 'about' ? 'bg-white/10 text-white font-semibold border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => (activeSubTab = 'about')}
       >
         <Info size={15} class="flex-shrink-0 {activeSubTab === 'about' ? 'text-sky-400' : 'text-[#8e95a2]'}" />
@@ -567,7 +567,7 @@
     <div class="p-3 border-t border-white/[0.06] flex-shrink-0 bg-[#07080a]">
       <button
         data-nav-item
-        class="w-full py-2 px-3 rounded-lg text-xs font-mono font-medium flex items-center justify-center gap-2 cursor-pointer transition-colors {isSaved ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/10 text-white hover:bg-white/15 border border-white/10'}"
+        class="w-full py-2 px-3 rounded text-xs font-mono font-medium flex items-center justify-center gap-2 cursor-pointer transition-colors {isSaved ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/10 text-white hover:bg-white/15 border border-white/10'}"
         onclick={handleSave}
       >
         {#if isSaved}
@@ -591,7 +591,7 @@
           <h2 class="text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">Хранилище игр</h2>
           <button
             data-nav-item
-            class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-white border border-white/10 font-medium transition-colors cursor-pointer flex items-center gap-1.5"
+            class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/15 text-xs text-white border border-white/10 font-medium transition-colors cursor-pointer flex items-center gap-1.5"
             onclick={handleBrowseFolder}
           >
             <Folder class="w-3.5 h-3.5" />
@@ -606,7 +606,7 @@
             {@const otherBytes = Math.max(0, (drive.usedBytes - drive.duckeBytes))}
             {@const otherPct = Math.min(100 - duckePct, Math.max(0, (otherBytes / total) * 100))}
 
-            <div class="p-4 rounded-xl bg-[#0d1117] border border-white/[0.06] space-y-3">
+            <div class="p-4 rounded bg-[#0d1117] border border-white/[0.06] space-y-3">
               <!-- Header Row -->
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2.5">
@@ -630,7 +630,7 @@
               </div>
 
               <!-- Steam Single Storage Bar -->
-              <div class="w-full h-2 rounded-full bg-white/[0.06] overflow-hidden flex">
+              <div class="w-full h-2 rounded-none bg-white/[0.06] overflow-hidden flex">
                 {#if duckePct > 0}
                   <div class="h-full bg-sky-400" style="width: {duckePct}%;"></div>
                 {/if}
@@ -704,7 +704,7 @@
           <div class="flex items-center gap-2.5">
             <button
               data-nav-item
-              class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#cbd5e1] hover:text-white border border-white/[0.06] transition-colors cursor-pointer"
+              class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-xs text-[#cbd5e1] hover:text-white border border-white/[0.06] transition-colors cursor-pointer"
               onclick={onImportFile}
             >
               Импорт из FileZilla
@@ -712,7 +712,7 @@
 
             <button
               data-nav-item
-              class="px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5"
+              class="px-3 py-1.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5"
               onclick={handleAddServer}
             >
               <Plus class="w-3.5 h-3.5" />
@@ -729,7 +729,7 @@
               {@const isActive = localSettings.activeServer?.id === srv.id}
               <button
                 data-nav-item
-                class="px-3 py-1.5 rounded-lg text-xs font-mono border transition-colors cursor-pointer flex items-center gap-2 flex-shrink-0 {isSelected ? 'bg-white/10 border-white/20 text-white font-medium' : 'bg-[#0d1117] border-white/[0.06] text-[#8e95a2] hover:text-white'}"
+                class="px-3 py-1.5 rounded text-xs font-mono border transition-colors cursor-pointer flex items-center gap-2 flex-shrink-0 {isSelected ? 'bg-white/10 border-white/20 text-white font-medium' : 'bg-[#0d1117] border-white/[0.06] text-[#8e95a2] hover:text-white'}"
                 onclick={() => handleSelectServer(srv.id)}
               >
                 <span>{srv.name || srv.host || 'Сервер'}</span>
@@ -743,7 +743,7 @@
 
         <!-- Selected Server Editor -->
         {#if selectedServer}
-          <div class="p-4 rounded-xl bg-[#0d1117] border border-white/[0.06] space-y-3.5">
+          <div class="p-4 rounded bg-[#0d1117] border border-white/[0.06] space-y-3.5">
             
             <!-- Top Controls for Selected Server -->
             <div class="flex items-center justify-between pb-3 border-b border-white/[0.06]">
@@ -756,7 +756,7 @@
                 {:else}
                   <button
                     data-nav-item
-                    class="px-3 py-1 rounded-lg bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 border border-sky-500/25 text-xs font-mono font-medium cursor-pointer transition-colors"
+                    class="px-3 py-1 rounded bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 border border-sky-500/25 text-xs font-mono font-medium cursor-pointer transition-colors"
                     onclick={() => handleMakeServerActive(selectedServer)}
                   >
                     Сделать активным
@@ -767,7 +767,7 @@
               {#if localSettings.savedServers.length > 1}
                 <button
                   data-nav-item
-                  class="px-2.5 py-1 rounded-lg text-xs text-[#8e95a2] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer flex items-center gap-1.5"
+                  class="px-2.5 py-1 rounded text-xs text-[#8e95a2] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer flex items-center gap-1.5"
                   onclick={() => handleDeleteServer(selectedServer)}
                   title="Удалить этот сервер"
                 >
@@ -786,7 +786,7 @@
                 bind:value={selectedServer.name}
                 onchange={handleServerFieldChange}
                 placeholder="Основной SFTP"
-                class="w-72 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                class="w-72 bg-[#07080a] border border-white/10 rounded px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
@@ -797,7 +797,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="px-3 py-1 text-xs rounded-lg cursor-pointer transition-colors font-mono {selectedServer.protocol === 'sftp' ? 'bg-white/15 text-white font-semibold border border-white/20' : 'text-[#8e95a2] hover:text-white bg-white/5 border border-transparent'}"
+                  class="px-3 py-1 text-xs rounded cursor-pointer transition-colors font-mono {selectedServer.protocol === 'sftp' ? 'bg-white/15 text-white font-semibold border border-white/20' : 'text-[#8e95a2] hover:text-white bg-white/5 border border-transparent'}"
                   onclick={() => {
                     if (selectedServer) {
                       selectedServer.protocol = 'sftp';
@@ -811,7 +811,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="px-3 py-1 text-xs rounded-lg cursor-pointer transition-colors font-mono {selectedServer.protocol === 'ftp' ? 'bg-white/15 text-white font-semibold border border-white/20' : 'text-[#8e95a2] hover:text-white bg-white/5 border border-transparent'}"
+                  class="px-3 py-1 text-xs rounded cursor-pointer transition-colors font-mono {selectedServer.protocol === 'ftp' ? 'bg-white/15 text-white font-semibold border border-white/20' : 'text-[#8e95a2] hover:text-white bg-white/5 border border-transparent'}"
                   onclick={() => {
                     if (selectedServer) {
                       selectedServer.protocol = 'ftp';
@@ -834,7 +834,7 @@
                 bind:value={selectedServer.host}
                 onchange={handleServerFieldChange}
                 placeholder="192.168.1.100"
-                class="w-72 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                class="w-72 bg-[#07080a] border border-white/10 rounded px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
@@ -846,7 +846,7 @@
                 type="number"
                 bind:value={selectedServer.port}
                 onchange={handleServerFieldChange}
-                class="w-24 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                class="w-24 bg-[#07080a] border border-white/10 rounded px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
@@ -859,7 +859,7 @@
                 bind:value={selectedServer.user}
                 onchange={handleServerFieldChange}
                 placeholder="anonymous"
-                class="w-72 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                class="w-72 bg-[#07080a] border border-white/10 rounded px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
@@ -874,7 +874,7 @@
                     bind:value={selectedServer.password}
                     onchange={handleServerFieldChange}
                     placeholder="••••••••"
-                    class="w-64 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                    class="w-64 bg-[#07080a] border border-white/10 rounded px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
                   />
                 {:else}
                   <input
@@ -883,7 +883,7 @@
                     bind:value={selectedServer.password}
                     onchange={handleServerFieldChange}
                     placeholder="••••••••"
-                    class="w-64 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                    class="w-64 bg-[#07080a] border border-white/10 rounded px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
                   />
                 {/if}
                 <button
@@ -910,7 +910,7 @@
                 bind:value={selectedServer.remoteDir}
                 onchange={handleServerFieldChange}
                 placeholder="/public"
-                class="w-72 bg-[#07080a] border border-white/10 rounded-lg px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                class="w-72 bg-[#07080a] border border-white/10 rounded px-2.5 py-1 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
 
@@ -919,7 +919,7 @@
               <button
                 data-nav-item
                 disabled={isTestingConnection}
-                class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 active:bg-white/20 text-xs font-mono font-medium text-white border border-white/10 cursor-pointer flex items-center gap-2 disabled:opacity-50 transition-colors"
+                class="px-3.5 py-1.5 rounded bg-white/10 hover:bg-white/15 active:bg-white/20 text-xs font-mono font-medium text-white border border-white/10 cursor-pointer flex items-center gap-2 disabled:opacity-50 transition-colors"
                 onclick={handleTestConn}
               >
                 {#if isTestingConnection}
@@ -963,11 +963,11 @@
                 type="text"
                 readonly
                 value={localSettings.downloadPath}
-                class="flex-1 bg-[#0d1117] border border-white/10 px-3 py-1.5 rounded-lg text-xs font-mono text-white select-all"
+                class="flex-1 bg-[#0d1117] border border-white/10 px-3 py-1.5 rounded text-xs font-mono text-white select-all"
               />
               <button
                 data-nav-item
-                class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white border border-white/10 transition-colors cursor-pointer"
+                class="px-3.5 py-1.5 rounded bg-white/10 hover:bg-white/15 text-xs font-medium text-white border border-white/10 transition-colors cursor-pointer"
                 onclick={handleBrowseFolder}
               >
                 Обзор
@@ -1007,7 +1007,7 @@
                   step="512"
                   bind:value={localSettings.maxSpeedKBps}
                   onchange={handleSave}
-                  class="w-24 bg-[#0d1117] border border-white/10 px-2.5 py-1 rounded-lg text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                  class="w-24 bg-[#0d1117] border border-white/10 px-2.5 py-1 rounded text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
                 />
                 <span class="text-xs font-mono text-[#8e95a2]">КБ/с</span>
               </div>
@@ -1018,7 +1018,7 @@
               {#each speedPresets as preset}
                 <button
                   data-nav-item
-                  class="px-3 py-1.5 rounded-lg text-xs font-mono transition-colors cursor-pointer {localSettings.maxSpeedKBps === preset.value ? 'bg-white/15 border border-white/20 text-white font-medium' : 'bg-[#0d1117] border border-white/[0.06] hover:bg-white/5 text-[#8e95a2] hover:text-white'}"
+                  class="px-3 py-1.5 rounded text-xs font-mono transition-colors cursor-pointer {localSettings.maxSpeedKBps === preset.value ? 'bg-white/15 border border-white/20 text-white font-medium' : 'bg-[#0d1117] border border-white/[0.06] hover:bg-white/5 text-[#8e95a2] hover:text-white'}"
                   onclick={() => {
                     localSettings.maxSpeedKBps = preset.value;
                     handleSave();
@@ -1085,7 +1085,7 @@
               bind:value={localSettings.steamApiKey}
               onchange={handleSave}
               placeholder="32-значный ключ Steam API..."
-              class="w-full bg-[#0d1117] border border-white/10 px-3 py-1.5 rounded-lg text-xs font-mono text-white focus:outline-none focus:border-white/25"
+              class="w-full bg-[#0d1117] border border-white/10 px-3 py-1.5 rounded text-xs font-mono text-white focus:outline-none focus:border-white/25"
             />
           </div>
 
@@ -1099,7 +1099,7 @@
               <button
                 data-nav-item
                 disabled={isClearingCache}
-                class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 active:bg-white/20 text-xs font-mono font-medium text-white border border-white/10 cursor-pointer flex items-center gap-2 disabled:opacity-50 transition-colors"
+                class="px-3.5 py-1.5 rounded bg-white/10 hover:bg-white/15 active:bg-white/20 text-xs font-mono font-medium text-white border border-white/10 cursor-pointer flex items-center gap-2 disabled:opacity-50 transition-colors"
                 onclick={handleClearCache}
               >
                 <RefreshCw class="w-3.5 h-3.5 {isClearingCache ? 'animate-spin' : ''}" />
@@ -1155,7 +1155,7 @@
           <div class="flex items-center gap-2 flex-wrap">
             <button
               data-nav-item
-              class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-white border border-white/10 cursor-pointer flex items-center gap-1.5 transition-colors font-medium"
+              class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/15 text-xs text-white border border-white/10 cursor-pointer flex items-center gap-1.5 transition-colors font-medium"
               onclick={handleClearLogs}
               title="Очистить буфер логов"
             >
@@ -1165,7 +1165,7 @@
 
             <button
               data-nav-item
-              class="px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition-colors"
+              class="px-3 py-1.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition-colors"
               onclick={handleExportLogs}
               title="Экспорт в текстовый файл"
             >
@@ -1176,7 +1176,7 @@
         </div>
 
         {#if exportMessage}
-          <div class="p-2.5 rounded-lg bg-white/5 border border-sky-500/30 text-xs font-mono text-sky-300 flex items-center justify-between">
+          <div class="p-2.5 rounded bg-white/5 border border-sky-500/30 text-xs font-mono text-sky-300 flex items-center justify-between">
             <span>{exportMessage}</span>
             <button onclick={() => (exportMessage = null)} class="text-white/40 hover:text-white">
               <X class="w-3.5 h-3.5" />
@@ -1185,13 +1185,13 @@
         {/if}
 
         <!-- Filter bar -->
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-[#0d1117] p-2 rounded-lg border border-white/[0.06]">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-[#0d1117] p-2 rounded border border-white/[0.06]">
           <!-- Level filters -->
           <div class="flex items-center gap-1 overflow-x-auto">
             {#each ['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG'] as lvl}
               <button
                 data-nav-item
-                class="px-2.5 py-1 rounded-md text-[11px] font-mono font-medium uppercase transition-colors cursor-pointer {selectedLogLevel === lvl ? 'bg-white/15 text-white' : 'text-[#8e95a2] hover:text-white hover:bg-white/5'}"
+                class="px-2.5 py-1 rounded-sm text-[11px] font-mono font-medium uppercase transition-colors cursor-pointer {selectedLogLevel === lvl ? 'bg-white/15 text-white' : 'text-[#8e95a2] hover:text-white hover:bg-white/5'}"
                 onclick={() => (selectedLogLevel = lvl)}
               >
                 {lvl}
@@ -1207,7 +1207,7 @@
                 type="text"
                 bind:value={logSearchQuery}
                 placeholder="Поиск по логам..."
-                class="w-full bg-[#07080a] border border-white/10 px-2.5 py-1 text-[11px] font-mono text-white rounded-md placeholder:text-[#64748b] focus:outline-none focus:border-white/25"
+                class="w-full bg-[#07080a] border border-white/10 px-2.5 py-1 text-[11px] font-mono text-white rounded-sm placeholder:text-[#64748b] focus:outline-none focus:border-white/25"
               />
               {#if logSearchQuery}
                 <button
@@ -1233,7 +1233,7 @@
         <!-- Terminal Log Viewer -->
         <div
           bind:this={logContainerEl}
-          class="flex-1 min-h-[320px] max-h-[calc(100vh-280px)] overflow-y-auto bg-[#040507] border border-white/[0.08] rounded-lg p-3 font-mono text-xs select-text space-y-1"
+          class="flex-1 min-h-[320px] max-h-[calc(100vh-280px)] overflow-y-auto bg-[#040507] border border-white/[0.08] rounded p-3 font-mono text-xs select-text space-y-1"
         >
           {#if displayedLogs.length === 0}
             <div class="h-full min-h-[200px] flex flex-col items-center justify-center text-center text-[#64748b]">
@@ -1294,7 +1294,7 @@
             </div>
             <button
               data-nav-item
-              class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer flex items-center gap-1.5"
+              class="px-3.5 py-1.5 rounded bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer flex items-center gap-1.5"
               onclick={onOpenConfigFolder}
             >
               <FolderOpen class="w-3.5 h-3.5" />

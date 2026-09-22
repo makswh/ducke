@@ -556,7 +556,7 @@
           type="text"
           bind:value={searchQuery}
           placeholder="Поиск в библиотеке..."
-          class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs rounded-lg pl-8 pr-7 py-1.5 border border-white/[0.08] focus:border-white/20 focus:outline-none transition-colors"
+          class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs rounded pl-8 pr-7 py-1.5 border border-white/[0.08] focus:border-white/20 focus:outline-none transition-colors"
         />
         {#if searchQuery}
           <button
@@ -575,7 +575,7 @@
           type="button"
           data-nav-item
           data-nav-filter
-          class="flex-1 h-8 flex items-center justify-between px-2.5 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer truncate {activeFilterCount > 0 ? 'bg-white/10 border-white/20 text-white shadow-sm' : 'bg-[#07080a] hover:bg-white/[0.04] border-white/[0.08] text-[#9ca3af] hover:text-white'}"
+          class="flex-1 h-8 flex items-center justify-between px-2.5 rounded border text-[11px] font-medium transition-colors cursor-pointer truncate {activeFilterCount > 0 ? 'bg-white/10 border-white/20 text-white shadow-sm' : 'bg-[#07080a] hover:bg-white/[0.04] border-white/[0.08] text-[#9ca3af] hover:text-white'}"
           onclick={() => {
             isFilterHubOpen = true;
           }}
@@ -596,7 +596,7 @@
         <select
           data-nav-item
           bind:value={selectedSort}
-          class="flex-1 h-8 bg-[#07080a] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2 rounded-lg border border-white/[0.08] focus:outline-none focus:border-white/20 cursor-pointer truncate transition-colors"
+          class="flex-1 h-8 bg-[#07080a] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2 rounded border border-white/[0.08] focus:outline-none focus:border-white/20 cursor-pointer truncate transition-colors"
         >
           <option value="date_desc">Новые</option>
           <option value="popular_desc">Популярные</option>
@@ -730,7 +730,7 @@
             <button
               type="button"
               onclick={() => (isFilterHubOpen = false)}
-              class="flex items-center gap-1.5 px-2 py-1 -ml-1 rounded-md text-xs text-[#8e95a2] hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
+              class="flex items-center gap-1.5 px-2 py-1 -ml-1 rounded-sm text-xs text-[#8e95a2] hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
             >
               <ArrowLeft class="w-3.5 h-3.5" />
               <span>Назад</span>
@@ -777,7 +777,7 @@
                 <button
                   type="button"
                   onclick={() => (selectedRating = opt.id)}
-                  class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left transition-colors cursor-pointer {selectedRating === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-transparent'}"
+                  class="w-full flex items-center justify-between px-3 py-1.5 rounded-sm text-left transition-colors cursor-pointer {selectedRating === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-transparent'}"
                 >
                   <span>{opt.label}</span>
                   {#if selectedRating === opt.id}
@@ -807,7 +807,7 @@
                 <button
                   type="button"
                   onclick={() => (selectedSize = opt.id)}
-                  class="px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer truncate {selectedSize === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.05]'}"
+                  class="px-2.5 py-1.5 rounded-sm text-left transition-colors cursor-pointer truncate {selectedSize === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.05]'}"
                 >
                   <span class="truncate">{opt.label}</span>
                 </button>
@@ -834,7 +834,7 @@
                 <button
                   type="button"
                   onclick={() => (selectedYear = opt.id)}
-                  class="px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer truncate {selectedYear === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.05]'}"
+                  class="px-2.5 py-1.5 rounded-sm text-left transition-colors cursor-pointer truncate {selectedYear === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.05]'}"
                 >
                   <span class="truncate">{opt.label}</span>
                 </button>
@@ -864,7 +864,7 @@
                 type="text"
                 bind:value={genreSearchQuery}
                 placeholder="Поиск жанра..."
-                class="w-full bg-[#0d1117] text-white text-xs placeholder-[#5a6170] rounded-lg pl-8 pr-7 py-1.5 border border-white/10 focus:border-white/20 focus:outline-none"
+                class="w-full bg-[#0d1117] text-white text-xs placeholder-[#5a6170] rounded pl-8 pr-7 py-1.5 border border-white/10 focus:border-white/20 focus:outline-none"
               />
               {#if genreSearchQuery}
                 <button
@@ -882,7 +882,7 @@
               <button
                 type="button"
                 onclick={() => (selectedGenre = 'all')}
-                class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer {selectedGenre === 'all' ? 'bg-white/10 text-white font-semibold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
+                class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-sm text-left transition-colors cursor-pointer {selectedGenre === 'all' ? 'bg-white/10 text-white font-semibold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
               >
                 <span>Все жанры</span>
                 <span class="text-[10px] font-mono text-[#64748b]">{deduplicatedList.length}</span>
@@ -892,7 +892,7 @@
                 <button
                   type="button"
                   onclick={() => (selectedGenre = item.name)}
-                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer {isCurrent ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
+                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-sm text-left transition-colors cursor-pointer {isCurrent ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
                 >
                   <div class="flex items-center gap-2 truncate">
                     {#if isCurrent}
@@ -928,7 +928,7 @@
                 type="text"
                 bind:value={tagSearchQuery}
                 placeholder="Поиск тега..."
-                class="w-full bg-[#0d1117] text-white text-xs placeholder-[#5a6170] rounded-lg pl-8 pr-7 py-1.5 border border-white/10 focus:border-white/20 focus:outline-none"
+                class="w-full bg-[#0d1117] text-white text-xs placeholder-[#5a6170] rounded pl-8 pr-7 py-1.5 border border-white/10 focus:border-white/20 focus:outline-none"
               />
               {#if tagSearchQuery}
                 <button
@@ -948,7 +948,7 @@
                 <button
                   type="button"
                   onclick={() => toggleTag(item.name)}
-                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
+                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-sm text-left transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03]'}"
                 >
                   <div class="flex items-center gap-2 truncate">
                     <span class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 {isSelected ? 'bg-white text-black border-white' : 'border-white/20 bg-transparent'}">
@@ -973,7 +973,7 @@
               <button
                 type="button"
                 onclick={() => (filterController = !filterController)}
-                class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors cursor-pointer {filterController ? 'bg-white/10 border border-white/15 text-white font-medium' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.04]'}"
+                class="w-full flex items-center justify-between px-3 py-2 rounded-sm text-left transition-colors cursor-pointer {filterController ? 'bg-white/10 border border-white/15 text-white font-medium' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.04]'}"
               >
                 <div class="flex items-center gap-2">
                   <Gamepad2 class="w-3.5 h-3.5 text-[#8e95a2]" />
@@ -989,7 +989,7 @@
               <button
                 type="button"
                 onclick={() => (filterCollections = !filterCollections)}
-                class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors cursor-pointer {filterCollections ? 'bg-white/10 border border-white/15 text-white font-medium' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.04]'}"
+                class="w-full flex items-center justify-between px-3 py-2 rounded-sm text-left transition-colors cursor-pointer {filterCollections ? 'bg-white/10 border border-white/15 text-white font-medium' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-white/[0.04]'}"
               >
                 <div class="flex items-center gap-2">
                   <FolderOpen class="w-3.5 h-3.5 text-[#8e95a2]" />
@@ -1011,7 +1011,7 @@
           <button
             type="button"
             onclick={() => (isFilterHubOpen = false)}
-            class="w-full py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-semibold text-center transition-colors cursor-pointer border border-white/15"
+            class="w-full py-2 rounded bg-white/10 hover:bg-white/15 text-white text-xs font-semibold text-center transition-colors cursor-pointer border border-white/15"
           >
             Показать {filteredGames.length} игр
           </button>
@@ -1032,7 +1032,7 @@
         </div>
         <div class="flex flex-col gap-1 w-full">
           {#each Array(9) as _, i}
-            <div class="h-[58px] rounded-xl sk-block p-2.5 px-3 flex flex-col justify-between" style="animation-delay: {i * 60}ms">
+            <div class="h-[58px] rounded sk-block p-2.5 px-3 flex flex-col justify-between" style="animation-delay: {i * 60}ms">
               <div class="sk-line h-3 w-3/4"></div>
               <div class="flex justify-between items-center">
                 <div class="sk-line h-2 w-16"></div>
@@ -1062,7 +1062,7 @@
                 data-nav-item
                 role="button"
                 tabindex="0"
-                class="group relative h-[58px] overflow-hidden rounded-xl cursor-pointer transition-colors duration-150 border-2 {isSelected ? 'border-sky-500 bg-[#131722]' : 'border-white/[0.04] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10'}"
+                class="group relative h-[58px] overflow-hidden rounded cursor-pointer transition-all duration-150 border {isSelected ? 'border-white/20 bg-white/[0.08] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-r before:bg-white' : 'border-white/[0.04] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10'}"
                 onclick={() => {
                   selectedGameId = game.id;
                 }}

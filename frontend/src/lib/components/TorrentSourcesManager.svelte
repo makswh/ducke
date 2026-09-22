@@ -137,7 +137,7 @@
     <button
       data-nav-item
       disabled={isSyncingTorrents || (torrentSources || []).length === 0}
-      class="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 active:bg-white/20 text-xs font-medium text-white border border-white/10 cursor-pointer flex items-center gap-2 disabled:opacity-40 transition-colors self-start sm:self-auto"
+      class="px-3.5 py-1.5 rounded bg-white/10 hover:bg-white/15 active:bg-white/20 text-xs font-medium text-white border border-white/10 cursor-pointer flex items-center gap-2 disabled:opacity-40 transition-colors self-start sm:self-auto"
       onclick={handleSyncAllTorrents}
     >
       <ArrowClockwise size={14} weight="regular" class={isSyncingTorrents ? 'animate-spin text-sky-400' : ''} />
@@ -147,7 +147,7 @@
 
   <!-- Message Banner -->
   {#if torrentMessage}
-    <div class="p-3 rounded-lg border text-xs font-mono flex items-center justify-between {torrentMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300' : 'bg-rose-500/10 border-rose-500/25 text-rose-300'}">
+    <div class="p-3 rounded border text-xs font-mono flex items-center justify-between {torrentMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300' : 'bg-rose-500/10 border-rose-500/25 text-rose-300'}">
       <span>{torrentMessage.text}</span>
       <button onclick={() => (torrentMessage = null)} class="opacity-60 hover:opacity-100 p-0.5 cursor-pointer">
         <X size={14} weight="regular" />
@@ -169,7 +169,7 @@
         data-nav-item
         type="button"
         disabled={isAddingSource}
-        class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#cbd5e1] hover:text-white border border-white/[0.06] transition-colors cursor-pointer flex items-center gap-1.5 font-medium self-start sm:self-auto disabled:opacity-50"
+        class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-xs text-[#cbd5e1] hover:text-white border border-white/[0.06] transition-colors cursor-pointer flex items-center gap-1.5 font-medium self-start sm:self-auto disabled:opacity-50"
         onclick={handleImportFromFile}
         title="Выбрать JSON-файл с диска"
       >
@@ -184,7 +184,7 @@
         type="text"
         bind:value={newTorrentUrl}
         placeholder="https://.../source.json"
-        class="flex-1 bg-[#0d1117] border border-white/10 px-3 py-1.5 text-xs font-mono text-white rounded-lg placeholder:text-[#64748b] focus:outline-none focus:border-white/25"
+        class="flex-1 bg-[#0d1117] border border-white/10 px-3 py-1.5 text-xs font-mono text-white rounded placeholder:text-[#64748b] focus:outline-none focus:border-white/25"
         onkeydown={(e) => {
           if (e.key === 'Enter') handleAddTorrentSource();
         }}
@@ -192,7 +192,7 @@
       <button
         data-nav-item
         disabled={isAddingSource || !newTorrentUrl.trim()}
-        class="px-4 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 active:bg-sky-500/40 disabled:opacity-40 text-sky-300 border border-sky-500/30 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition-colors"
+        class="px-4 py-1.5 rounded bg-sky-500/20 hover:bg-sky-500/30 active:bg-sky-500/40 disabled:opacity-40 text-sky-300 border border-sky-500/30 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition-colors"
         onclick={() => handleAddTorrentSource()}
       >
         {#if isAddingSource}
@@ -215,7 +215,7 @@
     </div>
 
     {#if (torrentSources || []).length === 0}
-      <div class="p-6 rounded-xl bg-[#0d1117] border border-white/[0.06] text-center text-[#64748b] space-y-2">
+      <div class="p-6 rounded bg-[#0d1117] border border-white/[0.06] text-center text-[#64748b] space-y-2">
         <Magnet size={32} weight="light" class="mx-auto opacity-30 text-[#64748b]" />
         <p class="text-xs font-mono text-[#cbd5e1] font-bold">Источники не подключены</p>
         <p class="text-[11px] text-[#64748b] font-mono max-w-md mx-auto">
@@ -225,7 +225,7 @@
     {:else}
       <div class="space-y-2">
         {#each (torrentSources || []) as src (src.id)}
-          <div class="flex items-center justify-between p-3 rounded-lg bg-[#0d1117] border border-white/[0.06] hover:border-white/15 transition-colors">
+          <div class="flex items-center justify-between p-3 rounded bg-[#0d1117] border border-white/[0.06] hover:border-white/15 transition-colors">
             <div class="space-y-1 min-w-0 pr-4">
               <div class="flex items-center gap-2.5 flex-wrap">
                 <span class="{isBigPicture ? 'text-sm' : 'text-xs'} font-bold text-white font-mono truncate">{src.name}</span>
@@ -260,7 +260,7 @@
               <button
                 data-nav-item
                 type="button"
-                class="p-1.5 rounded-lg text-[#8e95a2] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                class="p-1.5 rounded text-[#8e95a2] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                 onclick={() => handleRemoveTorrentSource(src.id)}
                 title="Удалить источник"
               >

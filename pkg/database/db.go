@@ -882,7 +882,6 @@ func DeduplicateGames(games []GameEntity) []GameEntity {
 			magnetURI := item.MagnetURI
 			if item.SourceType == "torrent" || strings.HasPrefix(remotePath, "magnet:") {
 				remotePath = ""
-				magnetURI = ""
 			}
 			variants = append(variants, GameVariant{
 				ID:            item.ID,
@@ -901,7 +900,6 @@ func DeduplicateGames(games []GameEntity) []GameEntity {
 		}
 		if primary.SourceType == "torrent" || strings.HasPrefix(primary.RemotePath, "magnet:") {
 			primary.RemotePath = ""
-			primary.MagnetURI = ""
 		}
 		if len(variants) <= 1 {
 			primary.Variants = make([]GameVariant, 0)

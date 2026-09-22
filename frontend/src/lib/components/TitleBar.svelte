@@ -63,7 +63,7 @@
 >
   <!-- Left: App Branding & Status -->
   <div class="flex items-center gap-2.5 px-3.5 pointer-events-none">
-    <img src="/appicon.png" alt="Ducke" class="w-5 h-5 rounded-md object-cover border border-white/10" />
+    <img src="/appicon.png" alt="Ducke" class="w-5 h-5 rounded-sm object-cover border border-white/10" />
     <span class="text-[11px] font-bold tracking-[0.16em] text-[#cbd5e1] uppercase font-mono">DUCKE</span>
   </div>
 
@@ -75,7 +75,7 @@
     <!-- Big Picture Console Mode Button -->
     <button
       type="button"
-      class="h-6.5 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] font-medium text-[#94a3b8] hover:text-white bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] transition-colors cursor-pointer mr-1"
+      class="h-6.5 px-2.5 rounded-sm flex items-center gap-1.5 text-[11px] font-medium text-[#94a3b8] hover:text-white bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] transition-colors cursor-pointer mr-1"
       onclick={onToggleBigPicture}
       title="Режим Big Picture (Консольный вид)"
       aria-label="Режим Big Picture"
@@ -89,7 +89,7 @@
     <!-- Minimize -->
     <button
       type="button"
-      class="h-7 w-8 rounded-md flex items-center justify-center text-[#8e95a2] hover:text-white hover:bg-white/[0.08] active:bg-white/[0.12] transition-colors cursor-pointer"
+      class="h-7 w-8 rounded-sm flex items-center justify-center text-[#8e95a2] hover:text-white hover:bg-white/[0.08] active:bg-white/[0.12] transition-colors cursor-pointer"
       onclick={handleMinimise}
       title="Свернуть"
       aria-label="Свернуть"
@@ -100,7 +100,7 @@
     <!-- Maximize / Restore -->
     <button
       type="button"
-      class="h-7 w-8 rounded-md flex items-center justify-center text-[#8e95a2] hover:text-white hover:bg-white/[0.08] active:bg-white/[0.12] transition-colors cursor-pointer"
+      class="h-7 w-8 rounded-sm flex items-center justify-center text-[#8e95a2] hover:text-white hover:bg-white/[0.08] active:bg-white/[0.12] transition-colors cursor-pointer"
       onclick={handleToggleMaximise}
       title={isMaximised ? "Восстановить" : "Развернуть"}
       aria-label={isMaximised ? "Восстановить" : "Развернуть"}
@@ -115,7 +115,7 @@
     <!-- Close -->
     <button
       type="button"
-      class="h-7 w-8 rounded-md flex items-center justify-center text-[#8e95a2] hover:text-white hover:bg-[#e81123] active:bg-[#c4101f] transition-colors cursor-pointer"
+      class="h-7 w-8 rounded-sm flex items-center justify-center text-[#8e95a2] hover:text-white hover:bg-[#e81123] active:bg-[#c4101f] transition-colors cursor-pointer"
       onclick={handleClose}
       title="Закрыть"
       aria-label="Закрыть"

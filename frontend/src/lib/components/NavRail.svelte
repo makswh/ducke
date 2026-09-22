@@ -69,7 +69,7 @@
           {/if}
           <button
             data-nav-item
-            class="relative w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer {activeTab === 'catalog' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+            class="relative w-10 h-10 rounded flex items-center justify-center transition-colors cursor-pointer {activeTab === 'catalog' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
             onclick={() => (activeTab = 'catalog')}
             title={isCatalogLoading ? "Каталог игр (загрузка...)" : "Каталог игр"}
           >
@@ -89,7 +89,7 @@
           {/if}
           <button
             data-nav-item
-            class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer {activeTab === 'torrents' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+            class="w-10 h-10 rounded flex items-center justify-center transition-colors cursor-pointer {activeTab === 'torrents' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
             onclick={() => (activeTab = 'torrents')}
             title="Торренты"
           >
@@ -105,7 +105,7 @@
         {/if}
         <button
           data-nav-item
-          class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer {activeTab === 'collections' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          class="w-10 h-10 rounded flex items-center justify-center transition-colors cursor-pointer {activeTab === 'collections' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
           onclick={() => (activeTab = 'collections')}
           title="Подборки игр"
         >
@@ -120,7 +120,7 @@
         {/if}
         <button
           data-nav-item
-          class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer {activeTab === 'favorites' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          class="w-10 h-10 rounded flex items-center justify-center transition-colors cursor-pointer {activeTab === 'favorites' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
           onclick={() => (activeTab = 'favorites')}
           title="Избранное"
         >
@@ -135,7 +135,7 @@
         {/if}
         <button
           data-nav-item
-          class="relative w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer {activeTab === 'downloads' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          class="relative w-10 h-10 rounded flex items-center justify-center transition-colors cursor-pointer {activeTab === 'downloads' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
           onclick={() => (activeTab = 'downloads')}
           title={downloadProgress.isDownloading ? `Загрузка: ${dlPercent}%` : 'Загрузки'}
         >
@@ -171,7 +171,7 @@
           {:else}
             <DownloadSimple size={20} weight={activeTab === 'downloads' ? 'bold' : 'regular'} class={activeTab === 'downloads' ? 'text-white' : ''} />
             {#if activeDownloadsCount > 0}
-              <span class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-sky-400 text-slate-950 text-[9px] font-bold font-mono flex items-center justify-center pointer-events-none">
+              <span class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded bg-sky-400 text-slate-950 text-[9px] font-bold font-mono flex items-center justify-center pointer-events-none">
                 {activeDownloadsCount}
               </span>
             {/if}
@@ -181,7 +181,7 @@
         <!-- Floating Tooltip Card for Active Download on Hover -->
         {#if downloadProgress.isDownloading}
           <div
-            class="pointer-events-none group-hover/dl:opacity-100 group-hover/dl:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-3 py-2 bg-[#12161f] border border-white/10 rounded-lg shadow-2xl flex flex-col gap-1 min-w-[190px] max-w-[260px]"
+            class="pointer-events-none group-hover/dl:opacity-100 group-hover/dl:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-3 py-2 bg-[#12161f] border border-white/10 rounded shadow-2xl flex flex-col gap-1 min-w-[190px] max-w-[260px]"
           >
             <div class="flex items-center justify-between text-[11px] font-medium text-white">
               <span>Загрузка игры</span>
@@ -208,7 +208,7 @@
         {/if}
         <button
           data-nav-item
-          class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer {activeTab === 'settings' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          class="w-10 h-10 rounded flex items-center justify-center transition-colors cursor-pointer {activeTab === 'settings' ? 'bg-white/[0.08] text-white border border-white/10' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
           onclick={() => (activeTab = 'settings')}
           title="Настройки"
         >
@@ -294,7 +294,7 @@
 
         <!-- Floating Tooltip Card on Hover -->
         <div
-          class="pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-3 py-2 bg-[#12161f] border border-white/10 rounded-lg shadow-2xl flex flex-col gap-1 min-w-[190px] max-w-[260px]"
+          class="pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-3 py-2 bg-[#12161f] border border-white/10 rounded shadow-2xl flex flex-col gap-1 min-w-[190px] max-w-[260px]"
         >
           <div class="flex items-center justify-between text-[11px] font-medium text-white">
             <span>{isCompletedRecently ? 'Метаданные обновлены' : 'Загрузка метаданных'}</span>
@@ -327,7 +327,7 @@
         </button>
 
         <div
-          class="pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-2.5 py-1.5 bg-[#12161f] border border-white/10 rounded-lg shadow-2xl flex flex-col gap-0.5 whitespace-nowrap"
+          class="pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-2.5 py-1.5 bg-[#12161f] border border-white/10 rounded shadow-2xl flex flex-col gap-0.5 whitespace-nowrap"
         >
           <span class="text-[11px] font-medium text-white">Метаданные актуальны</span>
           <span class="text-[10px] text-[#8e95a2]">Нажмите для проверки обновлений</span>
@@ -337,7 +337,7 @@
 
     <!-- Gamepad Indicator -->
     <div
-      class="w-9 h-9 rounded-lg flex items-center justify-center transition-colors {isGamepadConnected ? 'text-sky-400 bg-sky-400/10 border border-sky-400/20' : 'text-[#4b5563]'}"
+      class="w-9 h-9 rounded flex items-center justify-center transition-colors {isGamepadConnected ? 'text-sky-400 bg-sky-400/10 border border-sky-400/20' : 'text-[#4b5563]'}"
       title={isGamepadConnected ? 'Контроллер подключен' : 'Контроллер не обнаружен'}
     >
       <GameController size={18} weight={isGamepadConnected ? 'fill' : 'regular'} />

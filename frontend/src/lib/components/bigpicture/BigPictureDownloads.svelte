@@ -626,7 +626,7 @@
           <button
             data-nav-item
             type="button"
-            class="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 active:bg-white/15 focus:ring-2 focus:ring-white focus:outline-none flex items-center justify-center text-[#8f98a0] hover:text-white transition-colors cursor-pointer"
+            class="w-10 h-10 rounded-sm bg-white/5 hover:bg-white/10 active:bg-white/15 focus:ring-1 focus:ring-white focus:outline-none flex items-center justify-center text-[#8f98a0] hover:text-white transition-colors cursor-pointer"
             onclick={() => {
               sound.playSelect();
               onOpenFolder(currentDownload.localPath);
@@ -639,7 +639,7 @@
         <button
           data-nav-item
           type="button"
-          class="w-10 h-10 rounded-xl bg-white/5 hover:bg-rose-500/20 active:bg-rose-500/30 focus:ring-2 focus:ring-rose-400 focus:outline-none flex items-center justify-center text-[#8f98a0] hover:text-rose-400 transition-colors cursor-pointer"
+          class="w-10 h-10 rounded-sm bg-white/5 hover:bg-rose-500/20 active:bg-rose-500/30 focus:ring-1 focus:ring-rose-400 focus:outline-none flex items-center justify-center text-[#8f98a0] hover:text-rose-400 transition-colors cursor-pointer"
           onclick={() => {
             sound.playBack();
             onCancel(currentDownload.downloadId);
@@ -760,7 +760,7 @@
             <button
               data-nav-item
               type="button"
-              class="w-11 h-11 bg-[#1a9fff] hover:bg-[#28a8ff] active:bg-[#1388dc] focus:ring-2 focus:ring-white focus:outline-none text-white flex items-center justify-center rounded-xl transition-all cursor-pointer shrink-0 shadow-lg"
+              class="w-11 h-11 bg-[#1a9fff] hover:bg-[#28a8ff] active:bg-[#1388dc] focus:ring-1 focus:ring-white focus:outline-none text-white flex items-center justify-center rounded-sm transition-all cursor-pointer shrink-0 shadow-lg"
               onclick={() => {
                 sound.playSelect();
                 onPause(currentDownload.downloadId);
@@ -773,7 +773,7 @@
             <button
               data-nav-item
               type="button"
-              class="w-11 h-11 bg-[#1a9fff] hover:bg-[#28a8ff] active:bg-[#1388dc] focus:ring-2 focus:ring-white focus:outline-none text-white flex items-center justify-center rounded-xl transition-all cursor-pointer shrink-0 shadow-lg"
+              class="w-11 h-11 bg-[#1a9fff] hover:bg-[#28a8ff] active:bg-[#1388dc] focus:ring-1 focus:ring-white focus:outline-none text-white flex items-center justify-center rounded-sm transition-all cursor-pointer shrink-0 shadow-lg"
               onclick={() => {
                 sound.playSelect();
                 onResume(currentDownload.downloadId);
@@ -802,7 +802,7 @@
       </div>
       <button
         data-nav-item
-        class="px-5 py-2.5 rounded-xl bg-[#171d27] hover:bg-[#202937] focus:ring-2 focus:ring-white focus:outline-none text-[#c6d4df] hover:text-white text-xs font-mono uppercase border border-[#2b3648] cursor-pointer transition-all flex items-center gap-2"
+        class="px-5 py-2.5 rounded bg-[#171d27] hover:bg-[#202937] focus:ring-1 focus:ring-white focus:outline-none text-[#c6d4df] hover:text-white text-xs font-mono uppercase border border-[#2b3648] cursor-pointer transition-all flex items-center gap-2"
         onclick={() => {
           sound.playSelect();
           onGoToCatalog();
@@ -829,7 +829,7 @@
         {#if downloadingCount > 0}
           <button
             data-nav-item
-            class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 active:bg-white/25 focus:ring-2 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
+            class="px-4 py-2 rounded bg-white/10 hover:bg-white/20 active:bg-white/25 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
             onclick={() => {
               sound.playSelect();
               onPauseAll();
@@ -843,7 +843,7 @@
         {#if pausedCount > 0}
           <button
             data-nav-item
-            class="px-4 py-2 rounded-xl bg-[#1a9fff] hover:bg-[#28a8ff] active:bg-[#1388dc] focus:ring-2 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-all shadow-md"
+            class="px-4 py-2 rounded bg-[#1a9fff] hover:bg-[#28a8ff] active:bg-[#1388dc] focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-all shadow-md"
             onclick={() => {
               sound.playSelect();
               onResumeAll();
@@ -857,7 +857,7 @@
         {#if safeDownloadHistory.length > 0}
           <button
             data-nav-item
-            class="px-4 py-2 rounded-xl bg-white/5 hover:bg-rose-500/20 active:bg-rose-500/30 focus:ring-2 focus:ring-rose-400 focus:outline-none text-[#8e95a2] hover:text-rose-300 text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
+            class="px-4 py-2 rounded bg-white/5 hover:bg-rose-500/20 active:bg-rose-500/30 focus:ring-1 focus:ring-rose-400 focus:outline-none text-[#8e95a2] hover:text-rose-300 text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
             onclick={() => {
               sound.playBack();
               onClearCompleted();
@@ -887,10 +887,10 @@
         <div class="space-y-2.5">
           {#each queuedDownloads as qItem, idx (qItem.downloadId)}
             {@const qCover = getGameCover(qItem)}
-            <div class="w-full p-3.5 sm:p-4 rounded-2xl bg-[#0c1017] hover:bg-[#111722] border border-white/[0.04] hover:border-white/[0.08] transition-colors flex items-center justify-between gap-4">
+            <div class="w-full p-3.5 sm:p-4 rounded bg-[#0c1017] hover:bg-[#111722] border border-white/[0.04] hover:border-white/[0.08] transition-colors flex items-center justify-between gap-4">
               <div class="flex items-center gap-3.5 min-w-0 flex-1">
                 <span class="text-xs font-mono text-[#616875] w-6 text-center font-bold">#{idx + 1}</span>
-                <div class="w-24 h-12 rounded-xl bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
+                <div class="w-24 h-12 rounded-sm bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
                   {#if qCover && !imageLoadFailed[qCover]}
                     <img
                       src={qCover}
@@ -918,7 +918,7 @@
               <div class="flex items-center gap-2.5 flex-shrink-0">
                 <button
                   data-nav-item
-                  class="h-9 px-3.5 rounded-xl bg-[#171d27] hover:bg-[#1a9fff] hover:text-white text-[#8f98a0] focus:ring-2 focus:ring-white focus:outline-none border border-white/[0.06] flex items-center gap-1.5 text-xs font-mono font-bold cursor-pointer transition-colors"
+                  class="h-9 px-3.5 rounded-sm bg-[#171d27] hover:bg-[#1a9fff] hover:text-white text-[#8f98a0] focus:ring-1 focus:ring-white focus:outline-none border border-white/[0.06] flex items-center gap-1.5 text-xs font-mono font-bold cursor-pointer transition-colors"
                   title="Начать сейчас"
                   onclick={() => {
                     sound.playSelect();
@@ -930,7 +930,7 @@
                 </button>
                 <button
                   data-nav-item
-                  class="w-9 h-9 rounded-xl bg-[#171d27] hover:bg-rose-600/30 text-[#8f98a0] hover:text-rose-400 focus:ring-2 focus:ring-rose-400 focus:outline-none border border-white/[0.06] flex items-center justify-center cursor-pointer transition-colors"
+                  class="w-9 h-9 rounded-sm bg-[#171d27] hover:bg-rose-600/30 text-[#8f98a0] hover:text-rose-400 focus:ring-1 focus:ring-rose-400 focus:outline-none border border-white/[0.06] flex items-center justify-center cursor-pointer transition-colors"
                   title="Убрать из очереди"
                   onclick={() => {
                     sound.playBack();
@@ -963,10 +963,10 @@
         <div class="space-y-2.5">
           {#each safeDownloadHistory as record (record.id)}
             {@const rCover = getRecordCover(record)}
-            <div class="w-full p-3.5 sm:p-4 rounded-2xl bg-[#0c1017] hover:bg-[#111722] border border-white/[0.04] hover:border-white/[0.08] transition-colors flex items-center justify-between gap-4">
+            <div class="w-full p-3.5 sm:p-4 rounded bg-[#0c1017] hover:bg-[#111722] border border-white/[0.04] hover:border-white/[0.08] transition-colors flex items-center justify-between gap-4">
               
               <div class="flex items-center gap-3.5 min-w-0 flex-1">
-                <div class="w-24 h-12 rounded-xl bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
+                <div class="w-24 h-12 rounded-sm bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
                   {#if rCover && !imageLoadFailed[rCover]}
                     <img
                       src={rCover}
@@ -1002,7 +1002,7 @@
                   {#if isLinux && installerMap[record.id]}
                     <button
                       data-nav-item
-                      class="bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-md cursor-pointer transition-colors font-mono focus:ring-2 focus:ring-white focus:outline-none active:scale-95"
+                      class="bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs px-3.5 py-2 rounded-sm flex items-center gap-1.5 shadow-md cursor-pointer transition-colors font-mono focus:ring-1 focus:ring-white focus:outline-none active:scale-95"
                       onclick={() => handleLaunchInstaller(installerMap[record.id], record.id)}
                       title="Запустить установку игры (.run)"
                     >
@@ -1014,7 +1014,7 @@
                   {#if record.localPath}
                     <button
                       data-nav-item
-                      class="bg-[#171d27] hover:bg-[#202937] focus:ring-2 focus:ring-white focus:outline-none text-[#c6d4df] hover:text-white text-xs px-3.5 py-2 rounded-xl border border-white/[0.06] flex items-center gap-1.5 transition-colors cursor-pointer font-mono"
+                      class="bg-[#171d27] hover:bg-[#202937] focus:ring-1 focus:ring-white focus:outline-none text-[#c6d4df] hover:text-white text-xs px-3.5 py-2 rounded-sm border border-white/[0.06] flex items-center gap-1.5 transition-colors cursor-pointer font-mono"
                       onclick={() => {
                         sound.playSelect();
                         onOpenFolder(record.localPath);
@@ -1028,7 +1028,7 @@
                 {:else}
                   <button
                     data-nav-item
-                    class="bg-[#1a9fff] hover:bg-[#2cb2ff] focus:ring-2 focus:ring-white focus:outline-none text-white text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors font-mono"
+                    class="bg-[#1a9fff] hover:bg-[#2cb2ff] focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-bold px-3.5 py-2 rounded-sm flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors font-mono"
                     onclick={() => {
                       sound.playSelect();
                       onResume(record.id);
@@ -1041,7 +1041,7 @@
 
                 <button
                   data-nav-item
-                  class="p-2 text-[#64748b] hover:text-rose-400 focus:ring-2 focus:ring-rose-400 focus:outline-none transition-all cursor-pointer rounded-xl hover:bg-white/[0.05]"
+                  class="p-2 text-[#64748b] hover:text-rose-400 focus:ring-1 focus:ring-rose-400 focus:outline-none transition-all cursor-pointer rounded-sm hover:bg-white/[0.05]"
                   onclick={() => {
                     sound.playBack();
                     onDeleteRecord(record.id, false);

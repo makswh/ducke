@@ -235,7 +235,7 @@
           type="text"
           bind:value={searchQuery}
           placeholder="Поиск в избранном..."
-          class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs rounded-lg pl-8 pr-7 py-1.5 border border-white/[0.08] focus:border-white/20 focus:outline-none transition-colors"
+          class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs rounded pl-8 pr-7 py-1.5 border border-white/[0.08] focus:border-white/20 focus:outline-none transition-colors"
         />
         {#if searchQuery}
           <button
@@ -255,7 +255,7 @@
           <button
             type="button"
             data-nav-item
-            class="w-full h-8 flex items-center justify-between bg-[#07080a] hover:bg-white/[0.04] text-[#ededed] text-[11px] font-medium px-2.5 rounded-lg border {selectedTab !== 'all' ? 'border-sky-500/60 text-white' : 'border-white/[0.08]'} transition-colors cursor-pointer truncate"
+            class="w-full h-8 flex items-center justify-between bg-[#07080a] hover:bg-white/[0.04] text-[#ededed] text-[11px] font-medium px-2.5 rounded border {selectedTab !== 'all' ? 'border-sky-500/60 text-white' : 'border-white/[0.08]'} transition-colors cursor-pointer truncate"
             onclick={() => {
               isStatusMenuOpen = !isStatusMenuOpen;
               if (isStatusMenuOpen) isSortMenuOpen = false;
@@ -289,10 +289,10 @@
             ></button>
 
             <!-- Popup Container -->
-            <div class="absolute left-0 top-full mt-1.5 w-52 z-40 bg-[#0e1219] border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col p-1.5 space-y-0.5">
+            <div class="absolute left-0 top-full mt-1.5 w-52 z-40 bg-[#0e1219] border border-white/10 rounded shadow-2xl overflow-hidden flex flex-col p-1.5 space-y-0.5">
               <button
                 type="button"
-                class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedTab === 'all' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
+                class="w-full flex items-center justify-between px-2.5 py-2 rounded-sm text-left text-[11px] font-medium transition-colors cursor-pointer {selectedTab === 'all' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
                 onclick={() => {
                   selectedTab = 'all';
                   isStatusMenuOpen = false;
@@ -312,7 +312,7 @@
 
               <button
                 type="button"
-                class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedTab === 'planned' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
+                class="w-full flex items-center justify-between px-2.5 py-2 rounded-sm text-left text-[11px] font-medium transition-colors cursor-pointer {selectedTab === 'planned' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
                 onclick={() => {
                   selectedTab = 'planned';
                   isStatusMenuOpen = false;
@@ -332,7 +332,7 @@
 
               <button
                 type="button"
-                class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedTab === 'playing' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
+                class="w-full flex items-center justify-between px-2.5 py-2 rounded-sm text-left text-[11px] font-medium transition-colors cursor-pointer {selectedTab === 'playing' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
                 onclick={() => {
                   selectedTab = 'playing';
                   isStatusMenuOpen = false;
@@ -352,7 +352,7 @@
 
               <button
                 type="button"
-                class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {selectedTab === 'completed' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
+                class="w-full flex items-center justify-between px-2.5 py-2 rounded-sm text-left text-[11px] font-medium transition-colors cursor-pointer {selectedTab === 'completed' ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
                 onclick={() => {
                   selectedTab = 'completed';
                   isStatusMenuOpen = false;
@@ -378,7 +378,7 @@
           <button
             type="button"
             data-nav-item
-            class="w-full h-8 flex items-center justify-between bg-[#07080a] hover:bg-white/[0.04] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2.5 rounded-lg border border-white/[0.08] transition-colors cursor-pointer truncate"
+            class="w-full h-8 flex items-center justify-between bg-[#07080a] hover:bg-white/[0.04] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2.5 rounded border border-white/[0.08] transition-colors cursor-pointer truncate"
             onclick={() => {
               isSortMenuOpen = !isSortMenuOpen;
               if (isSortMenuOpen) isStatusMenuOpen = false;
@@ -401,7 +401,7 @@
             ></button>
 
             <!-- Popup Container -->
-            <div class="absolute right-0 top-full mt-1.5 w-44 z-40 bg-[#0e1219] border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col p-1.5 space-y-0.5">
+            <div class="absolute right-0 top-full mt-1.5 w-44 z-40 bg-[#0e1219] border border-white/10 rounded shadow-2xl overflow-hidden flex flex-col p-1.5 space-y-0.5">
               {#each [
                 { id: 'recent', label: 'Недавние' },
                 { id: 'rating', label: 'По оценке Steam' },
@@ -411,7 +411,7 @@
                 {@const isSel = selectedSort === opt.id}
                 <button
                   type="button"
-                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-[11px] font-medium transition-colors cursor-pointer {isSel ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
+                  class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-sm text-left text-[11px] font-medium transition-colors cursor-pointer {isSel ? 'bg-white/10 text-white font-semibold' : 'text-[#9ca3af] hover:text-white hover:bg-white/[0.04]'}"
                   onclick={() => {
                     selectedSort = opt.id as any;
                     isSortMenuOpen = false;
@@ -464,7 +464,7 @@
             data-nav-item
             role="button"
             tabindex="0"
-            class="group relative h-[58px] overflow-hidden rounded-xl cursor-pointer transition-colors duration-150 border-2 {isSelected ? 'border-sky-500 bg-[#131722]' : 'border-white/[0.04] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10'}"
+            class="group relative h-[58px] overflow-hidden rounded cursor-pointer transition-all duration-150 border {isSelected ? 'border-white/20 bg-white/[0.08] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-r before:bg-white' : 'border-white/[0.04] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10'}"
             onclick={() => (selectedGameId = g.id)}
             onkeydown={(e) => {
               if (e.key === 'Enter') selectedGameId = g.id;
@@ -516,7 +516,7 @@
     {:else if favorites.length === 0}
       <!-- Empty State -->
       <div class="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4 select-none">
-        <div class="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center text-[#64748b]">
+        <div class="w-14 h-14 rounded bg-white/[0.04] border border-white/10 flex items-center justify-center text-[#64748b]">
           <BookmarkSimple size={28} weight="duotone" class="text-[#64748b]" />
         </div>
         <div class="space-y-1 max-w-sm">
@@ -528,7 +528,7 @@
         <button
           data-nav-item
           type="button"
-          class="px-5 py-2.5 rounded-xl bg-white text-slate-950 text-xs font-bold hover:bg-white/90 transition-transform active:scale-95 cursor-pointer flex items-center gap-2"
+          class="px-5 py-2.5 rounded bg-white text-slate-950 text-xs font-bold hover:bg-white/90 transition-transform active:scale-95 cursor-pointer flex items-center gap-2"
           onclick={onOpenCatalog}
         >
           <SquaresFour size={16} weight="bold" />

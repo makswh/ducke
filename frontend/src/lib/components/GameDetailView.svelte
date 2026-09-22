@@ -491,15 +491,15 @@
   async function loadTorrentSeedsForGame(g: GameEntity | null | undefined) {
     if (!g) return;
     const gid = g.id;
-    lastSeedsFetchedGameId = gid;
 
     const allVariants = (g.variants && g.variants.length > 0) ? g.variants : [g];
     const queries: { id: number; magnetUri: string }[] = [];
 
     for (const v of allVariants) {
-      const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
-      if (isTorrent && v.magnetUri) {
-        queries.push({ id: v.id, magnetUri: v.magnetUri });
+      const magnet = v.magnetUri || (v.id === gid ? g.magnetUri : '') || '';
+      const isTorrent = v.sourceType === 'torrent' || !!magnet;
+      if (isTorrent && magnet) {
+        queries.push({ id: v.id, magnetUri: magnet });
         if (!variantSeeds[v.id]) {
           variantSeeds[v.id] = { seeders: 0, leechers: 0, loading: true };
         }
@@ -507,6 +507,7 @@
     }
 
     if (queries.length === 0) return;
+    lastSeedsFetchedGameId = gid;
 
     try {
       const results = await GetTorrentSeedsBatch(queries as any);
@@ -674,6 +675,7 @@
     if (curId !== lastGameId) {
       const prevId = lastGameId;
       lastGameId = curId;
+      lastSeedsFetchedGameId = 0;
       const seq = ++switchSequence;
 
       // 1. Reset all interactive view state for the new game immediately
@@ -766,6 +768,9 @@
       if (res) {
         pageDetailsCache.set(gameId, res);
         pageDetails = res;
+        if (res.game) {
+          loadTorrentSeedsForGame(res.game);
+        }
       }
     } catch (err) {
       console.error('[GameDetailView] Failed to get game page details:', err);
@@ -1441,7 +1446,7 @@
 
           <!-- Cover: plain rectangle, no border/icon -->
           <div class="md:col-span-4 lg:col-span-3 flex justify-center md:justify-start">
-            <div class="w-full max-w-[220px] aspect-[2/3] rounded-xl sk-block"></div>
+            <div class="w-full max-w-[220px] aspect-[2/3] rounded sk-block"></div>
           </div>
 
           <!-- Info column: lines only -->
@@ -1461,8 +1466,8 @@
 
             <!-- Action area -->
             <div class="flex items-center gap-3 pt-2">
-              <div class="sk-block h-9 w-28 rounded-xl"></div>
-              <div class="sk-block h-9 w-20 rounded-xl"></div>
+              <div class="sk-block h-9 w-28 rounded"></div>
+              <div class="sk-block h-9 w-20 rounded"></div>
             </div>
           </div>
         </div>
@@ -1475,12 +1480,12 @@
         </div>
 
         <!-- Media viewport -->
-        <div class="sk-block w-full aspect-video rounded-xl mb-3"></div>
+        <div class="sk-block w-full aspect-video rounded mb-3"></div>
 
         <!-- Thumbnail strip -->
         <div class="flex gap-2 mb-8">
           {#each [1,2,3,4] as _}
-            <div class="sk-block flex-shrink-0 w-32 aspect-video rounded-lg"></div>
+            <div class="sk-block flex-shrink-0 w-32 aspect-video rounded"></div>
           {/each}
         </div>
 
@@ -1533,7 +1538,7 @@
         <div class="{isCoverLandscape ? 'md:col-span-5 lg:col-span-5' : 'md:col-span-4 lg:col-span-3'} flex justify-center md:justify-start">
           {#if hasCover}
             <div
-              class="relative rounded-2xl overflow-hidden bg-[#07080a] group w-full {isCoverLandscape ? '' : 'max-w-[280px]'} transition-all duration-300 flex items-center justify-center border border-white/[0.08]"
+              class="relative rounded overflow-hidden bg-[#07080a] group w-full {isCoverLandscape ? '' : 'max-w-[280px]'} transition-all duration-300 flex items-center justify-center border border-white/[0.08]"
               style={coverAspectRatio ? `aspect-ratio: ${coverAspectRatio};` : (isCoverLandscape ? 'aspect-ratio: 16/9;' : 'aspect-ratio: 2/3;')}
             >
               <img
@@ -1551,10 +1556,10 @@
           {:else}
             <!-- Ascetic Tactile Poster Frame for Games Pending Cover / Steam Enrichment -->
             <div
-              class="relative rounded-2xl w-full max-w-[280px] aspect-[2/3] bg-[#07080a] border border-white/[0.08] flex flex-col items-center justify-between p-6 text-center shadow-inner"
+              class="relative rounded w-full max-w-[280px] aspect-[2/3] bg-[#07080a] border border-white/[0.08] flex flex-col items-center justify-between p-6 text-center shadow-inner"
             >
               <div class="flex-1 flex flex-col items-center justify-center w-full space-y-3">
-                <div class="w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-[#8e95a2]">
+                <div class="w-14 h-14 rounded bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-[#8e95a2]">
                   <Disc class="w-7 h-7 stroke-[1.5] text-[#8e95a2]" />
                 </div>
                 <div class="text-xs font-semibold text-white/70 line-clamp-3 px-1 leading-snug">
@@ -1572,7 +1577,7 @@
                   <button
                     data-nav-item
                     type="button"
-                    class="w-full py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-xs font-medium text-[#cbd5e1] hover:text-white border border-white/[0.08] hover:border-white/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    class="w-full py-2 px-3 rounded bg-white/[0.04] hover:bg-white/[0.08] text-xs font-medium text-[#cbd5e1] hover:text-white border border-white/[0.08] hover:border-white/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                     onclick={() => openSteamModal(g)}
                   >
                     <Search class="w-3.5 h-3.5 text-[#8e95a2]" />
@@ -1616,9 +1621,9 @@
             {#if (g.totalReviews && g.totalReviews > 0) || (g.reviewPercent && g.reviewPercent > 0)}
               {@const isPositive = (g.reviewPercent || 0) >= 70}
               {@const isMixed = (g.reviewPercent || 0) >= 40 && (g.reviewPercent || 0) < 70}
-              <div class="flex items-center gap-3 bg-[#11141c] border border-white/10 p-2.5 px-3.5 rounded-xl flex-shrink-0">
+              <div class="flex items-center gap-3 bg-[#11141c] border border-white/10 p-2.5 px-3.5 rounded flex-shrink-0">
                 <div
-                  class="w-11 h-11 rounded-xl border flex items-center justify-center font-black text-sm {isPositive ? 'bg-[#66c0f4]/15 text-[#66c0f4] border-[#66c0f4]/40' : isMixed ? 'bg-amber-500/15 text-amber-400 border-amber-500/40' : 'bg-red-500/15 text-red-400 border-red-500/40'}"
+                  class="w-11 h-11 rounded border flex items-center justify-center font-black text-sm {isPositive ? 'bg-[#66c0f4]/15 text-[#66c0f4] border-[#66c0f4]/40' : isMixed ? 'bg-amber-500/15 text-amber-400 border-amber-500/40' : 'bg-red-500/15 text-red-400 border-red-500/40'}"
                 >
                   {g.reviewPercent || 0}%
                 </div>
@@ -1632,9 +1637,9 @@
                 </div>
               </div>
             {:else if g.metacriticScore && g.metacriticScore > 0}
-              <div class="flex items-center gap-3 bg-[#11141c] border border-white/10 p-2.5 px-3.5 rounded-xl flex-shrink-0">
+              <div class="flex items-center gap-3 bg-[#11141c] border border-white/10 p-2.5 px-3.5 rounded flex-shrink-0">
                 <div
-                  class="w-11 h-11 rounded-xl border-2 flex items-center justify-center font-black text-sm"
+                  class="w-11 h-11 rounded border flex items-center justify-center font-black text-sm"
                   style="border-color: var(--game-accent); color: var(--game-accent); background-color: color-mix(in srgb, var(--game-accent) 15%, transparent);"
                 >
                   {g.metacriticScore}
@@ -1684,7 +1689,7 @@
                   bind:this={favoriteDropdownTriggerEl}
                   data-nav-item
                   type="button"
-                  class="h-11 inline-flex items-center gap-2 text-xs px-3.5 rounded-xl transition-colors cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#cbd5e1] hover:text-white"
+                  class="h-11 inline-flex items-center gap-2 text-xs px-3.5 rounded transition-colors cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#cbd5e1] hover:text-white"
                   onclick={(e) => {
                     e.stopPropagation();
                     isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
@@ -1710,14 +1715,14 @@
                 {#if isFavoriteDropdownOpen}
                   <div
                     bind:this={favoriteDropdownContainerEl}
-                    class="absolute left-0 top-full mt-2 z-50 min-w-[190px] rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1 text-xs"
+                    class="absolute left-0 top-full mt-2 z-50 min-w-[190px] rounded bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1 text-xs"
                   >
                     <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
                       Статус в избранном
                     </div>
                     <button
                       type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {effectiveFavoriteStatus === 'planned' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-sm transition-colors cursor-pointer {effectiveFavoriteStatus === 'planned' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                       onclick={() => handleToggleFavoriteStatus('planned')}
                     >
                       <Clock class="w-3.5 h-3.5 text-sky-400" />
@@ -1728,7 +1733,7 @@
                     </button>
                     <button
                       type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {effectiveFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-sm transition-colors cursor-pointer {effectiveFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                       onclick={() => handleToggleFavoriteStatus('playing')}
                     >
                       <Gamepad2 class="w-3.5 h-3.5 text-amber-400" />
@@ -1739,7 +1744,7 @@
                     </button>
                     <button
                       type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors cursor-pointer {effectiveFavoriteStatus === 'completed' ? 'bg-emerald-500/20 text-emerald-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-sm transition-colors cursor-pointer {effectiveFavoriteStatus === 'completed' ? 'bg-emerald-500/20 text-emerald-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                       onclick={() => handleToggleFavoriteStatus('completed')}
                     >
                       <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400" />
@@ -1753,7 +1758,7 @@
                       <div class="h-px bg-white/[0.06] my-1"></div>
                       <button
                         type="button"
-                        class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                        class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-sm text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                         onclick={handleRemoveFavorite}
                       >
                         <Trash2 class="w-3.5 h-3.5" />
@@ -1771,7 +1776,7 @@
                   data-nav-item
                   type="button"
                   title={hasCustomExe ? "Настройки запуска (настроено)" : "Настройки запуска (укажите .exe файл)"}
-                  class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-xl transition-all cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
+                  class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded transition-all cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
                   onclick={openLaunchConfigModal}
                 >
                   <Settings class="w-4 h-4" />
@@ -1785,7 +1790,7 @@
                   data-nav-item
                   type="button"
                   title="Открыть папку с игрой"
-                  class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-xl transition-all cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
+                  class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded transition-all cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
                   onclick={handleOpenFolder}
                 >
                   <FolderOpen class="w-4 h-4" />
@@ -1799,7 +1804,7 @@
                   data-nav-item
                   type="button"
                   title={isGameInSteam ? "Игра добавлена в Steam (нажмите для повторной синхронизации)" : "Добавить игру со всеми обложками в библиотеку Steam"}
-                  class="h-11 px-3.5 flex items-center justify-center gap-2 rounded-xl transition-all cursor-pointer border text-xs font-medium {isGameInSteam ? 'bg-sky-500/15 border-sky-500/30 text-sky-300 hover:bg-sky-500/25' : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10 text-[#8e95a2] hover:text-white'}"
+                  class="h-11 px-3.5 flex items-center justify-center gap-2 rounded transition-all cursor-pointer border text-xs font-medium {isGameInSteam ? 'bg-sky-500/15 border-sky-500/30 text-sky-300 hover:bg-sky-500/25' : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10 text-[#8e95a2] hover:text-white'}"
                   onclick={handleAddToSteam}
                   disabled={isAddingToSteam}
                 >
@@ -1824,7 +1829,7 @@
                 <div class="flex flex-wrap items-center gap-2.5">
                   <button
                     data-nav-item
-                    class="h-11 px-8 text-sm font-black rounded-xl flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 transition-all hover:brightness-110 shadow-lg uppercase tracking-wider"
+                    class="h-11 px-8 text-sm font-black rounded flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 transition-all hover:brightness-110 shadow-lg uppercase tracking-wider"
                     style="background-color: var(--game-accent); color: var(--game-accent-text);"
                     onclick={handlePlayButtonClick}
                   >
@@ -1871,7 +1876,7 @@
             {:else if isDownloading}
               <!-- ACTIVE DOWNLOADING / QUEUED STATE -->
               {@const prog = pageDetails?.downloadProgress}
-              <div class="space-y-3 max-w-md bg-[#07080a] p-4 rounded-xl border border-white/[0.06]">
+              <div class="space-y-3 max-w-md bg-[#07080a] p-4 rounded border border-white/[0.06]">
                 <div class="flex items-center justify-between text-xs font-bold text-white">
                   <div class="flex items-center gap-2">
                     <Download class="w-4 h-4 text-[var(--game-accent)]" />
@@ -1881,9 +1886,9 @@
                 </div>
 
                 <!-- Progress Bar -->
-                <div class="w-full h-2 rounded-full bg-black/60 overflow-hidden border border-white/5">
+                <div class="w-full h-2 rounded-none bg-black/60 overflow-hidden border border-white/5">
                   <div
-                    class="h-full rounded-full transition-all duration-300"
+                    class="h-full rounded-none transition-all duration-300"
                     style="width: {Math.max(2, prog?.progressPercent || 0)}%; background-color: var(--game-accent);"
                   ></div>
                 </div>
@@ -1922,7 +1927,7 @@
                     <!-- ИГРАТЬ via custom exe -->
                     <button
                       data-nav-item
-                      class="h-11 px-8 text-xs sm:text-sm font-black rounded-xl flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider shadow-lg"
+                      class="h-11 px-8 text-xs sm:text-sm font-black rounded flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider shadow-lg"
                       style="background-color: var(--game-accent); color: var(--game-accent-text);"
                       onclick={handleLaunchWithCustom}
                     >
@@ -1935,10 +1940,10 @@
                     {@render favoriteButton()}
                   {:else}
                     <!-- Unified Split Download Button -->
-                    <div class="relative inline-flex items-stretch rounded-xl shadow-lg border border-white/10 overflow-visible {isVariantDropdownOpen ? 'z-30' : ''}">
+                    <div class="relative inline-flex items-stretch rounded shadow-lg border border-white/10 overflow-visible {isVariantDropdownOpen ? 'z-30' : ''}">
                       <button
                         data-nav-item
-                        class="h-11 px-7 text-xs sm:text-sm font-black flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider {g.variants && g.variants.length > 1 ? 'rounded-l-xl' : 'rounded-xl'}"
+                        class="h-11 px-7 text-xs sm:text-sm font-black flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider {g.variants && g.variants.length > 1 ? 'rounded-l' : 'rounded'}"
                         style="background-color: var(--game-accent); color: var(--game-accent-text);"
                         onclick={() => onStartDownload(selectedVariantId || g.id, customDownloadPath)}
                       >
@@ -1953,7 +1958,7 @@
                           bind:this={variantDropdownTriggerEl}
                           data-nav-item
                           type="button"
-                          class="h-11 px-3 flex items-center justify-center border-l border-black/20 hover:brightness-110 active:scale-95 cursor-pointer transition-all rounded-r-xl"
+                          class="h-11 px-3 flex items-center justify-center border-l border-black/20 hover:brightness-110 active:scale-95 cursor-pointer transition-all rounded-r"
                           style="background-color: var(--game-accent); color: var(--game-accent-text);"
                           onclick={(e) => {
                             e.stopPropagation();
@@ -1967,7 +1972,7 @@
                         {#if isVariantDropdownOpen}
                           <div
                             bind:this={variantDropdownContainerEl}
-                            class="absolute left-0 top-full mt-2 z-50 min-w-[340px] sm:min-w-[420px] max-w-[500px] max-h-72 overflow-y-auto overscroll-contain rounded-xl bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1"
+                            class="absolute left-0 top-full mt-2 z-50 min-w-[340px] sm:min-w-[420px] max-w-[500px] max-h-72 overflow-y-auto overscroll-contain rounded bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1"
                           >
                             <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
                               Выбор версии для скачивания ({g.variants.length})
@@ -1976,7 +1981,7 @@
                               {@const isSelected = (activeVariant?.id === variant.id)}
                               <button
                                 type="button"
-                                class="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-xs transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                                class="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-sm text-xs transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                                 onclick={(e) => {
                                   e.stopPropagation();
                                   selectedVariantId = variant.id;
@@ -1988,11 +1993,12 @@
                                   <div class="flex items-center gap-2 text-[10px] text-[#6b7280] font-mono mt-0.5">
                                     <span>Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? `Торрент (${formatSourceName(variant.torrentSource) || 'Каталог'})` : 'FTP-сервер'}</span>
                                     {#if variant.sourceType === 'torrent' || variant.magnetUri}
-                                      <span class="text-white/20">•</span>
                                       {#if variantSeeds[variant.id]?.loading}
+                                        <span class="text-white/20">•</span>
                                         <span class="text-[#64748b] animate-pulse">сиды: ...</span>
                                       {:else if variantSeeds[variant.id]}
                                         {@const s = variantSeeds[variant.id].seeders}
+                                        <span class="text-white/20">•</span>
                                         <span class="inline-flex items-center gap-0.5 {s > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
                                           <UploadSimple class="w-3 h-3 stroke-[2.5]" />
                                           <span>{formatSeedsCount(s)}</span>
@@ -2079,7 +2085,7 @@
 
         <!-- Modal Panel -->
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-          <div class="pointer-events-auto w-full max-w-md bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+          <div class="pointer-events-auto w-full max-w-md bg-[#0d1117] border border-white/10 rounded-md shadow-2xl flex flex-col overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
               <div class="flex items-center gap-2.5 min-w-0">
@@ -2090,7 +2096,7 @@
               </div>
               <button
                 type="button"
-                class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-[#6b7280] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-sm text-[#6b7280] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                 onclick={() => (isLaunchConfigOpen = false)}
               >
                 <X class="w-4 h-4" />
@@ -2117,7 +2123,7 @@
                       {@const isSelected = lcExePath === cand}
                       <button
                         type="button"
-                        class="text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs font-mono transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold border border-white/20' : 'bg-white/[0.03] hover:bg-white/[0.07] text-[#cbd5e1] border border-white/[0.05]'}"
+                        class="text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs font-mono transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold border border-white/20' : 'bg-white/[0.03] hover:bg-white/[0.07] text-[#cbd5e1] border border-white/[0.05]'}"
                         onclick={() => { lcExePath = cand; }}
                       >
                         <span class="truncate">{fileName}</span>
@@ -2142,12 +2148,12 @@
                     bind:value={lcExePath}
                     placeholder="C:\Games\game.exe"
                     spellcheck="false"
-                    class="flex-1 min-w-0 bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded-xl px-3 py-2.5 border border-white/[0.08] focus:border-white/25 focus:outline-none transition-colors"
+                    class="flex-1 min-w-0 bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded px-3 py-2.5 border border-white/[0.08] focus:border-white/25 focus:outline-none transition-colors"
                   />
                   <button
                     type="button"
                     title="Выбрать файл на диске"
-                    class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-white/[0.05] hover:bg-white/10 border border-white/[0.08] text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
+                    class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded bg-white/[0.05] hover:bg-white/10 border border-white/[0.08] text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
                     onclick={handleBrowseExe}
                   >
                     <Folder class="w-4 h-4" />
@@ -2170,7 +2176,7 @@
                   bind:value={lcLaunchArgs}
                   placeholder="-dx12 -fullscreen -windowed"
                   spellcheck="false"
-                  class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded-xl px-3 py-2.5 border border-white/[0.08] focus:border-white/25 focus:outline-none transition-colors"
+                  class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded px-3 py-2.5 border border-white/[0.08] focus:border-white/25 focus:outline-none transition-colors"
                 />
               </div>
 
@@ -2188,7 +2194,7 @@
                 <button
                   type="button"
                   disabled={lcSaving}
-                  class="h-9 px-4 flex items-center justify-center gap-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md hover:brightness-110 active:scale-95"
+                  class="h-9 px-4 flex items-center justify-center gap-2 rounded text-xs font-bold transition-all cursor-pointer shadow-md hover:brightness-110 active:scale-95"
                   style="background-color: var(--game-accent); color: var(--game-accent-text);"
                   onclick={() => handleSaveLaunchConfig(true)}
                 >
@@ -2200,7 +2206,7 @@
               <button
                 type="button"
                 disabled={lcSaving}
-                class="flex-1 h-9 flex items-center justify-center gap-2 rounded-xl text-xs font-bold transition-colors cursor-pointer
+                class="flex-1 h-9 flex items-center justify-center gap-2 rounded text-xs font-bold transition-colors cursor-pointer
                   {lcSaveSuccess
                     ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
                     : 'bg-white text-slate-950 hover:bg-white/90 active:scale-[0.98]'}"
@@ -2216,7 +2222,7 @@
 
               <button
                 type="button"
-                class="h-9 px-3.5 rounded-xl text-xs font-medium text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] transition-colors cursor-pointer"
+                class="h-9 px-3.5 rounded text-xs font-medium text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] transition-colors cursor-pointer"
                 onclick={() => (isLaunchConfigOpen = false)}
               >
                 Отмена
@@ -2235,7 +2241,7 @@
               <!-- Main Viewport (16:9) -->
               <div
                 bind:this={screenshotViewport}
-                class="relative w-full aspect-video rounded-xl overflow-hidden bg-black border border-white/10 group/viewer flex items-center justify-center"
+                class="relative w-full aspect-video rounded overflow-hidden bg-black border border-white/10 group/viewer flex items-center justify-center"
               >
                 {#if activeMedia.type === 'video'}
                   <VideoPlayer
@@ -2283,7 +2289,7 @@
                     <button
                       type="button"
                       data-nav-item
-                      class="p-2 rounded-lg bg-black/70 hover:bg-black/90 text-white border border-white/15 cursor-pointer transition-colors"
+                      class="p-2 rounded-sm bg-black/70 hover:bg-black/90 text-white border border-white/15 cursor-pointer transition-colors"
                       onclick={toggleScreenshotFullscreen}
                       title={isScreenshotFullscreen ? "Выйти из полноэкранного режима" : "Во весь экран"}
                     >
@@ -2311,7 +2317,7 @@
                     <button
                       data-nav-item
                       type="button"
-                      class="relative flex-shrink-0 w-32 sm:w-36 aspect-video rounded-lg overflow-hidden border transition-all cursor-pointer group/thumb text-left {activeMediaIndex === idx ? 'border-white ring-2 ring-white/25 opacity-100' : 'border-white/10 opacity-60 hover:opacity-100 hover:border-white/40'}"
+                      class="relative flex-shrink-0 w-32 sm:w-36 aspect-video rounded overflow-hidden border transition-all cursor-pointer group/thumb text-left {activeMediaIndex === idx ? 'border-white ring-2 ring-white/25 opacity-100' : 'border-white/10 opacity-60 hover:opacity-100 hover:border-white/40'}"
                       onclick={() => (activeMediaIndex = idx)}
                       title={item.name}
                     >
@@ -2362,7 +2368,7 @@
         {@const hasGenres = g.genres && g.genres.length > 0}
         {@const hasTags = g.tags && g.tags.length > 0}
         {#if hasGenres || hasTags}
-          <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-4 text-xs">
+          <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-4 text-xs">
             {#if hasGenres}
               <div class="space-y-2">
                 <div class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5">
@@ -2374,7 +2380,7 @@
                     <button
                       data-nav-item
                       type="button"
-                      class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.06] hover:border-white/15 text-xs font-medium text-[#cbd5e1] hover:text-white transition-colors cursor-pointer"
+                      class="inline-flex items-center px-2.5 py-1 rounded-sm bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.06] hover:border-white/15 text-xs font-medium text-[#cbd5e1] hover:text-white transition-colors cursor-pointer"
                       onclick={() => onSelectGenre(genre)}
                       title="Фильтровать по жанру {genre}"
                     >
@@ -2415,7 +2421,7 @@
       {/snippet}
 
       {#snippet gameInfoCard()}
-        <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+        <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
           <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
             <Monitor class="w-3.5 h-3.5 text-[#8e95a2]" />
             <span>Сведения об игре</span>
@@ -2484,7 +2490,7 @@
               <button
                 data-nav-item
                 type="button"
-                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 text-[#cbd5e1] hover:text-white transition-colors cursor-pointer text-xs"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 text-[#cbd5e1] hover:text-white transition-colors cursor-pointer text-xs"
                 onclick={() => openSteamModal(g)}
                 title="Найти в Steam / Изменить метаданные"
               >
@@ -2497,7 +2503,7 @@
       {/snippet}
 
       {#snippet requirementsCard()}
-        <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3.5 text-xs">
+        <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-3.5 text-xs">
           <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
             <Cpu class="w-3.5 h-3.5 text-[#8e95a2]" />
             <span>Системные требования</span>
@@ -2510,7 +2516,7 @@
 
       {#snippet specsCard()}
         <div class="space-y-5">
-          <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+          <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
             <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
               <Server class="w-3.5 h-3.5 text-[#8e95a2]" />
               <span>Хранилище репозитория</span>
@@ -2539,7 +2545,7 @@
             </div>
           </div>
 
-          <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+          <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
             <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
               <Folder class="w-3.5 h-3.5 text-[#8e95a2]" />
               <span>Локальная конфигурация</span>
@@ -2668,7 +2674,7 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             
             <!-- CARD 1: Release Specifications -->
-            <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-4 text-xs">
+            <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-4 text-xs">
               <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
                 <Server class="w-3.5 h-3.5 text-[#8e95a2]" />
                 <span>Сведения о релизе</span>
@@ -2699,7 +2705,7 @@
                       <span>Копировать</span>
                     </button>
                   </div>
-                  <div class="font-mono text-white text-[11px] bg-black/40 border border-white/5 rounded-lg p-2.5 break-words select-all leading-relaxed">
+                  <div class="font-mono text-white text-[11px] bg-black/40 border border-white/5 rounded p-2.5 break-words select-all leading-relaxed">
                     {activeVariant?.rawName || g.rawName || getDisplayTitle(g)}
                   </div>
                 </div>
@@ -2750,7 +2756,7 @@
             </div>
 
             <!-- CARD 2: Save Settings & Steam Binding -->
-            <div class="p-5 rounded-xl bg-[#07080a] border border-white/[0.06] space-y-4 text-xs flex flex-col justify-between">
+            <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-4 text-xs flex flex-col justify-between">
               <div class="space-y-4">
                 <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
                   <Folder class="w-3.5 h-3.5 text-[#8e95a2]" />
@@ -2794,7 +2800,7 @@
                       <button
                         data-nav-item
                         type="button"
-                        class="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-white border border-white/10 transition-colors flex items-center gap-1.5 cursor-pointer"
+                        class="px-3 py-1.5 rounded bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-white border border-white/10 transition-colors flex items-center gap-1.5 cursor-pointer"
                         onclick={() => openSteamModal(g)}
                         title="Найти игру в Steam и привязать обложку, скриншоты и описание"
                       >
@@ -2808,7 +2814,7 @@
               </div>
 
               <!-- Subtle Info Note -->
-              <div class="p-3.5 rounded-lg bg-white/[0.02] border border-white/[0.04] text-[11px] text-[#8e95a2] leading-relaxed">
+              <div class="p-3.5 rounded bg-white/[0.02] border border-white/[0.04] text-[11px] text-[#8e95a2] leading-relaxed">
                 <span class="font-medium text-white/80">Интеграция:</span>
                 Привязка к Steam автоматически добавит официальное описание, постер, скриншоты, жанры, дату релиза и системные требования.
               </div>
@@ -2819,7 +2825,7 @@
 
           <!-- Toast Copy Feedback -->
           {#if copiedTextFeedback}
-            <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-xl bg-[#11141c] border border-white/15 text-white text-xs font-medium shadow-2xl flex items-center gap-2">
+            <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded bg-[#11141c] border border-white/15 text-white text-xs font-medium shadow-2xl flex items-center gap-2">
               <Check class="w-3.5 h-3.5 text-emerald-400" />
               <span>{copiedTextFeedback}</span>
             </div>
@@ -2827,7 +2833,7 @@
 
           <!-- Toast Launch Error Feedback -->
           {#if launchErrorFeedback}
-            <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-xl bg-[#1c1114] border border-rose-500/30 text-rose-200 text-xs font-medium shadow-2xl flex items-center gap-2">
+            <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded bg-[#1c1114] border border-rose-500/30 text-rose-200 text-xs font-medium shadow-2xl flex items-center gap-2">
               <X class="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
               <span>{launchErrorFeedback}</span>
             </div>
@@ -2841,7 +2847,7 @@
     <!-- STEAM METADATA MATCHER & APPID EDITOR MODAL -->
     {#if isSteamModalOpen}
       <div data-nav-zone="modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
-        <div class="bg-[#10131a] border border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+        <div class="bg-[#10131a] border border-white/10 rounded-md w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
           <!-- Modal Header -->
           <div class="p-5 border-b border-white/[0.08] flex items-center justify-between bg-black/40">
             <div class="space-y-0.5">
@@ -2854,7 +2860,7 @@
 
             <button
               data-nav-item
-              class="text-[#8e95a2] hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+              class="text-[#8e95a2] hover:text-white p-1.5 rounded-sm hover:bg-white/5 transition-colors cursor-pointer"
               onclick={() => (isSteamModalOpen = false)}
             >
               <X class="w-5 h-5" />
@@ -2880,7 +2886,7 @@
                     type="text"
                     bind:value={steamSearchTerm}
                     placeholder="Введите название игры..."
-                    class="w-full bg-[#090a0d] text-white text-xs rounded-xl pl-9 pr-4 py-2.5 border border-white/[0.08] focus:border-[var(--game-accent)] focus:outline-none"
+                    class="w-full bg-[#090a0d] text-white text-xs rounded pl-9 pr-4 py-2.5 border border-white/[0.08] focus:border-[var(--game-accent)] focus:outline-none"
                   />
                 </div>
 
@@ -2888,7 +2894,7 @@
                   data-nav-item
                   type="submit"
                   disabled={isSearchingSteam}
-                  class="px-5 py-2.5 text-xs font-bold text-black rounded-xl cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                  class="px-5 py-2.5 text-xs font-bold text-black rounded cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                   style="background-color: var(--game-accent);"
                 >
                   {#if isSearchingSteam}
@@ -2917,7 +2923,7 @@
                   <span>Поиск подходящих игр в Steam...</span>
                 </div>
               {:else if steamCandidates.length === 0}
-                <div class="p-6 rounded-xl bg-black/30 border border-white/[0.05] text-center text-xs text-[#6b7280] space-y-1">
+                <div class="p-6 rounded bg-black/30 border border-white/[0.05] text-center text-xs text-[#6b7280] space-y-1">
                   <p>Ничего не найдено по данному запросу.</p>
                   <p class="text-[11px] text-[#4b5563]">Попробуйте сократить название или указать AppID вручную ниже.</p>
                 </div>
@@ -2927,7 +2933,7 @@
                     {@const isCurrent = g.steamAppId === candidate.appId}
                     {@const matchPercent = Math.round(candidate.score * 100)}
                     
-                    <div class="p-2.5 rounded-xl bg-black/40 border {isCurrent ? 'border-[var(--game-accent)]' : 'border-white/[0.06] hover:border-white/15'} flex items-center justify-between gap-3 transition-colors">
+                    <div class="p-2.5 rounded bg-black/40 border {isCurrent ? 'border-[var(--game-accent)]' : 'border-white/[0.06] hover:border-white/15'} flex items-center justify-between gap-3 transition-colors">
                       <div class="flex items-center gap-3 min-w-0">
                         {#if candidate.tinyImage}
                           <img src={candidate.tinyImage} alt="" class="w-12 h-6 object-cover rounded flex-shrink-0 bg-black" />
@@ -2947,14 +2953,14 @@
                               {matchPercent}%
                             </span>
                           </div>
-                          <span class="text-[10px] font-mono text-[#6b7280]">AppID: {candidate.appId}</span>
+                          <span class="text-[10px] font-mono text-[#64748b]">AppID: {candidate.appId}</span>
                         </div>
                       </div>
 
                       <button
                         data-nav-item
                         disabled={isSavingSteam || isCurrent}
-                        class="px-3.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1 flex-shrink-0 transition-transform active:scale-95 disabled:opacity-50 {isCurrent ? 'bg-white/10 text-[#9ca3af]' : ''}"
+                        class="px-3.5 py-1.5 text-xs font-bold rounded cursor-pointer flex items-center gap-1 flex-shrink-0 transition-transform active:scale-95 disabled:opacity-50 {isCurrent ? 'bg-white/10 text-[#9ca3af]' : ''}"
                         style={isCurrent ? '' : 'background-color: var(--game-accent); color: var(--game-accent-text);'}
                         onclick={() => handleLinkAppId(candidate.appId)}
                       >
@@ -2981,12 +2987,12 @@
                   type="text"
                   bind:value={directAppIdInput}
                   placeholder="Например, 33230 для Assassin's Creed 2"
-                  class="flex-1 bg-[#090a0d] text-white text-xs font-mono rounded-xl px-4 py-2.5 border border-white/[0.08] focus:border-[var(--game-accent)] focus:outline-none"
+                  class="flex-1 bg-[#090a0d] text-white text-xs font-mono rounded px-4 py-2.5 border border-white/[0.08] focus:border-[var(--game-accent)] focus:outline-none"
                 />
                 <button
                   data-nav-item
                   disabled={isSavingSteam || !directAppIdInput.trim()}
-                  class="btn-secondary px-4 py-2.5 text-xs font-bold rounded-xl cursor-pointer disabled:opacity-50"
+                  class="btn-secondary px-4 py-2.5 text-xs font-bold rounded cursor-pointer disabled:opacity-50"
                   onclick={handleApplyDirectAppId}
                 >
                   Применить AppID
@@ -3014,7 +3020,7 @@
 
             <button
               data-nav-item
-              class="btn-secondary px-5 py-2 rounded-xl text-xs"
+              class="btn-secondary px-5 py-2 rounded text-xs"
               onclick={() => (isSteamModalOpen = false)}
             >
               Закрыть

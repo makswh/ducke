@@ -21,7 +21,10 @@
     Disc,
     ArrowDown,
     FilmStrip as Film,
-    UploadSimple
+    Image as ImageIcon,
+    UploadSimple,
+    Info,
+    Magnet
   } from 'phosphor-svelte';
   import Hls from 'hls.js';
   import { sound } from '../../navigation/audio';
@@ -33,6 +36,7 @@
     GamePageDetails
   } from '../../types/game';
   import { formatTorrentSourceName } from '../../utils/sourceFormatter';
+  import { getDisplayTitle } from '../../utils/titleUtils';
 
   let {
     game = null as any,
@@ -60,6 +64,70 @@
   let isSearchingSteam = $state<boolean>(false);
   let directAppIdInput = $state<string>('');
   let isSavingSteam = $state<boolean>(false);
+
+  // Game Description Modal state (Triggered by [X])
+  let isDescriptionModalOpen = $state<boolean>(false);
+  let descTab = $state<'about' | 'details' | 'specs' | 'variants'>('about');
+  let descScrollEl = $state<HTMLDivElement | null>(null);
+
+  function openDescriptionModal() {
+    sound.playSelect();
+    isDescriptionModalOpen = true;
+    window.dispatchEvent(new CustomEvent('app:modal-opened'));
+  }
+
+  function closeDescriptionModal() {
+    sound.playBack();
+    if (isDescriptionModalOpen) {
+      isDescriptionModalOpen = false;
+      window.dispatchEvent(new CustomEvent('app:modal-closed'));
+    }
+  }
+
+  function cycleDescTab(delta: number) {
+    const tabs: ('about' | 'details' | 'specs' | 'variants')[] = ['about', 'details', 'specs'];
+    if (activeVariantsList && activeVariantsList.length > 1) tabs.push('variants');
+    const curIdx = tabs.indexOf(descTab);
+    const nextIdx = (curIdx + delta + tabs.length) % tabs.length;
+    descTab = tabs[nextIdx];
+    sound.playTab();
+  }
+
+  // Download Variant Wizard state
+  let isDownloadWizardOpen = $state<boolean>(false);
+
+  function openDownloadWizard() {
+    sound.playSelect();
+    if (activeVariantsList && activeVariantsList.length > 0 && !selectedVariantId) {
+      selectedVariantId = activeVariantsList[0].id;
+    }
+    isDownloadWizardOpen = true;
+    window.dispatchEvent(new CustomEvent('app:modal-opened'));
+  }
+
+  function closeDownloadWizard() {
+    sound.playBack();
+    if (isDownloadWizardOpen) {
+      isDownloadWizardOpen = false;
+      window.dispatchEvent(new CustomEvent('app:modal-closed'));
+    }
+  }
+
+  function cycleWizardVariant(delta: number) {
+    if (!activeVariantsList || activeVariantsList.length <= 1) return;
+    const curId = selectedVariantId || activeVariantsList[0]?.id;
+    const idx = activeVariantsList.findIndex((v: any) => v.id === curId);
+    const nextIdx = (idx + delta + activeVariantsList.length) % activeVariantsList.length;
+    selectedVariantId = activeVariantsList[nextIdx]?.id;
+    sound.playMove();
+  }
+
+  function confirmDownloadVariant(variantId: number) {
+    selectedVariantId = variantId;
+    closeDownloadWizard();
+    sound.playSelect();
+    onStartDownload(variantId, customDownloadPath);
+  }
 
   // Favorites backlog state
   let isFavoriteDropdownOpen = $state<boolean>(false);
@@ -118,18 +186,18 @@
     return `${seeds} сидов`;
   }
 
-  async function loadTorrentSeedsForGame(g: any) {
+  async function loadTorrentSeedsForGame(g: GameEntity | null | undefined) {
     if (!g) return;
     const gid = g.id;
-    lastSeedsFetchedGameId = gid;
 
     const allVariants = (g.variants && g.variants.length > 0) ? g.variants : [g];
     const queries: { id: number; magnetUri: string }[] = [];
 
     for (const v of allVariants) {
-      const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
-      if (isTorrent && v.magnetUri) {
-        queries.push({ id: v.id, magnetUri: v.magnetUri });
+      const magnet = v.magnetUri || (v.id === gid ? g.magnetUri : '') || '';
+      const isTorrent = v.sourceType === 'torrent' || !!magnet;
+      if (isTorrent && magnet) {
+        queries.push({ id: v.id, magnetUri: magnet });
         if (!variantSeeds[v.id]) {
           variantSeeds[v.id] = { seeders: 0, leechers: 0, loading: true };
         }
@@ -137,6 +205,7 @@
     }
 
     if (queries.length === 0) return;
+    lastSeedsFetchedGameId = gid;
 
     try {
       const results = await AppAPI.GetTorrentSeedsBatch(queries as any);
@@ -288,6 +357,52 @@
       .filter((s: string) => typeof s === 'string' && s.trim() !== '')
       .map((s: string) => sanitizeMediaUrl(s));
   });
+
+  export interface UnifiedMediaItem {
+    type: 'video' | 'screenshot';
+    title: string;
+    url: string;
+    thumb?: string;
+    movie?: SteamMovie;
+  }
+
+  // Unified Media list combining trailers then screenshots
+  let unifiedMediaList = $derived.by<UnifiedMediaItem[]>(() => {
+    const list: UnifiedMediaItem[] = [];
+    movieList.forEach((m, idx) => {
+      const src = pickMovieSource(m);
+      if (src) {
+        list.push({
+          type: 'video',
+          title: m.name || `Трейлер ${idx + 1}`,
+          url: src,
+          thumb: sanitizeMediaUrl(m.thumbnail || ''),
+          movie: m
+        });
+      }
+    });
+    gameScreenshots.forEach((sc, idx) => {
+      list.push({
+        type: 'screenshot',
+        title: `Скриншот ${idx + 1}`,
+        url: sc,
+        thumb: sc
+      });
+    });
+    return list;
+  });
+
+  let currentMediaIndex = $state<number>(0);
+  let activeMedia = $derived.by<UnifiedMediaItem | null>(() => {
+    if (unifiedMediaList.length === 0) return null;
+    const idx = ((currentMediaIndex % unifiedMediaList.length) + unifiedMediaList.length) % unifiedMediaList.length;
+    return unifiedMediaList[idx] || null;
+  });
+
+  function formatReviewsCount(count: number): string {
+    if (!count || count <= 0) return '';
+    return count.toLocaleString('ru-RU');
+  }
 
   // Still artwork background
   let currentBackdropUrl = $derived.by(() => {
@@ -471,6 +586,15 @@
   }
 
   function handleTrailerEnded() {
+    if (isTheaterMode) {
+      if (unifiedMediaList.length > 1) {
+        nextMedia();
+      } else if (videoBgEl) {
+        videoBgEl.currentTime = 0;
+        videoBgEl.play().catch(() => {});
+      }
+      return;
+    }
     if (movieList.length <= 1) {
       if (videoBgEl) {
         videoBgEl.currentTime = 0;
@@ -481,22 +605,60 @@
     currentMovieIndex = (currentMovieIndex + 1) % movieList.length;
   }
 
-  function nextTrailer() {
-    if (movieList.length <= 1) return;
+  function syncMediaPlayback() {
+    if (!isTheaterMode) return;
+    const item = unifiedMediaList[currentMediaIndex];
+    if (!item) return;
+
+    if (item.type === 'video') {
+      const mIdx = movieList.findIndex((m) => m === item.movie);
+      if (mIdx !== -1) {
+        currentMovieIndex = mIdx;
+      }
+      isVideoMuted = false;
+      if (videoBgEl) {
+        videoBgEl.muted = false;
+      }
+      loadMediaSource(item.url);
+      safePlay();
+    } else {
+      // Viewing screenshot: pause and mute background video
+      isVideoMuted = true;
+      if (videoBgEl) {
+        videoBgEl.muted = true;
+      }
+      safePause();
+    }
+  }
+
+  function nextMedia() {
+    if (unifiedMediaList.length <= 1) return;
     sound.playMove();
-    currentMovieIndex = (currentMovieIndex + 1) % movieList.length;
+    currentMediaIndex = (currentMediaIndex + 1) % unifiedMediaList.length;
+    syncMediaPlayback();
+  }
+
+  function prevMedia() {
+    if (unifiedMediaList.length <= 1) return;
+    sound.playMove();
+    currentMediaIndex = (currentMediaIndex - 1 + unifiedMediaList.length) % unifiedMediaList.length;
+    syncMediaPlayback();
+  }
+
+  function nextTrailer() {
+    nextMedia();
   }
 
   function prevTrailer() {
-    if (movieList.length <= 1) return;
-    sound.playMove();
-    currentMovieIndex = (currentMovieIndex - 1 + movieList.length) % movieList.length;
+    prevMedia();
   }
 
   function enterTheaterMode(targetIndex?: number) {
-    if (movieList.length === 0) return;
-    if (typeof targetIndex === 'number' && targetIndex >= 0 && targetIndex < movieList.length) {
-      currentMovieIndex = targetIndex;
+    if (unifiedMediaList.length === 0) return;
+    if (typeof targetIndex === 'number' && targetIndex >= 0 && targetIndex < unifiedMediaList.length) {
+      currentMediaIndex = targetIndex;
+    } else {
+      currentMediaIndex = 0;
     }
     theaterEnterTimestamp = Date.now();
     sound.playSelect();
@@ -504,11 +666,7 @@
     isAmbientTimerElapsed = true;
     isAmbientTrailerActive = true;
     isTheaterMode = true;
-    isVideoMuted = false;
-    if (videoBgEl) {
-      videoBgEl.muted = false;
-    }
-    safePlay();
+    syncMediaPlayback();
     window.dispatchEvent(new CustomEvent('app:theater-mode', { detail: { active: true } }));
   }
 
@@ -519,6 +677,16 @@
     isVideoMuted = true;
     if (videoBgEl) {
       videoBgEl.muted = true;
+    }
+    // Restore ambient trailer playback if movies exist
+    if (movieList.length > 0) {
+      const curMovie = movieList[currentMovieIndex % movieList.length];
+      if (curMovie) {
+        loadMediaSource(pickMovieSource(curMovie));
+        safePlay();
+      }
+    } else {
+      safePause();
     }
     window.dispatchEvent(new CustomEvent('app:theater-mode', { detail: { active: false } }));
   }
@@ -554,6 +722,7 @@
 
     if (curId !== lastGameId) {
       lastGameId = curId;
+      lastSeedsFetchedGameId = 0;
       const seq = ++switchSequence;
 
       // Reset interactive state
@@ -664,6 +833,9 @@
       if (res) {
         pageDetailsCache.set(gameId, res);
         pageDetails = res;
+        if (res.game) {
+          loadTorrentSeedsForGame(res.game);
+        }
       }
     } catch (err) {
       console.warn('[BigPictureGameDetail] Failed to get page details:', err);
@@ -747,7 +919,11 @@
     } else if (isDownloading) {
       // Already downloading
     } else {
-      onStartDownload(selectedVariantId || activeGame.id, customDownloadPath);
+      if (activeVariantsList && activeVariantsList.length > 1) {
+        openDownloadWizard();
+      } else {
+        onStartDownload(selectedVariantId || activeGame.id, customDownloadPath);
+      }
     }
   }
 
@@ -970,16 +1146,44 @@
         return;
       }
 
-      if (lightboxImage) {
-        if (e.key === 'Escape' || e.key === 'Backspace') {
-          closeLightbox();
+      if (isDescriptionModalOpen) {
+        if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'x' || e.key === 'X') {
+          closeDescriptionModal();
           e.preventDefault();
           e.stopPropagation();
-        } else if (e.key === 'ArrowLeft') {
-          prevLightboxImage();
+        } else if (e.key === 'q' || e.key === 'Q' || e.key === 'ArrowLeft') {
+          cycleDescTab(-1);
           e.preventDefault();
-        } else if (e.key === 'ArrowRight') {
-          nextLightboxImage();
+        } else if (e.key === 'e' || e.key === 'E' || e.key === 'ArrowRight') {
+          cycleDescTab(1);
+          e.preventDefault();
+        } else if (e.key === 'ArrowUp') {
+          descScrollEl?.scrollBy({ top: -180, behavior: 'smooth' });
+          e.preventDefault();
+        } else if (e.key === 'ArrowDown') {
+          descScrollEl?.scrollBy({ top: 180, behavior: 'smooth' });
+          e.preventDefault();
+        }
+        return;
+      }
+
+      if (isDownloadWizardOpen) {
+        if (e.key === 'Escape' || e.key === 'Backspace') {
+          closeDownloadWizard();
+          e.preventDefault();
+          e.stopPropagation();
+        } else if (e.key === 'ArrowUp') {
+          cycleWizardVariant(-1);
+          e.preventDefault();
+        } else if (e.key === 'ArrowDown') {
+          cycleWizardVariant(1);
+          e.preventDefault();
+        } else if (e.key === 'Enter') {
+          const vId = selectedVariantId || activeVariantsList[0]?.id;
+          if (vId) confirmDownloadVariant(vId);
+          e.preventDefault();
+        } else if (e.key === 'x' || e.key === 'X') {
+          handleBrowseFolder();
           e.preventDefault();
         }
         return;
@@ -997,20 +1201,11 @@
           toggleMute();
           e.preventDefault();
         } else if (e.key === 'ArrowRight') {
-          nextTrailer();
+          nextMedia();
           e.preventDefault();
         } else if (e.key === 'ArrowLeft') {
-          prevTrailer();
+          prevMedia();
           e.preventDefault();
-        }
-        return;
-      }
-
-      if (isVariantDropdownOpen) {
-        if (e.key === 'Escape' || e.key === 'Backspace') {
-          isVariantDropdownOpen = false;
-          e.preventDefault();
-          e.stopPropagation();
         }
         return;
       }
@@ -1033,13 +1228,21 @@
         return;
       }
 
-      if (e.key === 'ArrowUp' && movieList.length > 0) {
-        enterTheaterMode();
+      if (e.key === 'x' || e.key === 'X') {
+        openDescriptionModal();
         e.preventDefault();
-      } else if (e.key === 'q' || e.key === 'Q') {
-        cycleTab(-1);
-      } else if (e.key === 'e' || e.key === 'E') {
-        cycleTab(1);
+        return;
+      }
+
+      if (e.key === 'y' || e.key === 'Y') {
+        isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
+        e.preventDefault();
+        return;
+      }
+
+      if (e.key === 'ArrowUp' && unifiedMediaList.length > 0) {
+        enterTheaterMode(0);
+        e.preventDefault();
       }
     };
 
@@ -1047,45 +1250,74 @@
       const dir = e.detail?.dir;
       if (!dir) return;
 
+      if (isDescriptionModalOpen) {
+        if (dir === 'DOWN') {
+          descScrollEl?.scrollBy({ top: 180, behavior: 'smooth' });
+        } else if (dir === 'UP') {
+          descScrollEl?.scrollBy({ top: -180, behavior: 'smooth' });
+        } else if (dir === 'LEFT') {
+          cycleDescTab(-1);
+        } else if (dir === 'RIGHT') {
+          cycleDescTab(1);
+        }
+        return;
+      }
+
       if (isTheaterMode) {
         if (dir === 'DOWN') {
           exitTheaterMode();
         } else if (dir === 'RIGHT') {
-          nextTrailer();
+          nextMedia();
         } else if (dir === 'LEFT') {
-          prevTrailer();
+          prevMedia();
         }
-      } else if (lightboxImage) {
-        if (dir === 'RIGHT') {
-          nextLightboxImage();
-        } else if (dir === 'LEFT') {
-          prevLightboxImage();
+        return;
+      }
+
+      if (isDownloadWizardOpen) {
+        if (dir === 'UP') {
+          cycleWizardVariant(-1);
+        } else if (dir === 'DOWN') {
+          cycleWizardVariant(1);
+        }
+        return;
+      }
+
+      if (!isDownloadWizardOpen && !isSteamModalOpen && !isFavoriteDropdownOpen) {
+        if (dir === 'UP') {
+          const isCarouselFocused = document.activeElement?.closest('.media-carousel-container') !== null;
+          if (!isCarouselFocused && unifiedMediaList.length > 0) {
+            enterTheaterMode(0);
+          }
         }
       }
     };
 
     const handleBtnX = (e: CustomEvent) => {
+      if (isSteamModalOpen) return;
+      if (isDescriptionModalOpen) {
+        closeDescriptionModal();
+        e.preventDefault();
+        return;
+      }
+      if (isDownloadWizardOpen) {
+        handleBrowseFolder();
+        e.preventDefault();
+        return;
+      }
       if (isTheaterMode) {
-        toggleMute();
+        if (activeMedia?.type === 'video') {
+          toggleMute();
+        }
         e.preventDefault();
         return;
       }
-      if (isCompleted) {
-        handleOpenGameFolder();
-        e.preventDefault();
-        return;
-      }
-      if (activeVariantsList && activeVariantsList.length > 1) {
-        isVariantDropdownOpen = !isVariantDropdownOpen;
-        e.preventDefault();
-        return;
-      }
-      handleBrowseFolder();
+      openDescriptionModal();
       e.preventDefault();
     };
 
     const handleBtnY = (e: CustomEvent) => {
-      if (isTheaterMode) return;
+      if (isTheaterMode || isDescriptionModalOpen || isDownloadWizardOpen) return;
       isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
       e.preventDefault();
     };
@@ -1095,16 +1327,16 @@
         closeSteamModal();
         e.preventDefault();
         e.stopImmediatePropagation();
-      } else if (lightboxImage) {
-        closeLightbox();
+      } else if (isDescriptionModalOpen) {
+        closeDescriptionModal();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (isDownloadWizardOpen) {
+        closeDownloadWizard();
         e.preventDefault();
         e.stopImmediatePropagation();
       } else if (isTheaterMode) {
         exitTheaterMode();
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      } else if (isVariantDropdownOpen) {
-        isVariantDropdownOpen = false;
         e.preventDefault();
         e.stopImmediatePropagation();
       } else if (isFavoriteDropdownOpen) {
@@ -1119,28 +1351,58 @@
       }
     };
 
+    const handleModalClose = (e: Event) => {
+      if (isSteamModalOpen) {
+        closeSteamModal();
+        e.preventDefault();
+      } else if (isDescriptionModalOpen) {
+        closeDescriptionModal();
+        e.preventDefault();
+      } else if (isDownloadWizardOpen) {
+        closeDownloadWizard();
+        e.preventDefault();
+      } else if (isTheaterMode) {
+        exitTheaterMode();
+        e.preventDefault();
+      }
+    };
+
     const handleSubtabPrev = (e: Event) => {
-      if (isTheaterMode) {
-        prevTrailer();
+      if (isDescriptionModalOpen) {
+        cycleDescTab(-1);
         e.preventDefault();
-      } else if (lightboxImage) {
-        prevLightboxImage();
-        e.preventDefault();
-      } else if (!isSteamModalOpen) {
-        cycleTab(-1);
+      } else if (isTheaterMode) {
+        prevMedia();
         e.preventDefault();
       }
     };
 
     const handleSubtabNext = (e: Event) => {
-      if (isTheaterMode) {
-        nextTrailer();
+      if (isDescriptionModalOpen) {
+        cycleDescTab(1);
         e.preventDefault();
-      } else if (lightboxImage) {
-        nextLightboxImage();
+      } else if (isTheaterMode) {
+        nextMedia();
         e.preventDefault();
-      } else if (!isSteamModalOpen) {
-        cycleTab(1);
+      }
+    };
+
+    const handleGalleryPrev = (e: Event) => {
+      if (isDescriptionModalOpen) {
+        cycleDescTab(-1);
+        e.preventDefault();
+      } else if (isTheaterMode) {
+        prevMedia();
+        e.preventDefault();
+      }
+    };
+
+    const handleGalleryNext = (e: Event) => {
+      if (isDescriptionModalOpen) {
+        cycleDescTab(1);
+        e.preventDefault();
+      } else if (isTheaterMode) {
+        nextMedia();
         e.preventDefault();
       }
     };
@@ -1151,8 +1413,11 @@
     window.addEventListener('app:btn-x', handleBtnX as EventListener);
     window.addEventListener('app:btn-y', handleBtnY as EventListener);
     window.addEventListener('app:go-back', handleGoBack as EventListener, true);
+    window.addEventListener('app:modal-close', handleModalClose as EventListener);
     window.addEventListener('app:subtab-prev', handleSubtabPrev as EventListener);
     window.addEventListener('app:subtab-next', handleSubtabNext as EventListener);
+    window.addEventListener('app:gallery-prev', handleGalleryPrev as EventListener);
+    window.addEventListener('app:gallery-next', handleGalleryNext as EventListener);
 
     return () => {
       isMounted = false;
@@ -1164,8 +1429,11 @@
       window.removeEventListener('app:btn-x', handleBtnX as EventListener);
       window.removeEventListener('app:btn-y', handleBtnY as EventListener);
       window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
+      window.removeEventListener('app:modal-close', handleModalClose as EventListener);
       window.removeEventListener('app:subtab-prev', handleSubtabPrev as EventListener);
       window.removeEventListener('app:subtab-next', handleSubtabNext as EventListener);
+      window.removeEventListener('app:gallery-prev', handleGalleryPrev as EventListener);
+      window.removeEventListener('app:gallery-next', handleGalleryNext as EventListener);
     };
   });
 
@@ -1184,20 +1452,20 @@
   <!-- 1. Fullscreen Cinematic Background Layer -->
   <div class="{isTheaterMode ? 'fixed inset-0 z-[90] w-screen h-screen bg-black pointer-events-auto' : 'absolute inset-0 z-0 pointer-events-none'} overflow-hidden">
     <!-- Static Backdrop Image -->
-    {#if currentBackdropUrl}
+    {#if currentBackdropUrl && !isTheaterMode}
       <img
         src={currentBackdropUrl}
         alt=""
-        class="w-full h-full object-cover object-center transition-opacity duration-700 ease-out {isTheaterMode ? 'opacity-0 pointer-events-none' : (videoHasRenderedFrame ? 'opacity-20' : 'opacity-60')}"
+        class="w-full h-full object-cover object-center transition-all duration-700 ease-out filter blur-md scale-105 {videoHasRenderedFrame ? 'opacity-15' : 'opacity-35'}"
         decoding="async"
       />
     {/if}
 
-    <!-- Live Fullscreen Background Video Trailer -->
+    <!-- Live Fullscreen Background Video Trailer (Dimmed and blurred until [↑] / Theater Mode) -->
     <video
       bind:this={videoBgEl}
       poster={activeMovie?.thumbnail ? sanitizeMediaUrl(activeMovie.thumbnail) : ''}
-      class="absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ease-out {isTheaterMode || (isAmbientTrailerActive && activeMovie?.src && videoHasRenderedFrame) ? 'opacity-100' : 'opacity-0 pointer-events-none'}"
+      class="absolute inset-0 w-full h-full object-cover transition-all duration-700 ease-out {isTheaterMode && activeMedia?.type === 'video' ? 'opacity-100 blur-0 scale-100 brightness-100 z-10' : (!isTheaterMode && isAmbientTrailerActive && activeMovie?.src && videoHasRenderedFrame ? 'opacity-30 blur-md scale-105 brightness-75 z-10' : 'opacity-0 pointer-events-none')}"
       muted={isVideoMuted}
       playsinline
       preload="auto"
@@ -1217,35 +1485,46 @@
       onended={handleTrailerEnded}
     ></video>
 
+    <!-- Fullscreen Screenshot (when active in Theater Mode) -->
+    {#if isTheaterMode && activeMedia?.type === 'screenshot'}
+      <img
+        src={activeMedia.url}
+        alt={activeMedia.title}
+        class="absolute inset-0 w-full h-full object-contain bg-black transition-opacity duration-300 ease-out z-10"
+      />
+    {/if}
+
     <!-- Ambient vignette & falloff gradients -->
-    <div class="absolute inset-0 bg-gradient-to-t from-[#07080a] via-[#07080a]/75 to-transparent transition-opacity duration-500 {isTheaterMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}"></div>
-    <div class="absolute inset-0 bg-gradient-to-r from-[#07080a]/95 via-[#07080a]/60 to-transparent transition-opacity duration-500 {isTheaterMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}"></div>
+    {#if !isTheaterMode}
+      <div class="absolute inset-0 bg-gradient-to-t from-[#07080a] via-[#07080a]/75 to-transparent transition-opacity duration-500 z-10 pointer-events-none"></div>
+      <div class="absolute inset-0 bg-gradient-to-r from-[#07080a]/95 via-[#07080a]/60 to-transparent transition-opacity duration-500 z-10 pointer-events-none"></div>
+    {/if}
   </div>
 
-  <!-- 2. Independent Scrollable Viewport Layer -->
+  <!-- 2. Main Fullscreen Interface Layer (100vw x 100vh, Zero Page Scroll) -->
   <div
     data-nav-zone="detail"
-    class="relative z-10 w-full h-full flex flex-col overflow-y-auto overflow-x-hidden scrollbar-none bg-transparent {isTheaterMode ? 'hidden pointer-events-none' : ''}"
+    class="relative z-10 w-full h-full flex flex-col justify-between p-6 sm:p-8 lg:p-10 overflow-hidden select-none {isTheaterMode ? 'hidden pointer-events-none' : ''}"
   >
-    <!-- Sticky Top Bar (Solid Charcoal, Zero Blur) -->
-    <div class="sticky top-0 z-30 px-8 sm:px-12 lg:px-16 pt-5 pb-3 flex items-center justify-between bg-[#07080a]/95 border-b border-white/[0.06] transition-all duration-300 {isTheaterMode ? 'opacity-0 pointer-events-none -translate-y-4' : 'opacity-100 translate-y-0'}">
+    <!-- Top Bar: Navigation & Status -->
+    <div class="flex items-center justify-between w-full flex-shrink-0 z-20">
       <button
         data-nav-item
         type="button"
-        class="px-4 py-2 rounded-xl bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-xs font-bold text-white hover:border-white/30 flex items-center gap-2.5 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none shadow-md"
+        class="px-4 py-2 rounded bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-xs font-bold text-white hover:border-white/30 flex items-center gap-2.5 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none shadow-md"
         onclick={() => {
           sound.playBack();
           onBack();
         }}
       >
         <ArrowLeft class="w-4 h-4" />
-        <span>Назад к библиотеке</span>
+        <span>Библиотека</span>
         <span class="w-4 h-4 rounded bg-white/20 text-[10px] flex items-center justify-center font-bold">B</span>
       </button>
 
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2.5">
         {#if isEnrichingCurrentGame}
-          <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-mono">
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-sm bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-mono">
             <RefreshCw class="w-3.5 h-3.5 animate-spin" />
             <span>Поиск данных...</span>
           </div>
@@ -1254,7 +1533,7 @@
         <button
           data-nav-item
           type="button"
-          class="px-3.5 py-1.5 rounded-xl bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-xs font-semibold text-[#cbd5e1] hover:text-white flex items-center gap-2 cursor-pointer transition-colors focus:ring-2 focus:ring-white focus:outline-none shadow-md"
+          class="px-3.5 py-1.5 rounded bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-xs font-semibold text-[#cbd5e1] hover:text-white flex items-center gap-2 cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none shadow-md"
           onclick={openSteamModal}
           title="Привязать Steam / Изменить метаданные"
         >
@@ -1264,617 +1543,893 @@
       </div>
     </div>
 
-    <!-- Main Scrollable Dashboard Content -->
-    <div class="px-8 sm:px-12 lg:px-16 pt-6 pb-16 flex-1 flex flex-col transition-all duration-500 ease-out {isTheaterMode ? 'opacity-0 pointer-events-none -translate-y-4' : 'opacity-100 translate-y-0'}">
-      {#if activeGame}
-        <!-- Upper Hero Stage: Game Title/Logo, Meta Badges & Action Buttons -->
-        <div class="max-w-4xl space-y-4">
+    <!-- Middle Hero Stage: Game Title/Logo, Meta Badges & Action Buttons -->
+    {#if activeGame}
+      <div class="max-w-3xl space-y-3.5 my-auto z-20">
+        <!-- Official Steam Logo or Large Google Sans Title -->
+        <div class="min-h-[60px] sm:min-h-[80px] flex items-end">
+          {#if activeGame.steamAppId && !logoFailedMap[activeGame.steamAppId]}
+            <img
+              src="https://shared.steamstatic.com/store_item_assets/steam/apps/{activeGame.steamAppId}/logo.png"
+              alt={activeGame.cleanTitle || activeGame.rawName}
+              class="max-h-24 sm:max-h-28 md:max-h-32 max-w-[320px] sm:max-w-lg object-contain object-left-bottom drop-shadow-2xl transition-all duration-500"
+              onerror={() => {
+                if (activeGame?.steamAppId) logoFailedMap[activeGame.steamAppId] = true;
+              }}
+            />
+          {:else}
+            <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight leading-none drop-shadow-2xl line-clamp-2">
+              {activeGame.cleanTitle || activeGame.rawName || activeGame.folderName || 'Игра'}
+            </h1>
+          {/if}
+        </div>
 
-          <!-- Official Steam Logo or Bold Title -->
-          <div class="min-h-[70px] sm:min-h-[90px] flex items-end">
-            {#if activeGame.steamAppId && !logoFailedMap[activeGame.steamAppId]}
-              <img
-                src="https://shared.steamstatic.com/store_item_assets/steam/apps/{activeGame.steamAppId}/logo.png"
-                alt={activeGame.cleanTitle || activeGame.rawName}
-                class="max-h-24 sm:max-h-32 md:max-h-36 max-w-[320px] sm:max-w-lg object-contain object-left-bottom drop-shadow-md transition-all duration-500"
-                onerror={() => {
-                  if (activeGame?.steamAppId) logoFailedMap[activeGame.steamAppId] = true;
-                }}
-              />
-            {:else}
-              <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight leading-none drop-shadow-2xl line-clamp-2">
-                {activeGame.cleanTitle || activeGame.rawName || activeGame.folderName || 'Игра'}
-              </h1>
-            {/if}
-          </div>
+        <!-- Meta Chips Row -->
+        <div class="flex flex-wrap items-center gap-2 pt-0.5">
+          <span class="px-2 py-0.5 rounded bg-white/10 text-white text-[10px] font-black tracking-widest border border-white/20 uppercase">
+            PC
+          </span>
 
-          <!-- Meta Chips Row (Zero Clutter, Consistent Steam Slate Styling) -->
-          <div class="flex flex-wrap items-center gap-2 pt-1">
-            <span class="px-2 py-0.5 rounded bg-white/10 text-white text-[10px] font-black tracking-widest border border-white/20 uppercase">
-              PC
+          {#if isCompleted}
+            <span class="px-2.5 py-0.5 rounded bg-white/[0.06] border border-white/10 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
+              <Check class="w-3.5 h-3.5 stroke-[3]" />
+              <span>Установлено</span>
             </span>
-
-            {#if isCompleted}
-              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
-                <Check class="w-3.5 h-3.5 stroke-[3]" />
-                <span>Установлено</span>
-              </span>
-            {:else if isDownloading}
-              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-sky-400 text-xs font-semibold flex items-center gap-1.5">
-                <Download class="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>{Math.round(activeDownload?.progress || pageDetails?.downloadProgress?.progressPercent || 0)}%</span>
-              </span>
-            {/if}
-
-            {#if downloadSourceInfo}
-              <span class="px-2.5 py-0.5 rounded-md border border-white/10 bg-white/[0.06] text-[#cbd5e1] text-xs font-semibold flex items-center gap-1.5">
-                <span>{downloadSourceInfo.name}</span>
-              </span>
-            {/if}
-
-            {#if currentFavoriteStatus}
-              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
-                <Star class="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                <span>
-                  {#if currentFavoriteStatus === 'playing'}
-                    Прохожу
-                  {:else if currentFavoriteStatus === 'completed'}
-                    Пройдено
-                  {:else}
-                    В планах
-                  {/if}
-                </span>
-              </span>
-            {/if}
-
-            {#if activeGame.releaseDate || activeGame.steamReleaseDate}
-              <span class="text-xs font-semibold text-[#8e95a2]">
-                {activeGame.releaseDate || activeGame.steamReleaseDate}
-              </span>
-              <span class="text-white/20">•</span>
-            {/if}
-
-            {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
-              <span class="text-xs font-semibold text-[#8e95a2] font-mono">
-                {activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
-              </span>
-              <span class="text-white/20">•</span>
-            {/if}
-
-            {#if activeGame.reviewPercent}
-              <span class="text-xs font-bold text-white flex items-center gap-1">
-                <Star class="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                <span>{activeGame.reviewPercent}%</span>
-              </span>
-              <span class="text-white/20">•</span>
-            {/if}
-
-            {#if activeGame.genres && Array.isArray(activeGame.genres) && activeGame.genres.length > 0}
-              <span class="text-xs text-[#8e95a2]">
-                {activeGame.genres.slice(0, 2).join(', ')}
-              </span>
-            {/if}
-          </div>
-
-          <!-- Synopsis / Short Description -->
-          {#if activeGame.shortDescription}
-            <p class="text-xs sm:text-sm text-[#cbd5e1] leading-relaxed line-clamp-2 max-w-2xl font-normal drop-shadow-sm">
-              {activeGame.shortDescription.replace(/<[^>]*>?/gm, '')}
-            </p>
+          {:else if isDownloading}
+            <span class="px-2.5 py-0.5 rounded bg-white/[0.06] border border-white/10 text-sky-400 text-xs font-semibold flex items-center gap-1.5">
+              <Download class="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>{Math.round(activeDownload?.progress || pageDetails?.downloadProgress?.progressPercent || 0)}%</span>
+            </span>
           {/if}
 
-          <!-- Tactile Action Buttons Deck -->
-          <div class="flex flex-wrap items-center gap-3 pt-2">
-            <!-- Primary Action Pill (A) -->
+          {#if downloadSourceInfo}
+            <span class="px-2.5 py-0.5 rounded border border-white/10 bg-white/[0.06] text-[#cbd5e1] text-xs font-semibold flex items-center gap-1.5">
+              <span>{downloadSourceInfo.name}</span>
+            </span>
+          {/if}
+
+          {#if currentFavoriteStatus}
+            <span class="px-2.5 py-0.5 rounded bg-white/[0.06] border border-white/10 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
+              <Star class="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+              <span>
+                {#if currentFavoriteStatus === 'playing'}
+                  Прохожу
+                {:else if currentFavoriteStatus === 'completed'}
+                  Пройдено
+                {:else}
+                  В планах
+                {/if}
+              </span>
+            </span>
+          {/if}
+
+          {#if activeGame.releaseDate || activeGame.steamReleaseDate}
+            <span class="text-xs font-semibold text-[#8e95a2]">
+              {activeGame.releaseDate || activeGame.steamReleaseDate}
+            </span>
+            <span class="text-white/20">•</span>
+          {/if}
+
+          {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
+            <span class="text-xs font-semibold text-[#8e95a2] font-mono">
+              {activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
+            </span>
+            <span class="text-white/20">•</span>
+          {/if}
+
+          {#if activeGame.reviewPercent}
+            <span class="text-xs font-bold text-white flex items-center gap-1">
+              <Star class="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              <span>{activeGame.reviewPercent}%</span>
+            </span>
+            <span class="text-white/20">•</span>
+          {/if}
+
+          {#if activeGame.genres && Array.isArray(activeGame.genres) && activeGame.genres.length > 0}
+            <span class="text-xs text-[#8e95a2]">
+              {activeGame.genres.slice(0, 2).join(', ')}
+            </span>
+          {/if}
+        </div>
+
+        <!-- Short Synopsis Preview -->
+        {#if activeGame.shortDescription}
+          <p class="text-xs sm:text-sm text-[#cbd5e1] leading-relaxed line-clamp-2 max-w-2xl font-normal drop-shadow-sm">
+            {activeGame.shortDescription.replace(/<[^>]*>?/gm, '')}
+          </p>
+        {/if}
+
+        <!-- Tactile Action Buttons Row -->
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <!-- Primary Action Pill (A) -->
+          <button
+            data-nav-item
+            type="button"
+            class="px-7 py-3 rounded bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+            onclick={handlePrimaryAction}
+          >
+            {#if isCompleted}
+              <Play class="w-4 h-4 fill-black text-black" />
+              <span>Играть</span>
+            {:else if isDownloading}
+              <Download class="w-4 h-4 stroke-[2.5]" />
+              <span>Скачивается...</span>
+            {:else}
+              <Download class="w-4 h-4 stroke-[2.5]" />
+              <span>Скачать</span>
+              {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
+                <span class="text-xs font-mono opacity-60 font-bold">• {activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}</span>
+              {/if}
+            {/if}
+            <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center">A</span>
+          </button>
+
+          <!-- Description Button (X) -->
+          <button
+            data-nav-item
+            type="button"
+            class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2.5 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+            onclick={openDescriptionModal}
+            title="Открыть описание игры [X]"
+          >
+            <Info class="w-4 h-4 text-sky-400" />
+            <span>Описание</span>
+            <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">X</span>
+          </button>
+
+          <!-- Versions or Folder Action -->
+          {#if isCompleted}
             <button
               data-nav-item
               type="button"
-              class="px-7 py-3 rounded-xl bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-              onclick={handlePrimaryAction}
+              class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              onclick={handleOpenGameFolder}
+              title="Открыть папку с игрой"
             >
-              {#if isCompleted}
-                <Play class="w-4 h-4 fill-black text-black" />
-                <span>Играть</span>
-              {:else if isDownloading}
-                <Download class="w-4 h-4 stroke-[2.5]" />
-                <span>Скачивается...</span>
-              {:else}
-                <Download class="w-4 h-4 stroke-[2.5]" />
-                <span>Скачать</span>
-                {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
-                  <span class="text-xs font-mono opacity-60 font-bold">• {activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}</span>
-                {/if}
-              {/if}
-              <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center">A</span>
+              <Folder class="w-4 h-4 fill-current text-[#cbd5e1]" />
+              <span>Папка</span>
             </button>
+          {:else if activeVariantsList && activeVariantsList.length > 1}
+            <button
+              data-nav-item
+              type="button"
+              class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              onclick={openDownloadWizard}
+              title="Выбрать версию ({activeVariantsList.length} доступно)"
+            >
+              <Disc class="w-4 h-4 text-sky-400" />
+              <span>Версии ({activeVariantsList.length})</span>
+            </button>
+          {/if}
 
-            <!-- Secondary Action: Versions or Folder (X) -->
-            {#if isCompleted}
-              <button
-                data-nav-item
-                type="button"
-                class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-                onclick={handleOpenGameFolder}
-                title="Открыть папку с игрой"
-              >
-                <Folder class="w-4 h-4 fill-current text-[#cbd5e1]" />
-                <span>Папка</span>
-                <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">X</span>
-              </button>
-            {:else if activeVariantsList && activeVariantsList.length > 1}
-              <div class="relative">
-                <button
-                  bind:this={variantDropdownTriggerEl}
-                  data-nav-item
-                  type="button"
-                  class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-                  onclick={() => {
-                    isVariantDropdownOpen = !isVariantDropdownOpen;
-                  }}
-                  title="Выбрать версию игры ({activeVariantsList.length} доступно)"
-                >
-                  <Disc class="w-4 h-4 text-sky-400" />
-                  <span>Версии ({activeVariantsList.length})</span>
-                  <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">X</span>
-                </button>
-
-                {#if isVariantDropdownOpen}
-                  <div
-                    bind:this={variantDropdownContainerEl}
-                    class="absolute left-0 bottom-full mb-3 z-50 w-80 max-h-60 overflow-y-auto overscroll-contain rounded-2xl bg-[#0d1117] border border-white/15 shadow-2xl p-2 space-y-1"
-                  >
-                    <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#64748b]">
-                      Доступные релизы ({activeVariantsList.length})
-                    </div>
-                    {#each activeVariantsList as variant (variant.id)}
-                      {@const isSel = activeVariant?.id === variant.id}
-                      <button
-                        data-nav-item
-                        type="button"
-                        class="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-xs transition-colors cursor-pointer {isSel ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          selectedVariantId = variant.id;
-                          isVariantDropdownOpen = false;
-                        }}
-                      >
-                        <div class="min-w-0 flex-1 pointer-events-none">
-                          <div class="truncate text-white text-xs">{variant.rawName}</div>
-                          <div class="text-[10px] text-[#64748b] font-mono flex items-center gap-2 mt-0.5">
-                            <span>Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? (formatTorrentSourceName(variant.torrentSource) || 'Торрент') : 'FTP-сервер'}</span>
-                            {#if variant.sourceType === 'torrent' || variant.magnetUri}
-                              <span class="text-white/20">•</span>
-                              {#if variantSeeds[variant.id]?.loading}
-                                <span class="text-[#64748b] animate-pulse">сиды: ...</span>
-                              {:else if variantSeeds[variant.id]}
-                                {@const s = variantSeeds[variant.id].seeders}
-                                <span class="inline-flex items-center gap-0.5 {s > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
-                                  <UploadSimple class="w-3 h-3 stroke-[2.5]" />
-                                  <span>{formatSeedsCount(s)}</span>
-                                </span>
-                              {/if}
-                            {/if}
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] pointer-events-none {isSel ? 'text-sky-400 font-bold' : 'text-[#64748b]'}">
-                          <span>{variant.sizeDisplay}</span>
-                          {#if isSel}
-                            <Check class="w-3.5 h-3.5 stroke-[2.5]" />
-                          {/if}
-                        </div>
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {:else}
-              <button
-                data-nav-item
-                type="button"
-                class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-                onclick={handleBrowseFolder}
-                title="Выбрать папку для сохранения"
-              >
-                <FolderOpen class="w-4 h-4 text-[#cbd5e1]" />
-                <span class="truncate max-w-[160px]">{customDownloadPath || downloadPath || 'Папка'}</span>
-                <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">X</span>
-              </button>
-            {/if}
-
-            <!-- Live Seeds Indicator (if active variant is torrent) -->
-            {#if currentVariantSeedInfo}
-              <div class="px-3 py-3 rounded-xl bg-white/10 border border-white/15 text-xs font-mono flex items-center gap-1.5 select-none {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#8e95a2]'}">
-                <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
-                {#if currentVariantSeedInfo.loading}
-                  <span class="animate-pulse text-[#64748b]">...</span>
-                {:else}
-                  <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
-                {/if}
-              </div>
-            {/if}
-
-            <!-- Favorite Toggle Dropdown (Y) -->
-            <div class="relative">
-              <button
-                bind:this={favoriteDropdownTriggerEl}
-                data-nav-item
-                type="button"
-                class="p-3 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none flex items-center gap-1.5"
-                onclick={() => {
-                  isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
-                }}
-                title="Статус в избранном [Y]"
-              >
-                <Star class="w-4 h-4 {currentFavoriteStatus ? 'text-amber-400 fill-amber-400' : 'text-white/40 fill-white/20'}" />
-                <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">Y</span>
-              </button>
-
-              {#if isFavoriteDropdownOpen}
-                <div
-                  bind:this={favoriteDropdownContainerEl}
-                  class="absolute left-0 bottom-full mb-3 z-50 w-52 rounded-2xl bg-[#0d1117] border border-white/15 shadow-2xl p-1.5 space-y-1"
-                >
-                  <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#64748b]">
-                    Статус игры
-                  </div>
-                  <button
-                    data-nav-item
-                    type="button"
-                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'planned' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                    onclick={() => handleToggleFavoriteStatus('planned')}
-                  >
-                    <span>В планах</span>
-                    {#if currentFavoriteStatus === 'planned'}
-                      <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
-                    {/if}
-                  </button>
-
-                  <button
-                    data-nav-item
-                    type="button"
-                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                    onclick={() => handleToggleFavoriteStatus('playing')}
-                  >
-                    <span>Прохожу</span>
-                    {#if currentFavoriteStatus === 'playing'}
-                      <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
-                    {/if}
-                  </button>
-
-                  <button
-                    data-nav-item
-                    type="button"
-                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'completed' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                    onclick={() => handleToggleFavoriteStatus('completed')}
-                  >
-                    <span>Пройдено</span>
-                    {#if currentFavoriteStatus === 'completed'}
-                      <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
-                    {/if}
-                  </button>
-
-                  {#if currentFavoriteStatus}
-                    <button
-                      data-nav-item
-                      type="button"
-                      class="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                      onclick={() => handleToggleFavoriteStatus('')}
-                    >
-                      <span>Убрать из избранного</span>
-                      <X class="w-3.5 h-3.5 text-rose-400" />
-                    </button>
-                  {/if}
-                </div>
+          <!-- Live Seeds Indicator (if active variant is torrent) -->
+          {#if currentVariantSeedInfo}
+            <div class="px-3 py-3 rounded-sm bg-white/10 border border-white/15 text-xs font-mono flex items-center gap-1.5 select-none {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#8e95a2]'}">
+              <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+              {#if currentVariantSeedInfo.loading}
+                <span class="animate-pulse text-[#64748b]">...</span>
+              {:else}
+                <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
               {/if}
             </div>
+          {/if}
 
-            <!-- Watch Trailer Fullscreen Button (↑) -->
-            {#if movieList.length > 0}
-              <button
-                data-nav-item
-                type="button"
-                class="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-                onclick={enterTheaterMode}
-                title="Смотреть трейлер во весь экран [↑]"
+          <!-- Favorite Toggle (Y) -->
+          <div class="relative">
+            <button
+              bind:this={favoriteDropdownTriggerEl}
+              data-nav-item
+              type="button"
+              class="p-3 rounded bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none flex items-center gap-1.5"
+              onclick={() => {
+                isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
+              }}
+              title="Статус в избранном [Y]"
+            >
+              <Star class="w-4 h-4 {currentFavoriteStatus ? 'text-amber-400 fill-amber-400' : 'text-white/40 fill-white/20'}" />
+              <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">Y</span>
+            </button>
+
+            {#if isFavoriteDropdownOpen}
+              <div
+                bind:this={favoriteDropdownContainerEl}
+                class="absolute left-0 bottom-full mb-3 z-50 w-52 rounded bg-[#0d1117] border border-white/15 shadow-2xl p-1.5 space-y-1"
               >
+                <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#64748b]">
+                  Статус игры
+                </div>
+                <button
+                  data-nav-item
+                  type="button"
+                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'planned' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                  onclick={() => handleToggleFavoriteStatus('planned')}
+                >
+                  <span>В планах</span>
+                  {#if currentFavoriteStatus === 'planned'}
+                    <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
+                  {/if}
+                </button>
+
+                <button
+                  data-nav-item
+                  type="button"
+                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                  onclick={() => handleToggleFavoriteStatus('playing')}
+                >
+                  <span>Прохожу</span>
+                  {#if currentFavoriteStatus === 'playing'}
+                    <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
+                  {/if}
+                </button>
+
+                <button
+                  data-nav-item
+                  type="button"
+                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'completed' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                  onclick={() => handleToggleFavoriteStatus('completed')}
+                >
+                  <span>Пройдено</span>
+                  {#if currentFavoriteStatus === 'completed'}
+                    <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
+                  {/if}
+                </button>
+
+                {#if currentFavoriteStatus}
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                    onclick={() => handleToggleFavoriteStatus('')}
+                  >
+                    <span>Убрать из избранного</span>
+                    <X class="w-3.5 h-3.5 text-rose-400" />
+                  </button>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Watch Media Fullscreen Button (↑) -->
+          {#if unifiedMediaList.length > 0}
+            <button
+              data-nav-item
+              type="button"
+              class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              onclick={() => enterTheaterMode(0)}
+              title="Смотреть во весь экран [↑]"
+            >
+              {#if movieList.length > 0}
                 <Volume2 class="w-4 h-4 text-sky-400" />
                 <span>Трейлер</span>
-                <span class="px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-mono">↑</span>
-              </button>
+              {:else}
+                <ImageIcon class="w-4 h-4 text-sky-400" />
+                <span>Скриншоты</span>
+              {/if}
+              <span class="px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-mono">↑</span>
+            </button>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Bottom Strip: Trailers & Screenshots Carousel -->
+    {#if movieList.length > 0 || gameScreenshots.length > 0}
+      <div class="w-full pt-3 pb-1 z-20 flex-shrink-0">
+        <div class="flex items-center justify-between pb-2">
+          <span class="text-xs font-bold uppercase tracking-wider text-[#8e95a2]">Медиа и скриншоты</span>
+          <span class="text-xs text-[#64748b] font-medium hidden sm:inline">Нажмите [A] для полноэкранного просмотра</span>
+        </div>
+        <div class="media-carousel-container flex items-center gap-3 overflow-x-auto scrollbar-none py-1">
+          <!-- Video Trailers -->
+          {#each movieList as movie, mIdx}
+            <button
+              data-nav-item
+              type="button"
+              class="w-44 sm:w-52 aspect-video rounded-sm overflow-hidden border border-white/15 bg-black hover:border-sky-400 focus:border-sky-400 hover:scale-105 focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
+              onclick={() => enterTheaterMode(mIdx)}
+              title={movie.name || `Трейлер ${mIdx + 1}`}
+            >
+              {#if movie.thumbnail}
+                <img src={sanitizeMediaUrl(movie.thumbnail)} alt={movie.name || 'Трейлер'} class="w-full h-full object-cover" loading="lazy" />
+              {:else}
+                <div class="w-full h-full bg-[#0d1117] flex items-center justify-center">
+                  <Film class="w-8 h-8 text-white/30" />
+                </div>
+              {/if}
+              <div class="absolute inset-0 bg-black/40 group-hover/thumb:bg-black/20 transition-colors flex items-center justify-center">
+                <div class="w-9 h-9 rounded-full bg-black/80 group-hover/thumb:bg-sky-500 text-white flex items-center justify-center border border-white/20 group-hover/thumb:border-transparent transition-all shadow-md">
+                  <Play class="w-3.5 h-3.5 fill-white translate-x-0.5" />
+                </div>
+              </div>
+              <div class="absolute bottom-1.5 inset-x-1.5 flex items-center justify-between pointer-events-none">
+                <span class="px-2 py-0.5 rounded bg-black/80 text-[10px] font-bold text-white max-w-[120px] truncate border border-white/10">
+                  {movie.name || `Трейлер ${mIdx + 1}`}
+                </span>
+                <span class="px-1.5 py-0.5 rounded bg-sky-500/80 text-[9px] font-bold uppercase tracking-wider text-black">
+                  Видео
+                </span>
+              </div>
+            </button>
+          {/each}
+
+          <!-- Screenshots -->
+          {#each gameScreenshots as sc, idx}
+            <button
+              data-nav-item
+              type="button"
+              class="w-44 sm:w-52 aspect-video rounded-sm overflow-hidden border border-white/10 bg-black/60 hover:border-white hover:scale-105 focus:border-white focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
+              onclick={() => enterTheaterMode(movieList.length + idx)}
+              onmouseenter={() => {
+                activeScreenshotPreview = sc;
+              }}
+              onfocus={() => {
+                activeScreenshotPreview = sc;
+              }}
+              title="Скриншот {idx + 1}"
+            >
+              <img src={sc} alt="" class="w-full h-full object-cover" loading="lazy" />
+              <div class="absolute inset-0 bg-white/10 opacity-0 group-hover/thumb:opacity-100 transition-opacity"></div>
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+  </div>
+
+  <!-- 3. Description Overlay Screen (Opened by [X]) -->
+  {#if isDescriptionModalOpen}
+    <div
+      data-nav-zone="modal"
+      class="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 animate-fade-in select-none"
+    >
+      <div class="w-full max-w-5xl h-[88vh] bg-[#07080a] border border-white/10 rounded-md flex flex-col overflow-hidden shadow-2xl">
+        <!-- 1. Modal Top Bar: Game Title & Subtitle + Close Button -->
+        <div class="px-6 sm:px-8 pt-5 pb-4 flex items-center justify-between flex-shrink-0 bg-[#0c0e14]">
+          <div class="min-w-0 flex-1 pr-4">
+            <h2 class="text-base sm:text-xl font-bold text-white tracking-tight leading-snug truncate">
+              {getDisplayTitle(activeGame) || 'Об игре'}
+            </h2>
+            {#if activeGame?.developers?.length || activeGame?.releaseDate}
+              <div class="flex items-center gap-2 text-xs text-[#8e95a2] mt-0.5 truncate">
+                {#if activeGame?.developers?.length}
+                  <span>{activeGame.developers.join(', ')}</span>
+                {/if}
+                {#if activeGame?.developers?.length && activeGame?.releaseDate}
+                  <span class="text-white/20">•</span>
+                {/if}
+                {#if activeGame?.releaseDate}
+                  <span>{activeGame.releaseDate}</span>
+                {/if}
+              </div>
             {/if}
+          </div>
+
+          <div class="flex items-center gap-3 flex-shrink-0">
+            <button
+              data-nav-item
+              type="button"
+              class="px-3.5 py-1.5 rounded-sm bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs font-bold flex items-center gap-2 cursor-pointer focus:ring-1 focus:ring-white focus:outline-none transition-colors"
+              onclick={closeDescriptionModal}
+            >
+              <span>Закрыть</span>
+              <span class="w-4 h-4 rounded-sm bg-white/20 text-[10px] flex items-center justify-center font-bold">B</span>
+            </button>
           </div>
         </div>
 
-        <!-- Dedicated Media Showcase Strip (Trailers & Screenshots) -->
-        {#if movieList.length > 0 || gameScreenshots.length > 0}
-          <div class="pt-8 pb-3">
-            <div class="flex items-center justify-between pb-3">
-              <span class="text-xs font-bold uppercase tracking-wider text-[#8e95a2]">Медиа и скриншоты</span>
-              <span class="text-xs text-[#64748b]">Нажмите для полноэкранного просмотра</span>
-            </div>
-            <div class="flex items-center gap-3 overflow-x-auto scrollbar-none py-1">
-              <!-- Video Trailers -->
-              {#each movieList as movie, mIdx}
-                <button
-                  data-nav-item
-                  type="button"
-                  class="w-48 sm:w-56 aspect-video rounded-xl overflow-hidden border border-white/15 bg-black hover:border-sky-400 focus:border-sky-400 hover:scale-105 focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
-                  onclick={() => enterTheaterMode(mIdx)}
-                  title={movie.name || `Трейлер ${mIdx + 1}`}
-                >
-                  {#if movie.thumbnail}
-                    <img src={sanitizeMediaUrl(movie.thumbnail)} alt={movie.name || 'Трейлер'} class="w-full h-full object-cover" loading="lazy" />
-                  {:else}
-                    <div class="w-full h-full bg-[#0d1117] flex items-center justify-center">
-                      <Film class="w-8 h-8 text-white/30" />
-                    </div>
-                  {/if}
-                  <div class="absolute inset-0 bg-black/40 group-hover/thumb:bg-black/20 transition-colors flex items-center justify-center">
-                    <div class="w-10 h-10 rounded-full bg-black/80 group-hover/thumb:bg-sky-500 text-white flex items-center justify-center border border-white/20 group-hover/thumb:border-transparent transition-all shadow-md">
-                      <Play class="w-4 h-4 fill-white translate-x-0.5" />
-                    </div>
-                  </div>
-                  <div class="absolute bottom-1.5 inset-x-1.5 flex items-center justify-between pointer-events-none">
-                    <span class="px-2 py-0.5 rounded bg-black/80 text-[10px] font-bold text-white max-w-[130px] truncate border border-white/10">
-                      {movie.name || `Трейлер ${mIdx + 1}`}
-                    </span>
-                    <span class="px-1.5 py-0.5 rounded bg-sky-500/80 text-[9px] font-bold uppercase tracking-wider text-black">
-                      Видео
-                    </span>
-                  </div>
-                </button>
-              {/each}
+        <!-- 2. SteamOS Horizontal Tab Rail (Baseline Tabs) -->
+        <div class="px-6 sm:px-8 border-b border-white/10 flex items-center justify-between flex-shrink-0 bg-[#090b10]">
+          <div class="flex items-center gap-1 sm:gap-2 overflow-x-auto scrollbar-none">
+            <!-- LB Bumper Hint -->
+            <button
+              type="button"
+              class="hidden sm:inline-flex items-center justify-center px-1.5 py-0.5 rounded-sm bg-white/5 hover:bg-white/10 border border-white/10 font-mono text-[10px] font-bold text-[#8e95a2] hover:text-white mr-1 cursor-pointer transition-colors focus:outline-none"
+              onclick={() => cycleDescTab(-1)}
+              title="Предыдущая вкладка (LB / Q / ←)"
+            >
+              LB
+            </button>
 
-              <!-- Screenshots -->
-              {#each gameScreenshots as sc, idx}
-                <button
-                  data-nav-item
-                  type="button"
-                  class="w-48 sm:w-56 aspect-video rounded-xl overflow-hidden border border-white/10 bg-black/60 hover:border-white hover:scale-105 focus:border-white focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
-                  onclick={() => openLightbox(idx)}
-                  onmouseenter={() => {
-                    activeScreenshotPreview = sc;
-                  }}
-                  onfocus={() => {
-                    activeScreenshotPreview = sc;
-                  }}
-                  title="Скриншот {idx + 1}"
-                >
-                  <img src={sc} alt="" class="w-full h-full object-cover" loading="lazy" />
-                  <div class="absolute inset-0 bg-white/10 opacity-0 group-hover/thumb:opacity-100 transition-opacity"></div>
-                </button>
-              {/each}
-            </div>
-          </div>
-        {/if}
+            <!-- Tab 1: Об игре -->
+            <button
+              data-nav-item
+              type="button"
+              class="relative px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'about' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+              onclick={() => {
+                descTab = 'about';
+                sound.playTab();
+              }}
+            >
+              Об игре
+            </button>
 
-        <!-- Detailed Content Tabs & Card -->
-        <div class="pt-6 pb-8">
-          <!-- Tabs Header Bar -->
-          <div class="flex items-center justify-between pb-3 border-b border-white/[0.06]">
-            <div class="flex items-center gap-2">
+            <!-- Tab 2: Сведения -->
+            <button
+              data-nav-item
+              type="button"
+              class="relative px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'details' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+              onclick={() => {
+                descTab = 'details';
+                sound.playTab();
+              }}
+            >
+              Сведения
+            </button>
+
+            <!-- Tab 3: Системные требования -->
+            <button
+              data-nav-item
+              type="button"
+              class="relative px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'specs' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+              onclick={() => {
+                descTab = 'specs';
+                sound.playTab();
+              }}
+            >
+              Системные требования
+            </button>
+
+            <!-- Tab 4: Все релизы (если > 1) -->
+            {#if activeVariantsList && activeVariantsList.length > 1}
               <button
                 data-nav-item
                 type="button"
-                class="px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer focus:outline-none {activeTab === 'about' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-                onclick={() => switchTab('about')}
+                class="relative px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'variants' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+                onclick={() => {
+                  descTab = 'variants';
+                  sound.playTab();
+                }}
               >
-                Об игре
+                Все релизы ({activeVariantsList.length})
               </button>
+            {/if}
 
-              {#if gameScreenshots.length > 0}
-                <button
-                  data-nav-item
-                  type="button"
-                  class="px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer focus:outline-none {activeTab === 'screenshots' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-                  onclick={() => switchTab('screenshots')}
-                >
-                  Все скриншоты ({gameScreenshots.length})
-                </button>
-              {/if}
-
-              <button
-                data-nav-item
-                type="button"
-                class="px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer focus:outline-none {activeTab === 'specs' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-                onclick={() => switchTab('specs')}
-              >
-                Характеристики и требования
-              </button>
-
-              {#if activeVariantsList && activeVariantsList.length > 1}
-                <button
-                  data-nav-item
-                  type="button"
-                  class="px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer focus:outline-none {activeTab === 'variants' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-                  onclick={() => switchTab('variants')}
-                >
-                  Все релизы ({activeVariantsList.length})
-                </button>
-              {/if}
-            </div>
-
-            <!-- Gamepad Bumper Hints -->
-            <div class="hidden sm:flex items-center gap-1.5 text-xs text-[#64748b]">
-              <span class="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-white">LB</span>
-              <span class="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-white">RB</span>
-              <span>Смена вкладок</span>
-            </div>
+            <!-- RB Bumper Hint -->
+            <button
+              type="button"
+              class="hidden sm:inline-flex items-center justify-center px-1.5 py-0.5 rounded-sm bg-white/5 hover:bg-white/10 border border-white/10 font-mono text-[10px] font-bold text-[#8e95a2] hover:text-white ml-1 cursor-pointer transition-colors focus:outline-none"
+              onclick={() => cycleDescTab(1)}
+              title="Следующая вкладка (RB / E / →)"
+            >
+              RB
+            </button>
           </div>
 
-          <!-- Tab Content Card (Solid Opaque Charcoal, Zero Blur) -->
-          <div class="mt-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] p-6 sm:p-8 shadow-xl">
-            <!-- Tab 1: Detailed Overview -->
-            {#if activeTab === 'about'}
-              <div class="space-y-6">
-                {#if activeGame?.detailedDescription}
-                  <div class="steam-html-content text-xs sm:text-sm text-[#cbd5e1] leading-relaxed">
-                    {@html activeGame.detailedDescription}
-                  </div>
-                {:else if activeGame?.shortDescription}
-                  <div class="text-xs sm:text-sm text-[#cbd5e1] leading-relaxed">
-                    {@html activeGame.shortDescription}
-                  </div>
-                {:else}
-                  <div class="text-xs text-[#64748b]">Описание отсутствует</div>
-                {/if}
+          <!-- Quick Navigation Tip -->
+          <div class="hidden md:flex items-center gap-1.5 text-[11px] text-[#64748b]">
+            <span>Вкладки:</span>
+            <span class="font-mono text-[10px] text-[#8e95a2]">LB / RB</span>
+            <span class="mx-1 text-white/10">•</span>
+            <span>Прокрутка:</span>
+            <span class="font-mono text-[10px] text-[#8e95a2]">D-pad ↑ / ↓</span>
+          </div>
+        </div>
 
-                {#if activeGame?.genres && activeGame.genres.length > 0}
-                  <div class="pt-4 border-t border-white/[0.06] flex items-center gap-2 flex-wrap text-xs">
-                    <span class="text-[#8e95a2] font-semibold">Жанры:</span>
+        <!-- Scrollable Description Body (No Sidebars, Clean Full-Width Steam Layout) -->
+        <div
+          bind:this={descScrollEl}
+          class="flex-1 overflow-y-auto p-6 sm:p-10 scrollbar-none"
+        >
+          {#if descTab === 'about'}
+            <div class="max-w-4xl mx-auto space-y-6">
+              {#if activeGame?.detailedDescription}
+                <div class="steam-html-content text-sm sm:text-base text-[#d1d5db] leading-relaxed">
+                  {@html activeGame.detailedDescription}
+                </div>
+              {:else if activeGame?.shortDescription}
+                <div class="text-sm sm:text-base text-[#d1d5db] leading-relaxed">
+                  {@html activeGame.shortDescription}
+                </div>
+              {:else}
+                <div class="text-sm text-[#64748b]">Описание отсутствует</div>
+              {/if}
+
+              {#if activeGame?.genres && activeGame.genres.length > 0}
+                <div class="pt-6 border-t border-white/10 space-y-2">
+                  <span class="text-xs font-bold uppercase tracking-wider text-[#8e95a2] block">Жанры и теги</span>
+                  <div class="flex items-center gap-2 flex-wrap text-xs">
                     {#each activeGame.genres as g}
-                      <span class="px-2.5 py-1 rounded-lg bg-white/[0.05] border border-white/[0.08] text-[#cbd5e1]">
+                      <span class="px-3 py-1 rounded-sm bg-white/5 border border-white/10 text-white font-medium">
                         {g}
                       </span>
                     {/each}
                   </div>
-                {/if}
-              </div>
-
-            <!-- Tab 2: Screenshots Grid -->
-            {:else if activeTab === 'screenshots'}
-              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                {#each gameScreenshots as sc, idx}
-                  <button
-                    data-nav-item
-                    type="button"
-                    class="aspect-video rounded-xl overflow-hidden border border-white/15 bg-black/60 hover:border-white focus:border-white focus:outline-none transition-all cursor-pointer relative group/thumb shadow-md"
-                    onclick={() => openLightbox(idx)}
-                    title="Скриншот {idx + 1}"
-                  >
-                    <img src={sc} alt="" class="w-full h-full object-cover" loading="lazy" />
-                    <div class="absolute inset-0 bg-white/10 opacity-0 group-hover/thumb:opacity-100 transition-opacity"></div>
-                    <span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-mono text-white/80">
-                      {idx + 1}
-                    </span>
-                  </button>
-                {/each}
-              </div>
-
-            <!-- Tab 3: System Requirements & Specs -->
-            {:else if activeTab === 'specs'}
-              <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <!-- Left: Technical Specs Table -->
-                <div class="space-y-3 text-xs divide-y divide-white/[0.04]">
-                  <div class="pt-1 flex items-center justify-between">
-                    <span class="text-[#8e95a2]">Разработчик</span>
-                    <span class="font-bold text-white text-right">{activeGame?.developers?.join(', ') || '—'}</span>
-                  </div>
-                  <div class="pt-2 flex items-center justify-between">
-                    <span class="text-[#8e95a2]">Издатель</span>
-                    <span class="font-bold text-white text-right">{activeGame?.publishers?.join(', ') || '—'}</span>
-                  </div>
-                  <div class="pt-2 flex items-center justify-between">
-                    <span class="text-[#8e95a2]">Дата выхода</span>
-                    <span class="font-bold text-white">{activeGame?.releaseDate || activeGame?.steamReleaseDate || '—'}</span>
-                  </div>
-                  <div class="pt-2 flex items-center justify-between">
-                    <span class="text-[#8e95a2]">Управление</span>
-                    <span class="font-bold text-sky-400">{activeGame?.controllerSupport === 'full' ? 'Полная поддержка геймпада' : 'Клавиатура / Мышь'}</span>
-                  </div>
-                  <div class="pt-2 flex items-center justify-between">
-                    <span class="text-[#8e95a2]">Размер в хранилище</span>
-                    <span class="font-mono font-bold text-white">{activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr || '—'}</span>
-                  </div>
-                  <div class="pt-2 flex items-center justify-between">
-                    <span class="text-[#8e95a2]">Steam AppID</span>
-                    <span class="font-mono text-white">{activeGame?.steamAppId > 0 ? activeGame.steamAppId : 'Не привязан'}</span>
-                  </div>
-                  <div class="pt-2 flex items-center justify-between">
-                    <span class="text-[#8e95a2]">Источник</span>
-                    <span class="font-bold text-white">{downloadSourceInfo?.name || '—'}</span>
-                  </div>
-                  <div class="pt-2 flex items-center justify-between">
-                    <span class="text-[#8e95a2]">Путь сохранения</span>
-                    <span class="font-mono text-[#cbd5e1] truncate max-w-[280px]">{pageDetails?.localPath || customDownloadPath || downloadPath}</span>
-                  </div>
                 </div>
+              {/if}
+            </div>
 
-                <!-- Right: PC Requirements -->
-                <div class="space-y-3 text-xs">
-                  <span class="text-[#8e95a2] font-bold uppercase tracking-wider block">Системные требования</span>
-                  {#if activeGame?.pcRequirements}
-                    <div class="steam-html-content text-[#cbd5e1] leading-relaxed">
-                      {@html activeGame.pcRequirements}
+          {:else if descTab === 'details'}
+            <div class="max-w-4xl mx-auto space-y-6">
+              <!-- Review score card -->
+              {#if activeGame?.reviewPercent || activeGame?.reviewScoreDesc}
+                {@const isPositive = (activeGame.reviewPercent || 0) >= 70}
+                {@const isMixed = (activeGame.reviewPercent || 0) >= 40 && (activeGame.reviewPercent || 0) < 70}
+                <div class="p-5 rounded-md bg-[#0e1219] border border-white/10 flex items-center gap-4 shadow-lg">
+                  <div class="w-14 h-14 rounded border flex items-center justify-center font-black text-lg {isPositive ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : isMixed ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'bg-red-500/15 text-red-400 border-red-500/30'}">
+                    {activeGame.reviewPercent || 0}%
+                  </div>
+                  <div class="space-y-1">
+                    <div class="text-base font-bold {isPositive ? 'text-sky-400' : isMixed ? 'text-amber-400' : 'text-red-400'}">
+                      {activeGame.reviewScoreDesc || (isPositive ? 'Положительные' : isMixed ? 'Смешанные' : 'Отрицательные')}
                     </div>
-                  {:else}
-                    <div class="text-[#64748b]">Информация о системных требованиях отсутствует</div>
-                  {/if}
-                </div>
-              </div>
-
-            <!-- Tab 4: Release Variants List -->
-            {:else if activeTab === 'variants'}
-              <div class="space-y-2.5">
-                {#each activeVariantsList as variant (variant.id)}
-                  {@const isSel = activeVariant?.id === variant.id}
-                  <button
-                    data-nav-item
-                    type="button"
-                    class="w-full flex items-center justify-between p-3.5 rounded-xl border text-left cursor-pointer transition-colors focus:ring-2 focus:ring-white focus:outline-none {isSel ? 'bg-white/15 border-white/30 text-white font-bold' : 'bg-black/40 border-white/[0.06] text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                    onclick={() => {
-                      sound.playSelect();
-                      selectedVariantId = variant.id;
-                    }}
-                  >
-                    <div class="min-w-0 flex-1">
-                      <div class="text-xs font-semibold text-white truncate">{variant.rawName}</div>
-                      <div class="text-[10px] text-[#64748b] font-mono flex items-center gap-2 mt-0.5">
-                        <span>Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? (formatTorrentSourceName(variant.torrentSource) || 'Торрент') : 'FTP-сервер'}</span>
-                        {#if variant.sourceType === 'torrent' || variant.magnetUri}
-                          <span class="text-white/20">•</span>
-                          {#if variantSeeds[variant.id]?.loading}
-                            <span class="text-[#64748b] animate-pulse">сиды: ...</span>
-                          {:else if variantSeeds[variant.id]}
-                            {@const s = variantSeeds[variant.id].seeders}
-                            <span class="inline-flex items-center gap-0.5 {s > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
-                              <UploadSimple class="w-3 h-3 stroke-[2.5]" />
-                              <span>{formatSeedsCount(s)}</span>
-                            </span>
-                          {/if}
-                        {/if}
+                    {#if activeGame.totalReviews}
+                      <div class="text-xs text-[#8e95a2]">
+                        {formatReviewsCount(activeGame.totalReviews)} обзоров игроков в Steam
                       </div>
-                    </div>
+                    {/if}
+                  </div>
+                </div>
+              {:else if activeGame?.metacriticScore}
+                <div class="p-5 rounded-md bg-[#0e1219] border border-white/10 flex items-center gap-4 shadow-lg">
+                  <div class="w-14 h-14 rounded border border-emerald-500/30 bg-emerald-500/15 text-emerald-400 flex items-center justify-center font-black text-lg">
+                    {activeGame.metacriticScore}
+                  </div>
+                  <div class="space-y-1">
+                    <div class="text-base font-bold text-emerald-400">Metacritic Score</div>
+                    <div class="text-xs text-[#8e95a2]">Оценка ведущих мировых критиков</div>
+                  </div>
+                </div>
+              {/if}
 
-                    <div class="flex items-center gap-3 font-mono text-xs">
-                      <span class="{isSel ? 'text-sky-400 font-bold' : 'text-[#8e95a2]'}">{variant.sizeDisplay}</span>
-                      {#if isSel}
-                        <span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-400 text-[10px] font-bold">Выбрано</span>
-                      {:else}
-                        <span class="text-xs text-white/40">Выбрать [A]</span>
+              <!-- Game Specs & Metadata Breakdown -->
+              <div class="bg-[#0e1219] border border-white/10 rounded-md p-6 shadow-lg divide-y divide-white/[0.06] text-sm">
+                <div class="pb-3.5 flex items-center justify-between gap-4">
+                  <span class="text-[#8e95a2]">Разработчик</span>
+                  <span class="font-bold text-white text-right">{activeGame?.developers?.join(', ') || '—'}</span>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-[#8e95a2]">Издатель</span>
+                  <span class="font-bold text-white text-right">{activeGame?.publishers?.join(', ') || '—'}</span>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-[#8e95a2]">Дата выхода</span>
+                  <span class="font-bold text-white">{activeGame?.releaseDate || activeGame?.steamReleaseDate || '—'}</span>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-[#8e95a2]">Поддержка геймпада</span>
+                  <span class="font-bold {activeGame?.controllerSupport === 'full' ? 'text-sky-400' : 'text-[#cbd5e1]'}">
+                    {activeGame?.controllerSupport === 'full' ? 'Полная поддержка геймпада' : 'Клавиатура / Мышь'}
+                  </span>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-[#8e95a2]">Размер в хранилище</span>
+                  <span class="font-mono font-bold text-white">{activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr || '—'}</span>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-[#8e95a2]">Источник</span>
+                  <span class="font-bold text-white">{downloadSourceInfo?.name || '—'}</span>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-[#8e95a2]">Steam AppID</span>
+                  <span class="font-mono text-[#cbd5e1]">{activeGame?.steamAppId > 0 ? activeGame.steamAppId : 'Не привязан'}</span>
+                </div>
+                <div class="pt-3.5 flex items-center justify-between gap-4">
+                  <span class="text-[#8e95a2]">Папка загрузки</span>
+                  <span class="font-mono text-[#cbd5e1] truncate max-w-lg">{pageDetails?.localPath || customDownloadPath || downloadPath}</span>
+                </div>
+              </div>
+            </div>
+
+          {:else if descTab === 'specs'}
+            <div class="max-w-4xl mx-auto space-y-6">
+              <span class="text-xs font-bold uppercase tracking-wider text-[#8e95a2] block">Системные требования</span>
+              {#if activeGame?.pcRequirements}
+                <div class="steam-html-content text-sm sm:text-base text-[#d1d5db] leading-relaxed bg-[#0e1219] border border-white/10 rounded-md p-6 shadow-lg">
+                  {@html activeGame.pcRequirements}
+                </div>
+              {:else}
+                <div class="p-6 rounded-md bg-[#0e1219] border border-white/10 text-sm text-[#64748b]">
+                  Информация о системных требованиях отсутствует
+                </div>
+              {/if}
+            </div>
+
+          {:else if descTab === 'variants'}
+            <div class="space-y-3 max-w-4xl">
+              <div class="text-xs text-[#8e95a2] pb-2 font-medium">
+                Доступно релизов: {activeVariantsList.length}. Нажмите «Скачать» для загрузки конкретной сборки.
+              </div>
+              {#each activeVariantsList as variant (variant.id)}
+                {@const isSel = activeVariant?.id === variant.id}
+                <div
+                  class="w-full flex items-center justify-between p-4 rounded border {isSel ? 'bg-white/10 border-white/30 text-white' : 'bg-[#0d1017] border-white/[0.06] text-[#8e95a2]'}"
+                >
+                  <div class="min-w-0 flex-1 pr-4">
+                    <div class="text-sm font-semibold text-white truncate">{variant.rawName}</div>
+                    <div class="text-xs text-[#64748b] font-mono flex items-center gap-2.5 mt-1">
+                      <span>Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? (formatTorrentSourceName(variant.torrentSource) || 'Торрент') : 'FTP-сервер'}</span>
+                      {#if variant.sourceType === 'torrent' || variant.magnetUri}
+                        <span class="text-white/20">•</span>
+                        {#if variantSeeds[variant.id]?.loading}
+                          <span class="text-[#64748b] animate-pulse">сиды: ...</span>
+                        {:else if variantSeeds[variant.id]}
+                          {@const s = variantSeeds[variant.id].seeders}
+                          <span class="inline-flex items-center gap-0.5 {s > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
+                            <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>{formatSeedsCount(s)}</span>
+                          </span>
+                        {/if}
                       {/if}
                     </div>
-                  </button>
-                {/each}
-              </div>
-            {/if}
+                  </div>
+
+                  <div class="flex items-center gap-4 font-mono text-xs flex-shrink-0">
+                    <span class="{isSel ? 'text-sky-400 font-bold' : 'text-[#8e95a2]'}">{variant.sizeDisplay}</span>
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="px-3.5 py-1.5 rounded bg-white text-black font-bold text-xs hover:bg-slate-200 transition-colors cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
+                      onclick={() => {
+                        confirmDownloadVariant(variant.id);
+                        closeDescriptionModal();
+                      }}
+                    >
+                      Скачать
+                    </button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <!-- Footer Control Strip with clear Gamepad glyphs -->
+        <div class="px-6 sm:px-8 py-3.5 bg-[#0c0e14] border-t border-white/10 flex items-center justify-between text-xs text-[#8e95a2] flex-shrink-0">
+          <div class="flex items-center gap-5">
+            <span class="flex items-center gap-1.5">
+              <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-mono text-[10px]">D-Pad ↑ / ↓</span>
+              <span>Прокрутка</span>
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-mono text-[10px]">LB / RB</span>
+              <span>Смена разделов</span>
+            </span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="flex items-center gap-1.5">
+              <span class="w-4 h-4 rounded-full bg-white/20 text-white font-bold text-[10px] flex items-center justify-center">B</span>
+              <span>Назад к игре</span>
+            </span>
           </div>
         </div>
-      {/if}
+      </div>
     </div>
-  </div>
+  {/if}
 
-  <!-- 5. Theater Mode Overlay HUD (Clean cinematic player, zero distracting badges) -->
+  <!-- 4. Download Variant Wizard Modal (PS5 Console Style, 80% screen, single-column, large typography) -->
+  {#if isDownloadWizardOpen}
+    <div
+      data-nav-zone="modal"
+      class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-8 animate-fade-in select-none"
+    >
+      <div class="w-[82vw] max-w-6xl h-[80vh] min-h-[560px] bg-[#07080a] border border-white/10 rounded-md flex flex-col overflow-hidden shadow-2xl relative">
+        <!-- Ambient Game Background Artwork (Subtle PS5 Hub immersion) -->
+        {#if currentBackdropUrl}
+          <div class="absolute inset-0 z-0 pointer-events-none overflow-hidden opacity-10">
+            <img
+              src={currentBackdropUrl}
+              alt=""
+              class="w-full h-full object-cover filter blur-sm scale-105"
+            />
+            <div class="absolute inset-0 bg-gradient-to-b from-[#07080a]/60 via-[#07080a]/90 to-[#07080a]"></div>
+          </div>
+        {/if}
+
+        <div class="relative z-10 flex flex-col h-full">
+          <!-- 1. Top Bar: Console Header & Close Button -->
+          <div class="px-8 sm:px-10 pt-7 pb-5 flex items-start justify-between flex-shrink-0 border-b border-white/10 bg-[#0c0f16]/95">
+            <div class="min-w-0 flex-1 pr-6">
+              <div class="flex items-center gap-2.5 text-xs font-black uppercase font-mono tracking-widest text-[#8e95a2] mb-1.5">
+                <Disc class="w-4 h-4 text-sky-400 flex-shrink-0" />
+                <span>Мастер установки и выбор издания</span>
+                <span class="text-white/20">•</span>
+                <span>{activeVariantsList.length} {activeVariantsList.length === 1 ? 'релиз' : activeVariantsList.length < 5 ? 'релиза' : 'релизов'}</span>
+              </div>
+              <h2 class="text-2xl sm:text-3xl font-black text-white tracking-tight leading-tight truncate">
+                {getDisplayTitle(activeGame) || 'Выбор издания игры'}
+              </h2>
+              <p class="text-sm sm:text-base text-[#8e95a2] mt-1 truncate">
+                Выберите подходящий источник для скачивания на консоль
+              </p>
+            </div>
+
+            <div class="flex items-center gap-3 flex-shrink-0 pt-1">
+              <button
+                data-nav-item
+                type="button"
+                class="px-4 py-2 rounded-sm bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs sm:text-sm font-bold flex items-center gap-2.5 cursor-pointer focus:ring-1 focus:ring-white focus:outline-none transition-colors"
+                onclick={closeDownloadWizard}
+              >
+                <span>Закрыть</span>
+                <span class="w-4 h-4 rounded-sm bg-white/20 text-[10px] flex items-center justify-center font-bold">B</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. Installation Destination Strip -->
+          <div class="px-8 sm:px-10 py-4 bg-[#090c12]/95 border-b border-white/10 flex items-center justify-between gap-4 flex-shrink-0">
+            <div class="flex items-center gap-3.5 min-w-0">
+              <div class="w-10 h-10 rounded-sm bg-white/5 border border-white/10 flex items-center justify-center flex-shrink-0 text-sky-400">
+                <FolderOpen class="w-5 h-5" />
+              </div>
+              <div class="min-w-0">
+                <div class="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e95a2]">
+                  Папка назначения
+                </div>
+                <div class="text-sm sm:text-base font-mono font-semibold text-white truncate">
+                  {customDownloadPath || downloadPath}
+                </div>
+              </div>
+            </div>
+
+            <button
+              data-nav-item
+              type="button"
+              class="px-4 py-2 rounded-sm bg-white/10 hover:bg-white/20 border border-white/10 text-white font-bold text-xs sm:text-sm flex items-center gap-2 flex-shrink-0 cursor-pointer focus:ring-1 focus:ring-white focus:outline-none transition-colors"
+              onclick={handleBrowseFolder}
+            >
+              <span>Изменить путь</span>
+              <span class="w-4 h-4 rounded-sm bg-white/20 text-[10px] flex items-center justify-center font-bold">X</span>
+            </button>
+          </div>
+
+          <!-- 3. Scrollable Releases Cards List (No Sidebars, Large Console Cards) -->
+          <div class="flex-1 overflow-y-auto px-8 sm:px-10 py-6 space-y-4 scrollbar-none">
+            <div class="flex items-center justify-between pb-1">
+              <span class="text-xs font-black uppercase tracking-widest text-[#8e95a2] font-mono">
+                Доступные варианты загрузки
+              </span>
+              <span class="text-xs font-mono text-[#64748b]">
+                D-pad ↑ / ↓ для выбора
+              </span>
+            </div>
+
+            {#each activeVariantsList as variant, idx (variant.id)}
+              {@const isSel = (selectedVariantId || activeVariant?.id) === variant.id}
+              {@const isTorrent = variant.sourceType === 'torrent' || !!variant.magnetUri}
+              {@const srcName = isTorrent ? (formatTorrentSourceName(variant.torrentSource) || 'Торрент') : 'FTP-сервер'}
+              <button
+                data-nav-item
+                type="button"
+                class="w-full text-left p-5 sm:p-6 rounded-md border transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-5 focus:outline-none {isSel ? 'bg-white/[0.08] border-white shadow-xl ring-1 ring-white' : 'bg-[#0c0f16]/90 border-white/10 hover:bg-white/[0.04] hover:border-white/25 text-[#cbd5e1]'}"
+                onclick={() => {
+                  selectedVariantId = variant.id;
+                  confirmDownloadVariant(variant.id);
+                }}
+              >
+                <!-- Left Info Column -->
+                <div class="min-w-0 flex-1 space-y-2.5">
+                  <div class="flex items-center gap-3">
+                    <span class="px-2 py-0.5 rounded-sm bg-white/10 font-mono text-xs font-bold text-white/80">
+                      #{idx + 1}
+                    </span>
+                    <div class="text-base sm:text-lg font-bold text-white tracking-tight leading-snug truncate">
+                      {variant.rawName || getDisplayTitle(activeGame)}
+                    </div>
+                  </div>
+
+                  <!-- Metadata Badges Row -->
+                  <div class="flex items-center gap-2.5 flex-wrap text-xs sm:text-sm">
+                    <!-- Source Pill -->
+                    <span class="px-3 py-1 rounded-sm bg-white/10 border border-white/10 text-white font-medium flex items-center gap-1.5">
+                      {#if isTorrent}
+                        <Magnet class="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+                      {:else}
+                        <Folder class="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                      {/if}
+                      <span>{srcName}</span>
+                    </span>
+
+                    <!-- Torrent Seeds -->
+                    {#if isTorrent}
+                      {#if variantSeeds[variant.id]?.loading}
+                        <span class="px-3 py-1 rounded-sm bg-white/5 border border-white/10 text-[#8e95a2] animate-pulse text-xs font-mono">
+                          сиды: проверка...
+                        </span>
+                      {:else if variantSeeds[variant.id]}
+                        {@const s = variantSeeds[variant.id].seeders}
+                        {@const l = variantSeeds[variant.id].leechers}
+                        <span class="px-3 py-1 rounded-sm border font-semibold flex items-center gap-1.5 {s > 0 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-[#8e95a2]'}">
+                          <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                          <span>{formatSeedsCount(s)}</span>
+                          {#if l > 0}
+                            <span class="text-white/30">•</span>
+                            <span class="text-[#8e95a2] text-xs font-normal">{l} пиров</span>
+                          {/if}
+                        </span>
+                      {/if}
+                    {/if}
+
+                    <!-- Fast Download Ready Badge -->
+                    {#if isSel}
+                      <span class="px-2.5 py-1 rounded-sm bg-sky-500/20 border border-sky-500/30 text-sky-300 font-bold text-xs uppercase tracking-wider">
+                        Выбрано
+                      </span>
+                    {/if}
+                  </div>
+                </div>
+
+                <!-- Right Actions & Size Column -->
+                <div class="flex items-center justify-between md:justify-end gap-5 flex-shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
+                  <!-- Size -->
+                  <div class="text-right">
+                    <div class="text-[11px] font-mono uppercase text-[#8e95a2] tracking-wider">Размер</div>
+                    <div class="text-lg sm:text-xl font-mono font-black text-white">
+                      {variant.sizeDisplay || '—'}
+                    </div>
+                  </div>
+
+                  <!-- CTA Button -->
+                  <div class="px-5 py-2.5 rounded-sm font-bold text-xs sm:text-sm flex items-center gap-2.5 transition-all shadow-sm {isSel ? 'bg-white text-black font-black' : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'}">
+                    <span>{isSel ? 'Скачать сейчас' : 'Выбрать'}</span>
+                    <span class="w-5 h-5 rounded-sm {isSel ? 'bg-black/20 text-black' : 'bg-white/20 text-white'} text-xs flex items-center justify-center font-black font-mono">A</span>
+                  </div>
+                </div>
+              </button>
+            {/each}
+          </div>
+
+          <!-- 4. Console Bottom Bar with Controller Glyphs -->
+          <div class="px-8 sm:px-10 py-4 bg-[#080a0f]/95 border-t border-white/10 flex items-center justify-between flex-shrink-0 text-xs sm:text-sm text-[#8e95a2]">
+            <div class="flex items-center gap-5 sm:gap-7 flex-wrap">
+              <span class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded-sm bg-white/20 text-white font-bold text-xs flex items-center justify-center font-mono">A</span>
+                <span class="font-semibold text-white">Скачать выбранный релиз</span>
+              </span>
+              <span class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded-sm bg-white/20 text-white font-bold text-xs flex items-center justify-center font-mono">X</span>
+                <span>Сменить папку установки</span>
+              </span>
+              <span class="hidden sm:flex items-center gap-2 text-[#64748b]">
+                <span class="px-1.5 py-0.5 rounded-sm bg-white/10 text-[#cbd5e1] font-mono text-[10px]">↑ / ↓</span>
+                <span>Навигация по списку</span>
+              </span>
+            </div>
+
+            <button
+              data-nav-item
+              type="button"
+              class="px-4 py-2 rounded-sm bg-white/10 hover:bg-white/20 text-white font-semibold cursor-pointer focus:ring-1 focus:ring-white focus:outline-none flex items-center gap-2 transition-colors"
+              onclick={closeDownloadWizard}
+            >
+              <span>Отмена</span>
+              <span class="w-4 h-4 rounded-sm bg-white/20 text-[10px] flex items-center justify-center font-bold">B</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- 5. Unified Media Viewer (Trailers + Screenshots Overlay HUD) -->
   {#if isTheaterMode}
     <div
       data-nav-zone="modal"
-      class="fixed inset-0 z-[100] flex flex-col justify-between p-8 pointer-events-none select-none"
+      class="fixed inset-0 z-[100] flex flex-col justify-between p-6 sm:p-8 pointer-events-none select-none animate-fade-in"
       role="presentation"
     >
-      <!-- Top Bar: Title & Back Button -->
+      <!-- Top Bar: Title, Media Type Badge, Index & Close Button -->
       <div class="flex items-center justify-between pointer-events-none w-full">
-        <div class="pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-[#07080a]/95 text-white text-xs font-bold border border-white/15 shadow-2xl max-w-lg">
-          <Film class="w-4 h-4 text-sky-400 flex-shrink-0" />
-          <span class="truncate">{activeMovie?.name || 'Трейлер'}</span>
-          {#if movieList.length > 1}
-            <span class="text-[11px] font-mono text-[#8e95a2] flex-shrink-0">({currentMovieIndex + 1} / {movieList.length})</span>
+        <div class="pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded bg-[#07080a]/95 text-white text-xs font-bold border border-white/10 shadow-2xl max-w-xl">
+          {#if activeMedia?.type === 'video'}
+            <Film class="w-4 h-4 text-sky-400 flex-shrink-0" />
+            <span class="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-400 text-[10px] uppercase font-bold tracking-wider">Видео</span>
+          {:else}
+            <ImageIcon class="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] uppercase font-bold tracking-wider">Скриншот</span>
+          {/if}
+          <span class="truncate">{activeMedia?.title || 'Медиа'}</span>
+          {#if unifiedMediaList.length > 1}
+            <span class="text-[11px] font-mono text-[#8e95a2] flex-shrink-0">
+              ({currentMediaIndex + 1} / {unifiedMediaList.length})
+            </span>
           {/if}
         </div>
 
         <button
           data-nav-item
           type="button"
-          class="pointer-events-auto px-4 py-2 rounded-xl bg-black/85 hover:bg-black text-white/90 hover:text-white text-xs font-semibold flex items-center gap-2.5 border border-white/15 cursor-pointer transition-all shadow-2xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+          class="pointer-events-auto px-4 py-2 rounded bg-black/85 hover:bg-black text-white/90 hover:text-white text-xs font-semibold flex items-center gap-2.5 border border-white/10 cursor-pointer transition-all shadow-2xl active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
           onclick={(e) => {
             e.stopPropagation();
             exitTheaterMode();
@@ -1887,134 +2442,103 @@
         </button>
       </div>
 
-      <!-- Bottom: Subtle unobtrusive bar -->
-      <div class="flex items-center justify-between pointer-events-none w-full" role="presentation">
-        <div class="pointer-events-auto flex items-center gap-2.5 bg-[#07080a]/95 p-2 rounded-2xl border border-white/15 shadow-2xl">
+      <!-- Center: Navigation Arrows over Fullscreen Media -->
+      <div class="pointer-events-none flex-1 flex items-center justify-between px-2 sm:px-4">
+        {#if unifiedMediaList.length > 1}
           <button
             data-nav-item
             type="button"
-            class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-            onclick={togglePlayPause}
-            title="Пауза / Воспроизведение [Пробел]"
+            class="pointer-events-auto p-3.5 rounded-full bg-black/60 hover:bg-black text-white/80 hover:text-white border border-white/10 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none shadow-2xl backdrop-blur-sm"
+            onclick={prevMedia}
+            title="Предыдущий [←] или [LB]"
           >
-            {#if isVideoPlaying}
-              <Pause class="w-4 h-4 fill-current" />
-            {:else}
-              <Play class="w-4 h-4 fill-current" />
-            {/if}
+            <ChevronLeft class="w-6 h-6" />
           </button>
-
           <button
             data-nav-item
             type="button"
-            class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-            onclick={toggleMute}
-            title="Звук [M]"
+            class="pointer-events-auto p-3.5 rounded-full bg-black/60 hover:bg-black text-white/80 hover:text-white border border-white/10 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none shadow-2xl backdrop-blur-sm"
+            onclick={nextMedia}
+            title="Следующий [→] или [RB]"
           >
-            {#if isVideoMuted}
-              <VolumeX class="w-4 h-4 text-white/60" />
-            {:else}
-              <Volume2 class="w-4 h-4 text-white" />
-            {/if}
+            <ChevronRight class="w-6 h-6" />
           </button>
+        {/if}
+      </div>
 
-          {#if movieList.length > 1}
-            <div class="h-4 w-[1px] bg-white/20 mx-0.5"></div>
+      <!-- Bottom Bar: Playback Controls & Controller Navigation Hints -->
+      <div class="flex items-center justify-between pointer-events-none w-full">
+        <div class="pointer-events-auto flex items-center gap-2.5 bg-[#07080a]/95 p-2 rounded border border-white/10 shadow-2xl">
+          {#if activeMedia?.type === 'video'}
             <button
               data-nav-item
               type="button"
-              class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-              onclick={prevTrailer}
-              title="Предыдущий [←]"
+              class="p-2.5 rounded-sm bg-white/10 hover:bg-white/20 text-white border border-white/10 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              onclick={togglePlayPause}
+              title="Пауза / Воспроизведение [Пробел] или [A]"
+            >
+              {#if isVideoPlaying}
+                <Pause class="w-4 h-4 fill-current" />
+              {:else}
+                <Play class="w-4 h-4 fill-current" />
+              {/if}
+            </button>
+
+            <button
+              data-nav-item
+              type="button"
+              class="p-2.5 rounded-sm bg-white/10 hover:bg-white/20 text-white border border-white/10 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              onclick={toggleMute}
+              title="Звук [M] или [X]"
+            >
+              {#if isVideoMuted}
+                <VolumeX class="w-4 h-4 text-white/60" />
+              {:else}
+                <Volume2 class="w-4 h-4 text-white" />
+              {/if}
+            </button>
+          {/if}
+
+          {#if unifiedMediaList.length > 1}
+            {#if activeMedia?.type === 'video'}
+              <div class="h-4 w-[1px] bg-white/20 mx-0.5"></div>
+            {/if}
+            <button
+              data-nav-item
+              type="button"
+              class="p-2.5 rounded-sm bg-white/10 hover:bg-white/20 text-white border border-white/10 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              onclick={prevMedia}
+              title="Предыдущий [←] или [LB]"
             >
               <ChevronLeft class="w-4 h-4" />
             </button>
             <button
               data-nav-item
               type="button"
-              class="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
-              onclick={nextTrailer}
-              title="Следующий [→]"
+              class="p-2.5 rounded-sm bg-white/10 hover:bg-white/20 text-white border border-white/10 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              onclick={nextMedia}
+              title="Следующий [→] или [RB]"
             >
               <ChevronRight class="w-4 h-4" />
             </button>
           {/if}
         </div>
-      </div>
-    </div>
-  {/if}
 
-  <!-- 6. Fullscreen Screenshot Lightbox Modal -->
-  {#if lightboxImage}
-    <div
-      data-nav-zone="modal"
-      class="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4 select-none"
-      onclick={closeLightbox}
-      role="button"
-      tabindex="-1"
-      onkeydown={(e) => {
-        if (e.key === 'Escape') closeLightbox();
-      }}
-    >
-      <!-- Close Button -->
-      <button
-        data-nav-item
-        type="button"
-        class="absolute top-6 right-6 p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-2 focus:ring-white/40 focus:outline-none"
-        onclick={(e) => {
-          e.stopPropagation();
-          closeLightbox();
-        }}
-        title="Закрыть [B]"
-      >
-        <X class="w-6 h-6" />
-      </button>
-
-      <!-- Navigation Arrows -->
-      {#if gameScreenshots.length > 1}
-        <button
-          data-nav-item
-          type="button"
-          class="absolute left-6 top-1/2 -translate-y-1/2 p-3.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-2 focus:ring-white/40 focus:outline-none"
-          onclick={(e) => {
-            e.stopPropagation();
-            prevLightboxImage();
-          }}
-          title="Предыдущий [←]"
-        >
-          <ChevronLeft class="w-6 h-6" />
-        </button>
-
-        <button
-          data-nav-item
-          type="button"
-          class="absolute right-6 top-1/2 -translate-y-1/2 p-3.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors z-20 focus:ring-2 focus:ring-white/40 focus:outline-none"
-          onclick={(e) => {
-            e.stopPropagation();
-            nextLightboxImage();
-          }}
-          title="Следующий [→]"
-        >
-          <ChevronRight class="w-6 h-6" />
-        </button>
-      {/if}
-
-      <!-- Main Fullscreen Image -->
-      <div
-        class="max-w-6xl max-h-[85vh] rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-black"
-        onclick={(e) => e.stopPropagation()}
-        role="presentation"
-      >
-        <img
-          src={lightboxImage}
-          alt="Fullscreen Screenshot"
-          class="w-full h-full object-contain max-h-[85vh]"
-        />
-      </div>
-
-      <!-- Counter -->
-      <div class="absolute bottom-6 px-3.5 py-1 rounded-full bg-white/10 text-xs font-mono text-[#cbd5e1] border border-white/15">
-        {lightboxIndex + 1} / {gameScreenshots.length}
+        <!-- Gamepad Navigation Glyph Hints -->
+        <div class="pointer-events-auto flex items-center gap-3 px-3.5 py-2 rounded bg-[#07080a]/95 text-xs text-[#8e95a2] border border-white/10 shadow-2xl">
+          <span class="flex items-center gap-1.5">
+            <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-mono text-[10px]">D-Pad ← / →</span>
+            <span>Листать</span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-mono text-[10px]">LB / RB</span>
+            <span>Медиа</span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-white/20 text-white font-bold text-[10px] flex items-center justify-center">B</span>
+            <span>Закрыть</span>
+          </span>
+        </div>
       </div>
     </div>
   {/if}
@@ -2022,7 +2546,7 @@
   <!-- 7. Steam Candidate Matching Modal -->
   {#if isSteamModalOpen}
     <div data-nav-zone="modal" class="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6 animate-fade-in">
-      <div class="w-full max-w-2xl bg-[#07080a] border border-white/10 rounded-2xl p-6 space-y-6 shadow-2xl max-h-[85vh] flex flex-col">
+      <div class="w-full max-w-2xl bg-[#07080a] border border-white/10 rounded-md p-6 space-y-6 shadow-2xl max-h-[85vh] flex flex-col">
         
         <!-- Modal Header -->
         <div class="flex items-center justify-between">
@@ -2032,7 +2556,7 @@
           </div>
           <button
             data-nav-item
-            class="p-2 rounded-lg text-[#8e95a2] hover:text-white hover:bg-white/10 cursor-pointer focus:ring-2 focus:ring-white focus:outline-none"
+            class="p-2 rounded-sm text-[#8e95a2] hover:text-white hover:bg-white/10 cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
             onclick={closeSteamModal}
           >
             <X class="w-4 h-4" />
@@ -2046,7 +2570,7 @@
             type="text"
             bind:value={steamSearchTerm}
             placeholder="Поиск в базе Steam..."
-            class="flex-1 bg-[#11141c] text-white text-xs rounded-xl px-4 py-3 border border-white/[0.08] focus:border-sky-400 focus:outline-none"
+            class="flex-1 bg-[#11141c] text-white text-xs rounded px-4 py-3 border border-white/[0.08] focus:border-sky-400 focus:outline-none"
             onkeydown={(e) => {
               if (e.key === 'Enter') performSteamSearch();
             }}
@@ -2054,7 +2578,7 @@
           <button
             data-nav-item
             disabled={isSearchingSteam}
-            class="px-5 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold text-white flex items-center gap-2 cursor-pointer disabled:opacity-50 focus:ring-2 focus:ring-white focus:outline-none"
+            class="px-5 py-3 rounded bg-white/10 hover:bg-white/20 text-xs font-bold text-white flex items-center gap-2 cursor-pointer disabled:opacity-50 focus:ring-1 focus:ring-white focus:outline-none"
             onclick={() => performSteamSearch()}
           >
             {#if isSearchingSteam}
@@ -2076,12 +2600,12 @@
             {#each steamCandidates as cand}
               <button
                 data-nav-item
-                class="w-full flex items-center justify-between p-3 rounded-xl bg-[#0d1017] hover:bg-white/10 border border-white/[0.06] text-left cursor-pointer transition-colors focus:ring-2 focus:ring-white focus:outline-none"
+                class="w-full flex items-center justify-between p-3 rounded-sm bg-[#0d1017] hover:bg-white/10 border border-white/[0.06] text-left cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none"
                 onclick={() => handleLinkAppId(cand.appId)}
               >
                 <div class="flex items-center gap-3">
                   {#if cand.tinyImage}
-                    <img src={cand.tinyImage} alt="" class="w-16 h-8 object-cover rounded" />
+                    <img src={cand.tinyImage} alt="" class="w-16 h-8 object-cover rounded-sm" />
                   {/if}
                   <div>
                     <div class="text-xs font-bold text-white">{cand.name}</div>
@@ -2103,26 +2627,33 @@
               type="text"
               bind:value={directAppIdInput}
               placeholder="Точный AppID"
-              class="w-32 bg-[#11141c] text-white text-xs font-mono rounded-xl px-3 py-2 border border-white/[0.08] focus:border-sky-400 focus:outline-none"
+              class="w-32 bg-[#11141c] text-white text-xs font-mono rounded px-3 py-2 border border-white/[0.08] focus:border-sky-400 focus:outline-none"
             />
             <button
               data-nav-item
-              class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-white cursor-pointer focus:ring-2 focus:ring-white focus:outline-none"
+              class="px-4 py-2 rounded bg-white/10 hover:bg-white/20 text-xs font-semibold text-white cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
               onclick={handleApplyDirectAppId}
             >
               Применить
             </button>
           </div>
 
-          {#if activeGame?.steamAppId}
-            <button
-              data-nav-item
-              class="text-xs text-rose-400 hover:underline cursor-pointer focus:ring-2 focus:ring-white focus:outline-none"
-              onclick={handleUnlinkMetadata}
-            >
-              Отвязать метаданные
-            </button>
-          {/if}
+          <div class="flex items-center gap-4">
+            {#if activeGame?.steamAppId}
+              <button
+                data-nav-item
+                class="text-xs text-rose-400 hover:underline cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
+                onclick={handleUnlinkMetadata}
+              >
+                Отвязать метаданные
+              </button>
+            {/if}
+
+            <span class="flex items-center gap-1.5 text-xs text-[#8e95a2]">
+              <span class="w-4 h-4 rounded-full bg-white/20 text-white font-bold text-[10px] flex items-center justify-center">B</span>
+              <span>Назад</span>
+            </span>
+          </div>
         </div>
 
       </div>

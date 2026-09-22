@@ -223,7 +223,7 @@
         <button
           type="button"
           onclick={() => (selectedGame = null)}
-          class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-slate-200 transition-colors cursor-pointer"
+          class="flex items-center gap-2 px-3 py-1.5 rounded bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-slate-200 transition-colors cursor-pointer"
         >
           <ArrowLeft class="w-3.5 h-3.5" />
           <span>Назад к подборке: <strong class="text-white font-semibold">{detail?.title || 'Подборка'}</strong></span>
@@ -265,7 +265,7 @@
               type="text"
               placeholder="Поиск по подборкам..."
               bind:value={catalogSearch}
-              class="w-full h-8 pl-8 pr-3 text-xs bg-[#0d1117] border border-white/10 rounded-lg text-white placeholder-[#64748b] focus:outline-none focus:border-white/25 transition-colors"
+              class="w-full h-8 pl-8 pr-3 text-xs bg-[#0d1117] border border-white/10 rounded text-white placeholder-[#64748b] focus:outline-none focus:border-white/25 transition-colors"
             />
             {#if catalogSearch}
               <button
@@ -285,7 +285,7 @@
             <button
               type="button"
               onclick={() => loadCompilations(1, tab.id)}
-              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap cursor-pointer {sortOption === tab.id ? 'bg-white/10 text-white font-semibold border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+              class="px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap cursor-pointer {sortOption === tab.id ? 'bg-white/10 text-white font-semibold border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
             >
               {tab.label}
             </button>
@@ -299,8 +299,8 @@
           <!-- Loading skeleton grid -->
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {#each Array(8) as _}
-              <div class="bg-[#0d1117] border border-white/[0.06] rounded-xl p-4 flex flex-col gap-3 animate-pulse">
-                <div class="w-full h-28 bg-white/[0.04] rounded-lg"></div>
+              <div class="bg-[#0d1117] border border-white/[0.06] rounded p-4 flex flex-col gap-3 animate-pulse">
+                <div class="w-full h-28 bg-white/[0.04] rounded-sm"></div>
                 <div class="h-4 bg-white/[0.06] rounded w-3/4"></div>
                 <div class="h-3 bg-white/[0.04] rounded w-1/2"></div>
                 <div class="h-10 bg-white/[0.02] rounded w-full mt-1"></div>
@@ -309,14 +309,14 @@
           </div>
         {:else if catalogError}
           <div class="h-full flex flex-col items-center justify-center text-center p-6 gap-3">
-            <div class="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
+            <div class="w-12 h-12 rounded bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
               <Compass size={24} />
             </div>
             <p class="text-sm text-slate-300 font-medium max-w-md">{catalogError}</p>
             <button
               type="button"
               onclick={() => loadCompilations(currentPage, sortOption)}
-              class="mt-2 px-4 py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-lg border border-white/10 flex items-center gap-2 transition-colors cursor-pointer"
+              class="mt-2 px-4 py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded border border-white/10 flex items-center gap-2 transition-colors cursor-pointer"
             >
               <ArrowClockwise size={14} />
               Повторить попытку
@@ -345,7 +345,7 @@
                 tabindex="0"
                 onclick={() => openCompilation(comp.id)}
                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') openCompilation(comp.id); }}
-                class="group relative h-48 sm:h-52 rounded-xl overflow-hidden bg-[#0d1117] border border-white/[0.06] hover:border-white/20 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between p-4"
+                class="group relative h-48 sm:h-52 rounded overflow-hidden bg-[#0d1117] border border-white/[0.06] hover:border-white/20 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between p-4"
               >
                 <!-- 45-degree diagonal background grid of covers -->
                 <div class="absolute -inset-20 flex items-center justify-center pointer-events-none overflow-hidden select-none">
@@ -354,7 +354,7 @@
                       class="grid grid-cols-4 gap-2 w-[180%] h-[180%] rotate-[-45deg] opacity-20 group-hover:opacity-30 grayscale-[25%] transition-opacity duration-300"
                     >
                       {#each getBackgroundCovers(comp.previewImages) as imgUrl}
-                        <div class="aspect-[2/3] rounded-md overflow-hidden bg-black/40 border border-white/[0.04]">
+                        <div class="aspect-[2/3] rounded-sm overflow-hidden bg-black/40 border border-white/[0.04]">
                           <img
                             src={imgUrl}
                             alt=""
@@ -405,7 +405,7 @@
                 type="button"
                 disabled={currentPage <= 1}
                 onclick={() => loadCompilations(currentPage - 1, sortOption)}
-                class="px-3 py-1.5 rounded-lg bg-[#0d1117] border border-white/10 text-[#8e95a2] hover:text-white hover:bg-white/[0.05] disabled:opacity-30 disabled:pointer-events-none flex items-center gap-1.5 transition-colors cursor-pointer"
+                class="px-3 py-1.5 rounded bg-[#0d1117] border border-white/10 text-[#8e95a2] hover:text-white hover:bg-white/[0.05] disabled:opacity-30 disabled:pointer-events-none flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <ChevronLeft class="w-3.5 h-3.5" />
                 Назад
@@ -419,7 +419,7 @@
                 type="button"
                 disabled={currentPage >= totalPages}
                 onclick={() => loadCompilations(currentPage + 1, sortOption)}
-                class="px-3 py-1.5 rounded-lg bg-[#0d1117] border border-white/10 text-[#8e95a2] hover:text-white hover:bg-white/[0.05] disabled:opacity-30 disabled:pointer-events-none flex items-center gap-1.5 transition-colors cursor-pointer"
+                class="px-3 py-1.5 rounded bg-[#0d1117] border border-white/10 text-[#8e95a2] hover:text-white hover:bg-white/[0.05] disabled:opacity-30 disabled:pointer-events-none flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 Вперед
                 <ChevronRight class="w-3.5 h-3.5" />
@@ -439,7 +439,7 @@
         <button
           type="button"
           onclick={backToCatalog}
-          class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-slate-200 transition-colors cursor-pointer"
+          class="flex items-center gap-2 px-3 py-1.5 rounded bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-slate-200 transition-colors cursor-pointer"
         >
           <ArrowLeft class="w-3.5 h-3.5" />
           Все подборки
@@ -456,7 +456,7 @@
               <button
                 type="button"
                 onclick={() => openExternalUrl(`https://stopgame.ru/games/compilation/${detail?.id}`)}
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-[#8e95a2] hover:text-white transition-colors cursor-pointer"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-[#8e95a2] hover:text-white transition-colors cursor-pointer"
                 title="Перейти к оригинальной подборке на StopGame.ru"
               >
                 <span>Оригинал на StopGame</span>
@@ -467,7 +467,7 @@
               type="button"
               onclick={() => selectedCompId && openCompilation(selectedCompId, true)}
               title="Обновить подборку с сайта StopGame"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-[#8e95a2] hover:text-white transition-colors cursor-pointer"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#0d1117] hover:bg-white/10 border border-white/10 text-xs font-medium text-[#8e95a2] hover:text-white transition-colors cursor-pointer"
             >
               <RefreshCw class="w-3.5 h-3.5" />
               Обновить
@@ -489,7 +489,7 @@
             <button
               type="button"
               onclick={() => selectedCompId && openCompilation(selectedCompId, true)}
-              class="px-4 py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-lg border border-white/10 transition-colors cursor-pointer"
+              class="px-4 py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded border border-white/10 transition-colors cursor-pointer"
             >
               Повторить
             </button>
@@ -520,7 +520,7 @@
               </div>
 
               <!-- Compact Library Match Status -->
-              <div class="flex items-center gap-3 px-3.5 py-2 rounded-lg bg-white/[0.03] border border-white/[0.08] text-xs self-start">
+              <div class="flex items-center gap-3 px-3.5 py-2 rounded bg-white/[0.03] border border-white/[0.08] text-xs self-start">
                 <span class="text-[#8e95a2]">В библиотеке:</span>
                 <span class="font-mono text-white">
                   <strong class="text-emerald-400 font-semibold">{inLibraryCount}</strong>
@@ -553,18 +553,18 @@
 
           <!-- Search & Filter Controls -->
           <div class="flex items-center justify-between gap-3 mb-4 flex-wrap">
-            <div class="flex items-center gap-1.5 bg-[#0d1117] p-1 rounded-lg border border-white/[0.06]">
+            <div class="flex items-center gap-1.5 bg-[#0d1117] p-1 rounded border border-white/[0.06]">
               <button
                 type="button"
                 onclick={() => (detailFilter = 'all')}
-                class="px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer {detailFilter === 'all' ? 'bg-white/10 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white'}"
+                class="px-3 py-1 rounded-sm text-xs font-medium transition-colors cursor-pointer {detailFilter === 'all' ? 'bg-white/10 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white'}"
               >
                 Все ({detail.games.length})
               </button>
               <button
                 type="button"
                 onclick={() => (detailFilter = 'in_library')}
-                class="px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 {detailFilter === 'in_library' ? 'bg-white/10 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white'}"
+                class="px-3 py-1 rounded-sm text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 {detailFilter === 'in_library' ? 'bg-white/10 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white'}"
               >
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                 В библиотеке ({inLibraryCount})
@@ -572,7 +572,7 @@
               <button
                 type="button"
                 onclick={() => (detailFilter = 'missing')}
-                class="px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer {detailFilter === 'missing' ? 'bg-white/10 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white'}"
+                class="px-3 py-1 rounded-sm text-xs font-medium transition-colors cursor-pointer {detailFilter === 'missing' ? 'bg-white/10 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white'}"
               >
                 Отсутствуют ({missingCount})
               </button>
@@ -584,7 +584,7 @@
                 type="text"
                 placeholder="Поиск по играм подборки..."
                 bind:value={detailSearch}
-                class="w-full h-8 pl-8 pr-3 text-xs bg-[#0d1117] border border-white/10 rounded-lg text-white placeholder-[#8e95a2] focus:outline-none focus:border-white/25 transition-colors"
+                class="w-full h-8 pl-8 pr-3 text-xs bg-[#0d1117] border border-white/10 rounded text-white placeholder-[#8e95a2] focus:outline-none focus:border-white/25 transition-colors"
               />
               {#if detailSearch}
                 <button
@@ -628,7 +628,7 @@
                       }
                     }
                   }}
-                  class="group relative bg-[#0d1117] hover:bg-[#131826] border border-white/[0.06] hover:border-white/20 rounded-xl overflow-hidden flex flex-col transition-all duration-150 cursor-pointer select-none text-left focus:outline-none focus:border-sky-500 active:scale-[0.99]"
+                  class="group relative bg-[#0d1117] hover:bg-[#131826] border border-white/[0.06] hover:border-white/20 rounded overflow-hidden flex flex-col transition-all duration-150 cursor-pointer select-none text-left focus:outline-none focus:border-sky-500 active:scale-[0.99]"
                 >
                   <!-- Poster image container -->
                   <div class="relative w-full aspect-[3/4] bg-[#07080a] overflow-hidden">
@@ -664,7 +664,7 @@
                             const fullUrl = game.url.startsWith('http') ? game.url : `https://stopgame.ru${game.url}`;
                             openExternalUrl(fullUrl);
                           }}
-                          class="pointer-events-auto p-1 rounded-md bg-[#07080a]/90 hover:bg-black border border-white/10 text-[#8e95a2] hover:text-white transition-all"
+                          class="pointer-events-auto p-1 rounded-sm bg-[#07080a]/90 hover:bg-black border border-white/10 text-[#8e95a2] hover:text-white transition-all"
                           title="Открыть статью об игре на StopGame.ru"
                         >
                           <ExternalLink class="w-3 h-3" />
@@ -675,7 +675,7 @@
 
                       <!-- Right: StopGame score chip -->
                       {#if game.stopGameScore && game.stopGameScore !== '-'}
-                        <div class="px-1.5 py-0.5 rounded-md bg-[#07080a]/90 border border-white/10 text-slate-200 font-mono text-[10px] flex items-center gap-1 shadow">
+                        <div class="px-1.5 py-0.5 rounded-sm bg-[#07080a]/90 border border-white/10 text-slate-200 font-mono text-[10px] flex items-center gap-1 shadow">
                           <Star class="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
                           <span>{game.stopGameScore}</span>
                         </div>
