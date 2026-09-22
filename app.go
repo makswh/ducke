@@ -103,7 +103,7 @@ func (a *App) startup(ctx context.Context) {
 
 	appLogger.SetEnabled(cfgMgr.GetSettings().EnableLogs)
 	log.Printf("[System] ===========================================")
-	log.Printf("[System] Ducke v1.1.5 starting up")
+	log.Printf("[System] Ducke v1.1.6 starting up")
 	log.Printf("[System] AppData: %s", appDataDir)
 	log.Printf("[System] LogFile: %s", logFile)
 	log.Printf("[System] Runtime: %s %s (%d CPUs)", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
@@ -2044,7 +2044,7 @@ type AppInfo struct {
 func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
 		Name:    "Ducke",
-		Version: "1.1.5",
+		Version: "1.1.6",
 	}
 }
 
