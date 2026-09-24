@@ -126,12 +126,6 @@ func ParseFolderName(name string, remotePath string, isDir bool) RemoteItem {
 
 	trimmedName := strings.TrimSpace(name)
 
-	// Check if this is a collection / series folder
-	lower := strings.ToLower(trimmedName)
-	if strings.HasSuffix(lower, "series") || strings.HasSuffix(lower, "collection") || strings.HasSuffix(lower, "anthology") || strings.HasSuffix(lower, "trilogy") {
-		item.IsCollection = true
-	}
-
 	// Try extracting size and title
 	titleCandidate := trimmedName
 	matches := sizeExtractorRegex.FindStringSubmatchIndex(trimmedName)
@@ -166,6 +160,14 @@ func ParseFolderName(name string, remotePath string, isDir bool) RemoteItem {
 				// Remove matched size tag from title
 				titleCandidate = strings.TrimSpace(trimmedName[:tagMatches[0]] + " " + trimmedName[tagMatches[1]:])
 			}
+		}
+	}
+
+	// Check if this is a collection / series container folder (only if no release size was specified)
+	if isDir && item.SizeDisplay == "" && item.SizeBytes == 0 {
+		lower := strings.ToLower(titleCandidate)
+		if strings.HasSuffix(lower, "series") || strings.HasSuffix(lower, "collection") || strings.HasSuffix(lower, "anthology") || strings.HasSuffix(lower, "trilogy") {
+			item.IsCollection = true
 		}
 	}
 

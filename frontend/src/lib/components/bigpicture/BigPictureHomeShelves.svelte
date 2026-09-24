@@ -27,6 +27,7 @@
   } from 'phosphor-svelte';
   import Hls from 'hls.js';
   import { sound } from '../../navigation/audio';
+  import { gamepad } from '../../navigation/gamepad';
   import { deduplicateGames, cleanCanonicalKey } from '../../utils/gameDeduplication';
   import {
     GetFavorites,
@@ -92,6 +93,28 @@
   let lightboxImage = $state<string | null>(null);
   let lightboxIndex = $state<number>(0);
 
+  // More options menu popover state (...)
+  let isActionMenuOpen = $state<boolean>(false);
+
+  function toggleActionMenu() {
+    isActionMenuOpen = !isActionMenuOpen;
+    if (isActionMenuOpen) {
+      sound.playSelect();
+      setTimeout(() => gamepad.retryFocusZone('modal'), 40);
+    } else {
+      sound.playBack();
+      setTimeout(() => gamepad.retryFocusZone('detail'), 40);
+    }
+  }
+
+  function closeActionMenu() {
+    if (isActionMenuOpen) {
+      isActionMenuOpen = false;
+      sound.playBack();
+      setTimeout(() => gamepad.retryFocusZone('detail'), 40);
+    }
+  }
+
   // Strip container ref
   let stripContainerEl: HTMLDivElement | null = $state(null);
   let cardRefs = $state<Record<number, HTMLButtonElement | null>>({});
@@ -149,6 +172,15 @@
           e.preventDefault();
         }
         return;
+      }
+
+      // When more options menu is open
+      if (isActionMenuOpen) {
+        if (e.key === 'Escape' || e.key === 'Backspace') {
+          closeActionMenu();
+          e.preventDefault();
+          return;
+        }
       }
 
       // When in Theater Mode
@@ -246,6 +278,10 @@
         closeLightbox();
         e.preventDefault();
         e.stopImmediatePropagation();
+      } else if (isActionMenuOpen) {
+        closeActionMenu();
+        e.preventDefault();
+        e.stopImmediatePropagation();
       } else if (isTheaterMode) {
         exitTheaterMode();
         e.preventDefault();
@@ -280,6 +316,56 @@
       window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
     };
   });
+
+  function formatReleaseYear(rawDate: string | undefined | null): string {
+    if (!rawDate) return '';
+    const match = rawDate.match(/\b(19\d\d|20\d\d)\b/);
+    return match ? match[0] : rawDate;
+  }
+
+  function formatSteamRatingText(game: any): string {
+    if (!game) return '';
+    const desc = (game.reviewScoreDesc || '').trim();
+    const percent = typeof game.reviewPercent === 'number' ? game.reviewPercent : 0;
+
+    if (desc) {
+      const lower = desc.toLowerCase();
+      if (lower.includes('крайне полож') || lower.includes('overwhelmingly positive')) return 'Крайне положительные';
+      if (lower.includes('очень полож') || lower.includes('very positive')) return 'Очень положительные';
+      if (lower.includes('в основном полож') || lower.includes('mostly positive')) return 'В основном положительные';
+      if (lower.includes('полож') || lower.includes('positive')) return 'Положительные';
+      if (lower.includes('смешан') || lower.includes('mixed')) return 'Смешанные';
+      if (lower.includes('крайне отриц') || lower.includes('overwhelmingly negative')) return 'Крайне отрицательные';
+      if (lower.includes('очень отриц') || lower.includes('very negative')) return 'Очень отрицательные';
+      if (lower.includes('в основном отриц') || lower.includes('mostly negative')) return 'В основном отрицательные';
+      if (lower.includes('отриц') || lower.includes('negative')) return 'Отрицательные';
+      if (/[а-яА-ЯёЁ]/.test(desc)) return desc;
+    }
+
+    if (percent > 0) {
+      if (percent >= 95) return 'Крайне положительные';
+      if (percent >= 80) return 'Очень положительные';
+      if (percent >= 70) return 'Положительные';
+      if (percent >= 40) return 'Смешанные';
+      if (percent >= 20) return 'В основном отрицательные';
+      return 'Крайне отрицательные';
+    }
+
+    return '';
+  }
+
+  function getRatingColor(game: any): string {
+    if (!game) return 'text-[#8e95a2]';
+    const percent = game.reviewPercent || 0;
+    const desc = (game.reviewScoreDesc || '').toLowerCase();
+    if (desc.includes('отриц') || desc.includes('negative') || (percent > 0 && percent < 40)) {
+      return 'text-rose-400';
+    }
+    if (desc.includes('смешан') || desc.includes('mixed') || (percent >= 40 && percent < 70)) {
+      return 'text-amber-400';
+    }
+    return 'text-[#66c0f4]';
+  }
 
   // Fast URL sanitizer ensuring Akamai/Steam static CDN (bypassing Fastly blockages in CIS)
   function sanitizeMediaUrl(raw: string | undefined | null): string {
@@ -1228,6 +1314,7 @@
 
   function switchFilter(filter: 'all' | 'installed' | 'favorites' | 'catalog' | 'torrents') {
     if (selectedFilter === filter) return;
+    if (isActionMenuOpen) isActionMenuOpen = false;
     sound.playTab();
     selectedFilter = filter;
     focusedIndex = 0;
@@ -1241,6 +1328,7 @@
 
   function moveFocus(delta: number) {
     if (filteredGames.length === 0) return;
+    if (isActionMenuOpen) isActionMenuOpen = false;
     sound.playMove();
     const next = Math.max(0, Math.min(filteredGames.length - 1, focusedIndex + delta));
     if (next !== focusedIndex) {
@@ -1443,78 +1531,41 @@
             {/if}
           </div>
 
-          <!-- Console Meta Chips Line -->
-          <div class="flex flex-wrap items-center gap-2.5">
-            <span class="px-2 py-0.5 rounded bg-white/10 text-white text-[10px] font-black tracking-widest border border-white/20 uppercase">
-              PC
-            </span>
-
-            {#if isFocusedInstalled}
-              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
-                <Check class="w-3.5 h-3.5 stroke-[3]" />
-                <span>Установлено</span>
-              </span>
-            {:else if focusedDownload}
-              <span class="px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-sky-400 text-xs font-semibold flex items-center gap-1.5">
-                <Download class="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>{focusedDownload.progressPercent || 0}%</span>
+          <!-- Clean Meta Line: Genres • Rating • Year • Size -->
+          <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:text-sm font-medium text-[#8e95a2]">
+            {#if effectiveFocusedGame.genres && Array.isArray(effectiveFocusedGame.genres) && effectiveFocusedGame.genres.length > 0}
+              <span class="text-white/90">
+                {effectiveFocusedGame.genres.slice(0, 3).join(', ')}
               </span>
             {/if}
 
-            {#if isFocusedFavorite}
-              <span class="px-2.5 py-0.5 rounded-sm bg-white/[0.06] border border-white/10 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
-                <Star class="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                <span>Избранное</span>
+            {#if formatSteamRatingText(effectiveFocusedGame)}
+              {#if effectiveFocusedGame.genres && effectiveFocusedGame.genres.length > 0}
+                <span class="text-white/20 select-none">•</span>
+              {/if}
+              <span class="font-semibold {getRatingColor(effectiveFocusedGame)}">
+                {formatSteamRatingText(effectiveFocusedGame)}
               </span>
             {/if}
 
-            <span class="px-2.5 py-0.5 rounded-sm border border-white/10 bg-white/[0.06] text-[#cbd5e1] text-xs font-semibold flex items-center gap-1.5">
-              <span>Источник: {effectiveFocusedGame.sourceType === 'torrent' || effectiveFocusedGame.magnetUri ? `Торрент (${formatTorrentSourceName(effectiveFocusedGame.torrentSource) || 'Каталог'})` : 'FTP-сервер'}</span>
-            </span>
-
-            {#if effectiveFocusedGame.releaseDate}
-              <span class="text-xs font-semibold text-[#8e95a2]">
-                {effectiveFocusedGame.releaseDate}
-              </span>
-              <span class="text-white/20">•</span>
+            {#if formatReleaseYear(effectiveFocusedGame.releaseDate)}
+              <span class="text-white/20 select-none">•</span>
+              <span>{formatReleaseYear(effectiveFocusedGame.releaseDate)}</span>
             {/if}
 
             {#if effectiveFocusedGame.sizeDisplay}
-              <span class="text-xs font-semibold text-[#8e95a2]">
-                {effectiveFocusedGame.sizeDisplay}
-              </span>
-              <span class="text-white/20">•</span>
-            {/if}
-
-            {#if effectiveFocusedGame.reviewPercent}
-              <span class="text-xs font-bold text-white flex items-center gap-1">
-                <Star class="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                <span>{effectiveFocusedGame.reviewPercent}%</span>
-              </span>
-              <span class="text-white/20">•</span>
-            {/if}
-
-            {#if effectiveFocusedGame.genres && Array.isArray(effectiveFocusedGame.genres)}
-              <span class="text-xs text-[#8e95a2]">
-                {effectiveFocusedGame.genres.slice(0, 2).join(', ')}
-              </span>
+              <span class="text-white/20 select-none">•</span>
+              <span class="font-mono text-[#cbd5e1]">{effectiveFocusedGame.sizeDisplay}</span>
             {/if}
           </div>
 
-          <!-- Synopsis / Short Description -->
-          {#if effectiveFocusedGame.shortDescription}
-            <p class="text-xs sm:text-sm text-[#cbd5e1] leading-relaxed line-clamp-2 max-w-xl font-normal drop-shadow-sm transition-all duration-700 ease-out">
-              {effectiveFocusedGame.shortDescription}
-            </p>
-          {/if}
-
-          <!-- Tactical Action Buttons -->
+          <!-- Tactical Action Buttons: Only Primary Button and Three Dots Button (PS5 Console Style) -->
           <div class="flex items-center gap-3 pt-2">
             <!-- Primary Action Pill (A) -->
             <button
               data-nav-item
               type="button"
-              class="px-7 py-3 rounded bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              class="px-8 py-3.5 rounded bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
               onclick={handlePrimaryAction}
             >
               {#if isFocusedInstalled}
@@ -1530,89 +1581,140 @@
               <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center">A</span>
             </button>
 
-            <!-- Secondary Action (Folder / Download) (X) -->
-            <button
-              data-nav-item
-              type="button"
-              class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
-              onclick={handleSecondaryAction}
-              title={isFocusedInstalled ? 'Открыть папку с игрой' : 'Начать скачивание игры'}
-            >
-              {#if isFocusedInstalled}
-                <Folder class="w-4 h-4 fill-current text-[#cbd5e1]" />
-                <span>Папка</span>
-              {:else}
-                <Download class="w-4 h-4 stroke-[2.5] text-[#cbd5e1]" />
-                <span>Скачать</span>
-              {/if}
-              <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">X</span>
-            </button>
-
-            <!-- Favorite Toggle (Y) -->
-            <button
-              data-nav-item
-              type="button"
-              class="p-3 rounded bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
-              onclick={handleToggleFavorite}
-              title={isFocusedFavorite ? 'В избранном' : 'Добавить в избранное'}
-            >
-              <Star class="w-4 h-4 {isFocusedFavorite ? 'text-amber-400 fill-amber-400' : 'text-white/40 fill-white/20'}" />
-            </button>
-
-            <!-- Watch Trailer Fullscreen Button -->
-            {#if movieList.length > 0}
+            <!-- More Options Button (...) with Popover Action Menu -->
+            <div class="relative">
               <button
                 data-nav-item
                 type="button"
-                class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
-                onclick={enterTheaterMode}
-                title="Смотреть трейлер во весь экран [↑]"
+                class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-[#cbd5e1] hover:text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none flex items-center justify-center {isActionMenuOpen ? 'bg-white/25 border-white/40 text-white' : ''}"
+                onclick={toggleActionMenu}
+                title="Дополнительные действия (...)"
               >
-                <Volume2 class="w-4 h-4 fill-current text-sky-400" />
-                <span>Трейлер</span>
-                <span class="px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-mono">↑</span>
+                <MoreHorizontal class="w-5 h-5" />
               </button>
-            {/if}
 
-            <!-- More Options -->
-            <button
-              data-nav-item
-              type="button"
-              class="p-3 rounded bg-white/10 hover:bg-white/20 text-[#cbd5e1] hover:text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
-              onclick={() => onSelectGame(effectiveFocusedGame)}
-              title="Все свойства и настройки"
-            >
-              <MoreHorizontal class="w-4 h-4" />
-            </button>
+              {#if isActionMenuOpen}
+                <!-- Backdrop to dismiss on outside click -->
+                <button
+                  type="button"
+                  aria-label="Закрыть меню опций"
+                  class="fixed inset-0 z-40 bg-black/50 cursor-default border-none p-0 m-0 w-full h-full"
+                  onclick={closeActionMenu}
+                ></button>
+
+                <!-- Console-style Popover Menu (PS5 / SteamOS style) -->
+                <div
+                  data-nav-zone="modal"
+                  class="absolute bottom-full left-0 mb-3 w-72 sm:w-80 bg-[#0d1117] border border-white/15 rounded-md shadow-2xl p-1.5 space-y-1 z-50 animate-fade-in"
+                >
+                  <!-- Header: Game title -->
+                  <div class="px-3 py-2 border-b border-white/[0.08] text-left">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-[#8e95a2] truncate">Действия</div>
+                    <div class="text-xs font-semibold text-white truncate">{displayTitle}</div>
+                  </div>
+
+                  <!-- Menu Items -->
+                  <div class="space-y-0.5 pt-1">
+                    <!-- 1. Folder / Download secondary action -->
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="w-full text-left px-3 py-2.5 rounded hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
+                      onclick={() => {
+                        handleSecondaryAction();
+                        closeActionMenu();
+                      }}
+                    >
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        {#if isFocusedInstalled}
+                          <Folder class="w-4 h-4 text-[#94a3b8] group-hover:text-white flex-shrink-0" />
+                          <span class="truncate">Открыть папку с игрой</span>
+                        {:else}
+                          <Download class="w-4 h-4 text-[#94a3b8] group-hover:text-white flex-shrink-0 stroke-[2.5]" />
+                          <span class="truncate">Скачать игру</span>
+                        {/if}
+                      </div>
+                      <span class="text-[10px] font-mono text-[#64748b]">X</span>
+                    </button>
+
+                    <!-- 2. Favorite Toggle -->
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="w-full text-left px-3 py-2.5 rounded hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
+                      onclick={() => {
+                        handleToggleFavorite();
+                        closeActionMenu();
+                      }}
+                    >
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        <Star class="w-4 h-4 flex-shrink-0 {isFocusedFavorite ? 'text-amber-400 fill-amber-400' : 'text-[#94a3b8] group-hover:text-white'}" />
+                        <span class="truncate">{isFocusedFavorite ? 'Удалить из избранного' : 'Добавить в избранное'}</span>
+                      </div>
+                      <span class="text-[10px] font-mono text-[#64748b]">Y</span>
+                    </button>
+
+                    <!-- 3. Fullscreen Trailer (if available) -->
+                    {#if movieList.length > 0}
+                      <button
+                        data-nav-item
+                        type="button"
+                        class="w-full text-left px-3 py-2.5 rounded hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
+                        onclick={() => {
+                          enterTheaterMode();
+                          closeActionMenu();
+                        }}
+                      >
+                        <div class="flex items-center gap-2.5 min-w-0">
+                          <Volume2 class="w-4 h-4 text-sky-400 flex-shrink-0" />
+                          <span class="truncate">Смотреть трейлер</span>
+                        </div>
+                        <span class="text-[10px] font-mono text-[#64748b]">↑</span>
+                      </button>
+                    {/if}
+
+                    <!-- 4. Screenshots Lightbox (if available) -->
+                    {#if gameScreenshots.length > 0}
+                      <button
+                        data-nav-item
+                        type="button"
+                        class="w-full text-left px-3 py-2.5 rounded hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
+                        onclick={() => {
+                          openLightbox(0);
+                          closeActionMenu();
+                        }}
+                      >
+                        <div class="flex items-center gap-2.5 min-w-0">
+                          <ImageIcon class="w-4 h-4 text-[#94a3b8] group-hover:text-white flex-shrink-0" />
+                          <span class="truncate">Скриншоты</span>
+                        </div>
+                        <span class="text-[10px] font-mono text-[#64748b]">({gameScreenshots.length})</span>
+                      </button>
+                    {/if}
+
+                    <!-- 5. Game Detail Page -->
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="w-full text-left px-3 py-2.5 rounded hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
+                      onclick={() => {
+                        onSelectGame(effectiveFocusedGame);
+                        closeActionMenu();
+                      }}
+                    >
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        <Info class="w-4 h-4 text-[#94a3b8] group-hover:text-white flex-shrink-0" />
+                        <span class="truncate">Страница игры</span>
+                      </div>
+                      <span class="text-[10px] font-mono text-[#64748b]">Подробнее</span>
+                    </button>
+                  </div>
+                </div>
+              {/if}
+            </div>
           </div>
 
         </div>
-
-        <!-- Right Side: Screenshots Carousel Strip -->
-        {#if gameScreenshots.length > 0}
-          <div class="w-full lg:w-[460px] xl:w-[500px] flex-shrink-0 flex flex-col justify-end">
-            <div class="flex items-center gap-2.5 overflow-x-auto scrollbar-none py-1">
-              {#each gameScreenshots as sc, idx}
-                <button
-                  data-nav-item
-                  type="button"
-                  class="w-20 sm:w-24 aspect-video rounded-sm overflow-hidden border border-white/15 bg-black/50 hover:border-white hover:scale-105 focus:border-white focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
-                  onclick={() => openLightbox(idx)}
-                  onmouseenter={() => {
-                    activeScreenshotPreview = sc;
-                  }}
-                  onfocus={() => {
-                    activeScreenshotPreview = sc;
-                  }}
-                  title="Открыть скриншот"
-                >
-                  <img src={sc} alt="" class="w-full h-full object-cover" />
-                  <div class="absolute inset-0 bg-white/15 opacity-0 group-hover/thumb:opacity-100 transition-opacity"></div>
-                </button>
-              {/each}
-            </div>
-          </div>
-        {/if}
 
       </div>
     {:else}
@@ -1635,10 +1737,7 @@
           data-nav-item
           type="button"
           class="px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'all' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-          onclick={() => {
-            sound.playTab();
-            selectedFilter = 'all';
-          }}
+          onclick={() => switchFilter('all')}
         >
           Все ({baseAllGames.length})
         </button>
@@ -1647,10 +1746,7 @@
           data-nav-item
           type="button"
           class="px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'installed' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-          onclick={() => {
-            sound.playTab();
-            selectedFilter = 'installed';
-          }}
+          onclick={() => switchFilter('installed')}
         >
           Установленные ({installedCount})
         </button>
@@ -1659,10 +1755,7 @@
           data-nav-item
           type="button"
           class="px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'favorites' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-          onclick={() => {
-            sound.playTab();
-            selectedFilter = 'favorites';
-          }}
+          onclick={() => switchFilter('favorites')}
         >
           Избранное ({favoriteCount})
         </button>

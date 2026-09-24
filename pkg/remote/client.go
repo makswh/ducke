@@ -7,6 +7,7 @@ import (
 	"net"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,11 +19,15 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// ScanProgressCallback reports progress during repository scanning
+type ScanProgressCallback func(foundCount int, currentPath string)
+
 // RemoteClient is the common interface for SFTP / FTP access
 type RemoteClient interface {
 	Connect(cfg config.ServerConfig) error
 	Close() error
 	ScanRepository(rootPath string) ([]RemoteItem, error)
+	ScanRepositoryProgress(rootPath string, cb ScanProgressCallback) ([]RemoteItem, error)
 	ListDirectory(dirPath string) ([]RemoteItem, error)
 	OpenRead(remoteFilePath string, offset int64) (io.ReadCloser, int64, error)
 	GetFileSize(remoteFilePath string) (int64, error)
@@ -70,7 +75,7 @@ func (s *SFTPClient) Connect(cfg config.ServerConfig) error {
 		Timeout:         12 * time.Second,
 	}
 
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	conn, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
 		return fmt.Errorf("SFTP SSH connection failed to %s: %w", addr, err)
@@ -134,7 +139,11 @@ func (s *SFTPClient) ListDirectory(dirPath string) ([]RemoteItem, error) {
 }
 
 func (s *SFTPClient) ScanRepository(rootPath string) ([]RemoteItem, error) {
-	return scanClientRepository(s, rootPath)
+	return scanClientRepository(s, rootPath, nil)
+}
+
+func (s *SFTPClient) ScanRepositoryProgress(rootPath string, cb ScanProgressCallback) ([]RemoteItem, error) {
+	return scanClientRepository(s, rootPath, cb)
 }
 
 func (s *SFTPClient) OpenRead(remoteFilePath string, offset int64) (io.ReadCloser, int64, error) {
@@ -232,23 +241,38 @@ func (f *FTPClient) Connect(cfg config.ServerConfig) error {
 	defer f.mu.Unlock()
 
 	f.config = cfg
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 
-	// Try standard FTP dial with TLS fallback
-	c, err := ftp.Dial(addr,
-		ftp.DialWithTimeout(12*time.Second),
-		ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true}),
-	)
-	if err != nil {
-		// Try unencrypted dial
-		c, err = ftp.Dial(addr, ftp.DialWithTimeout(12*time.Second))
+	var c *ftp.ServerConn
+	var err error
+
+	// If explicit FTPS port (990) or protocol is ftps, try TLS first
+	if cfg.Port == 990 || strings.ToLower(cfg.Protocol) == "ftps" {
+		c, err = ftp.Dial(addr,
+			ftp.DialWithTimeout(6*time.Second),
+			ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true}),
+		)
 		if err != nil {
-			return fmt.Errorf("FTP connection failed to %s: %w", addr, err)
+			c, err = ftp.Dial(addr, ftp.DialWithTimeout(6*time.Second))
+		}
+	} else {
+		// Standard FTP (port 21 or custom plain FTP port): dial unencrypted first for instant connection
+		c, err = ftp.Dial(addr, ftp.DialWithTimeout(6*time.Second))
+		if err != nil {
+			// Fallback with quick TLS attempt
+			c, err = ftp.Dial(addr,
+				ftp.DialWithTimeout(3*time.Second),
+				ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true}),
+			)
 		}
 	}
 
+	if err != nil {
+		return fmt.Errorf("FTP connection failed to %s: %w", addr, err)
+	}
+
 	if err := c.Login(cfg.User, cfg.Password); err != nil {
-		c.Quit()
+		_ = c.Quit()
 		return fmt.Errorf("FTP login failed for user %s: %w", cfg.User, err)
 	}
 
@@ -300,7 +324,11 @@ func (f *FTPClient) ListDirectory(dirPath string) ([]RemoteItem, error) {
 }
 
 func (f *FTPClient) ScanRepository(rootPath string) ([]RemoteItem, error) {
-	return scanClientRepository(f, rootPath)
+	return scanClientRepository(f, rootPath, nil)
+}
+
+func (f *FTPClient) ScanRepositoryProgress(rootPath string, cb ScanProgressCallback) ([]RemoteItem, error) {
+	return scanClientRepository(f, rootPath, cb)
 }
 
 func (f *FTPClient) OpenRead(remoteFilePath string, offset int64) (io.ReadCloser, int64, error) {
@@ -415,7 +443,7 @@ func TestServerConnection(cfg config.ServerConfig) (string, error) {
 	}
 
 	// Also check raw TCP ping
-	tcpAddr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	tcpAddr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	conn, tcpErr := net.DialTimeout("tcp", tcpAddr, 4*time.Second)
 	if tcpErr != nil {
 		return "", fmt.Errorf("host unreachable on %s: %w", tcpAddr, tcpErr)
@@ -438,12 +466,11 @@ func isSectionContainer(name string) bool {
 	}
 }
 
-// scanClientRepository performs multi-section scanning across /public, /private, and root directories
-func scanClientRepository(client RemoteClient, rootPath string) ([]RemoteItem, error) {
-	rootCandidates := []string{"/", "/public", "/private"}
-	cleaned := strings.TrimSpace(rootPath)
-	if cleaned != "" && cleaned != "/0" && cleaned != "0" && cleaned != "." {
-		rootCandidates = append([]string{cleaned}, rootCandidates...)
+// scanClientRepository performs fast, targeted scanning across the repository directory
+func scanClientRepository(client RemoteClient, rootPath string, onProgress ScanProgressCallback) ([]RemoteItem, error) {
+	cleaned := path.Clean(strings.TrimSpace(rootPath))
+	if cleaned == "." || cleaned == "/0" || cleaned == "0" || cleaned == "" {
+		cleaned = "/"
 	}
 
 	seenPaths := make(map[string]bool)
@@ -455,69 +482,94 @@ func scanClientRepository(client RemoteClient, rootPath string) ([]RemoteItem, e
 		}
 		seenPaths[item.RemotePath] = true
 		allGames = append(allGames, item)
+		if onProgress != nil && len(allGames)%15 == 0 {
+			onProgress(len(allGames), item.RemotePath)
+		}
 	}
 
-	var sectionsToScan []RemoteItem
 	scannedDirs := make(map[string]bool)
+	var sectionsToScan []RemoteItem
 
-	for _, cand := range rootCandidates {
-		if scannedDirs[cand] {
+	// 1. Scan primary target directory
+	scannedDirs[cleaned] = true
+	items, err := client.ListDirectory(cleaned)
+
+	// Fallback: If root "/" was scanned and returned 0 items or error, probe "/public" as common default
+	if (err != nil || len(items) == 0) && cleaned == "/" {
+		if pubItems, pubErr := client.ListDirectory("/public"); pubErr == nil && len(pubItems) > 0 {
+			cleaned = "/public"
+			scannedDirs["/public"] = true
+			items = pubItems
+			err = nil
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range items {
+		if !item.IsDirectory {
+			addGame(item)
 			continue
 		}
-		scannedDirs[cand] = true
 
-		items, err := client.ListDirectory(cand)
-		if err != nil || len(items) == 0 {
-			continue
-		}
-
-		for _, item := range items {
-			if !item.IsDirectory {
-				addGame(item)
-				continue
-			}
-
-			if isSectionContainer(item.CleanTitle) || isSectionContainer(item.RawName) {
-				sectionsToScan = append(sectionsToScan, item)
-			} else if item.IsCollection {
-				subItems, subErr := client.ListDirectory(item.RemotePath)
-				if subErr == nil && len(subItems) > 0 {
-					for _, sub := range subItems {
+		if isSectionContainer(item.CleanTitle) || isSectionContainer(item.RawName) {
+			sectionsToScan = append(sectionsToScan, item)
+		} else if item.IsCollection {
+			subItems, subErr := client.ListDirectory(item.RemotePath)
+			hasSubDirs := false
+			if subErr == nil && len(subItems) > 0 {
+				for _, sub := range subItems {
+					if sub.IsDirectory {
+						hasSubDirs = true
 						sub.ParentPath = item.CleanTitle
 						addGame(sub)
 					}
-				} else {
-					addGame(item)
 				}
-			} else {
+			}
+			if !hasSubDirs {
 				addGame(item)
 			}
+		} else {
+			addGame(item)
 		}
 	}
 
+	// 2. Scan discovered sub-sections (e.g. PC Games, Repacks, etc.)
 	for _, sec := range sectionsToScan {
-		if scannedDirs[sec.RemotePath] {
+		secClean := path.Clean(sec.RemotePath)
+		if scannedDirs[secClean] {
 			continue
 		}
-		scannedDirs[sec.RemotePath] = true
+		scannedDirs[secClean] = true
 
-		secItems, err := client.ListDirectory(sec.RemotePath)
-		if err != nil || len(secItems) == 0 {
+		secItems, secErr := client.ListDirectory(sec.RemotePath)
+		if secErr != nil || len(secItems) == 0 {
 			continue
 		}
 
 		secTag := strings.ToUpper(sec.CleanTitle)
-
 		for _, item := range secItems {
 			if item.IsCollection && item.IsDirectory {
 				subItems, subErr := client.ListDirectory(item.RemotePath)
+				hasSubDirs := false
 				if subErr == nil && len(subItems) > 0 {
 					for _, sub := range subItems {
-						sub.ParentPath = fmt.Sprintf("[%s] %s", secTag, item.CleanTitle)
-						addGame(sub)
+						if sub.IsDirectory {
+							hasSubDirs = true
+							sub.ParentPath = fmt.Sprintf("[%s] %s", secTag, item.CleanTitle)
+							addGame(sub)
+						}
 					}
-					continue
 				}
+				if !hasSubDirs {
+					if item.ParentPath == "" {
+						item.ParentPath = secTag
+					}
+					addGame(item)
+				}
+				continue
 			}
 
 			if item.ParentPath == "" {
@@ -525,6 +577,10 @@ func scanClientRepository(client RemoteClient, rootPath string) ([]RemoteItem, e
 			}
 			addGame(item)
 		}
+	}
+
+	if onProgress != nil {
+		onProgress(len(allGames), cleaned)
 	}
 
 	return allGames, nil

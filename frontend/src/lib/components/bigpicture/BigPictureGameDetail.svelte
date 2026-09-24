@@ -265,18 +265,7 @@
   let lastSeedsFetchedGameId = 0;
 
   function formatSeedsCount(seeds: number): string {
-    const mod10 = seeds % 10;
-    const mod100 = seeds % 100;
-    if (mod100 >= 11 && mod100 <= 19) {
-      return `${seeds} сидов`;
-    }
-    if (mod10 === 1) {
-      return `${seeds} сид`;
-    }
-    if (mod10 >= 2 && mod10 <= 4) {
-      return `${seeds} сида`;
-    }
-    return `${seeds} сидов`;
+    return `${seeds}`;
   }
 
   async function loadTorrentSeedsForGame(g: GameEntity | null | undefined) {

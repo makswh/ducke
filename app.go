@@ -260,7 +260,12 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	defer client.Close()
 
 	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "scanning", "message": "Сканирование каталога..."})
-	remoteItems, err := client.ScanRepository(remoteDir)
+	remoteItems, err := client.ScanRepositoryProgress(remoteDir, func(foundCount int, currentPath string) {
+		wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{
+			"status":  "scanning",
+			"message": fmt.Sprintf("Сканирование каталога... (найдено: %d)", foundCount),
+		})
+	})
 	if err != nil {
 		log.Printf("[Remote] ERROR: Repository scan failed: %v", err)
 		wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "error", "message": "Ошибка сканирования репозитория"})
@@ -275,7 +280,10 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 		return nil, fmt.Errorf("failed to cache games: %w", err)
 	}
 
-	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "ready", "message": ""})
+	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{
+		"status":  "ready",
+		"message": fmt.Sprintf("Каталог обновлен: %d игр", len(remoteItems)),
+	})
 	finalGames, finalErr := a.db.GetAllGames()
 	if finalErr == nil {
 		a.catalogCache = finalGames

@@ -95,6 +95,24 @@ func TestParseFolderName(t *testing.T) {
 			expectedSize:  "18.9 GB",
 			isCollection:  false,
 		},
+		{
+			name:          "Trilogy release with size is not a collection",
+			folderName:    "Mafia Trilogy 45.2GB",
+			remotePath:    "/public/Mafia Trilogy 45.2GB",
+			isDir:         true,
+			expectedTitle: "Mafia Trilogy",
+			expectedSize:  "45.2 GB",
+			isCollection:  false,
+		},
+		{
+			name:          "Collection release with size is not a collection",
+			folderName:    "Borderlands The Handsome Collection [35 GB]",
+			remotePath:    "/public/Borderlands The Handsome Collection [35 GB]",
+			isDir:         true,
+			expectedTitle: "Borderlands The Handsome Collection",
+			expectedSize:  "35 GB",
+			isCollection:  false,
+		},
 	}
 
 	for _, tt := range tests {

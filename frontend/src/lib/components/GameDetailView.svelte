@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { slide } from 'svelte/transition';
   import {
     GameController as Gamepad2,
     HardDrive,
@@ -416,7 +417,38 @@
   let selectedVariantId = $state<number | null>(null);
   let isVariantDropdownOpen = $state<boolean>(false);
   let variantDropdownTriggerEl = $state<HTMLButtonElement | null>(null);
+  let secondaryVariantDropdownTriggerEl = $state<HTMLButtonElement | null>(null);
   let variantDropdownContainerEl = $state<HTMLDivElement | null>(null);
+  let variantSearchQuery = $state<string>('');
+  let variantSortBy = $state<'default' | 'seeds' | 'size'>('default');
+
+  let currentGame = $derived(pageDetails?.game || game);
+
+  let displayedVariants = $derived.by(() => {
+    const list = currentGame?.variants ? [...currentGame.variants] : [];
+    if (list.length === 0) return [];
+
+    let filtered = list;
+    if (variantSearchQuery.trim()) {
+      const q = variantSearchQuery.toLowerCase().trim();
+      filtered = filtered.filter((v: GameVariant) =>
+        (v.rawName && v.rawName.toLowerCase().includes(q)) ||
+        (v.torrentSource && v.torrentSource.toLowerCase().includes(q)) ||
+        (v.version && v.version.toLowerCase().includes(q))
+      );
+    }
+
+    if (variantSortBy === 'seeds') {
+      filtered.sort((a: GameVariant, b: GameVariant) => {
+        const sa = variantSeeds[a.id]?.seeders ?? -1;
+        const sb = variantSeeds[b.id]?.seeders ?? -1;
+        return sb - sa;
+      });
+    } else if (variantSortBy === 'size') {
+      filtered.sort((a: GameVariant, b: GameVariant) => (b.sizeBytes || 0) - (a.sizeBytes || 0));
+    }
+    return filtered;
+  });
 
   // Favorites backlog state
   let isFavoriteDropdownOpen = $state<boolean>(false);
@@ -579,18 +611,7 @@
   let lastSeedsFetchedGameId = 0;
 
   function formatSeedsCount(seeds: number): string {
-    const mod10 = seeds % 10;
-    const mod100 = seeds % 100;
-    if (mod100 >= 11 && mod100 <= 19) {
-      return `${seeds} сидов`;
-    }
-    if (mod10 === 1) {
-      return `${seeds} сид`;
-    }
-    if (mod10 >= 2 && mod10 <= 4) {
-      return `${seeds} сида`;
-    }
-    return `${seeds} сидов`;
+    return `${seeds}`;
   }
 
   async function loadTorrentSeedsForGame(g: GameEntity | null | undefined) {
@@ -667,7 +688,11 @@
     const target = e.target as Node | null;
     if (!target) return;
     if (isVariantDropdownOpen) {
-      if (!variantDropdownContainerEl?.contains(target) && !variantDropdownTriggerEl?.contains(target)) {
+      if (
+        !variantDropdownContainerEl?.contains(target) &&
+        !variantDropdownTriggerEl?.contains(target) &&
+        !secondaryVariantDropdownTriggerEl?.contains(target)
+      ) {
         isVariantDropdownOpen = false;
       }
     }
@@ -2109,60 +2134,14 @@
                           onclick={(e) => {
                             e.stopPropagation();
                             isVariantDropdownOpen = !isVariantDropdownOpen;
+                            if (isVariantDropdownOpen) {
+                              variantSearchQuery = '';
+                            }
                           }}
                           title="Выбрать версию ({g.variants.length} доступно)"
                         >
                           <ChevronDown class="w-4 h-4 stroke-[2.5] transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
                         </button>
-
-                        {#if isVariantDropdownOpen}
-                          <div
-                            bind:this={variantDropdownContainerEl}
-                            class="absolute left-0 top-full mt-2 z-50 min-w-[340px] sm:min-w-[420px] max-w-[500px] max-h-72 overflow-y-auto overscroll-contain rounded bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1"
-                          >
-                            <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
-                              Выбор версии для скачивания ({g.variants.length})
-                            </div>
-                            {#each g.variants as variant (variant.id)}
-                              {@const isSelected = (activeVariant?.id === variant.id)}
-                              <button
-                                type="button"
-                                class="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-sm text-xs transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                                onclick={(e) => {
-                                  e.stopPropagation();
-                                  selectedVariantId = variant.id;
-                                  isVariantDropdownOpen = false;
-                                }}
-                              >
-                                <div class="min-w-0 flex-1 pointer-events-none">
-                                  <div class="truncate text-white text-xs">{variant.rawName}</div>
-                                  <div class="flex items-center gap-2 text-[10px] text-[#6b7280] font-mono mt-0.5">
-                                    <span>Источник: {variant.sourceType === 'torrent' || variant.magnetUri ? `Торрент (${formatSourceName(variant.torrentSource) || 'Каталог'})` : 'FTP-сервер'}</span>
-                                    {#if variant.sourceType === 'torrent' || variant.magnetUri}
-                                      {#if variantSeeds[variant.id]?.loading}
-                                        <span class="text-white/20">•</span>
-                                        <span class="text-[#64748b] animate-pulse">сиды: ...</span>
-                                      {:else if variantSeeds[variant.id]}
-                                        {@const s = variantSeeds[variant.id].seeders}
-                                        <span class="text-white/20">•</span>
-                                        <span class="inline-flex items-center gap-0.5 {s > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
-                                          <UploadSimple class="w-3 h-3 stroke-[2.5]" />
-                                          <span>{formatSeedsCount(s)}</span>
-                                        </span>
-                                      {/if}
-                                    {/if}
-                                  </div>
-                                </div>
-                                <div class="flex items-center gap-2 flex-shrink-0 font-mono text-[11px] pointer-events-none {isSelected ? 'text-[var(--game-accent)] font-bold' : 'text-[#6b7280]'}">
-                                  <span>{variant.sizeDisplay}</span>
-                                  {#if isSelected}
-                                    <Check class="w-3.5 h-3.5 stroke-[2.5]" />
-                                  {/if}
-                                </div>
-                              </button>
-                            {/each}
-                          </div>
-                        {/if}
                       {/if}
                     </div>
 
@@ -2193,7 +2172,10 @@
                   {#if currentVariantSeedInfo}
                     <span class="text-white/20 select-none">•</span>
                     {#if currentVariantSeedInfo.loading}
-                      <span class="text-[#64748b] font-mono text-[11px] animate-pulse">поиск сидов...</span>
+                      <span class="inline-flex items-center gap-1 font-mono text-[11px] text-[#64748b] animate-pulse">
+                        <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>...</span>
+                      </span>
                     {:else}
                       <span class="inline-flex items-center gap-1 font-mono text-[11px] {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
                         <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
@@ -2204,12 +2186,31 @@
 
                   {#if (activeVariant?.rawName || g.rawName)}
                     <span class="text-white/20 select-none">•</span>
-                    <span
-                      class="font-mono text-[#64748b] truncate max-w-md"
-                      title={activeVariant?.rawName || g.rawName}
-                    >
-                      {activeVariant?.rawName || g.rawName}
-                    </span>
+                    {#if g.variants && g.variants.length > 1}
+                      <button
+                        bind:this={secondaryVariantDropdownTriggerEl}
+                        type="button"
+                        class="font-mono text-[#8e95a2] hover:text-white transition-colors truncate max-w-md cursor-pointer hover:underline text-left inline-flex items-center gap-1"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          isVariantDropdownOpen = !isVariantDropdownOpen;
+                          if (isVariantDropdownOpen) {
+                            variantSearchQuery = '';
+                          }
+                        }}
+                        title="Нажмите, чтобы сменить версию или репак"
+                      >
+                        <span class="truncate">{activeVariant?.rawName || g.rawName}</span>
+                        <ChevronDown class="w-3 h-3 flex-shrink-0 transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
+                      </button>
+                    {:else}
+                      <span
+                        class="font-mono text-[#64748b] truncate max-w-md"
+                        title={activeVariant?.rawName || g.rawName}
+                      >
+                        {activeVariant?.rawName || g.rawName}
+                      </span>
+                    {/if}
                   {/if}
                 </div>
               </div>
@@ -2219,6 +2220,182 @@
 
         </div>
       </div>
+
+      <!-- FULL-WIDTH REPACK & VERSION SELECTOR WITH MICROANIMATION -->
+      {#if isVariantDropdownOpen && g.variants && g.variants.length > 1}
+        <div
+          bind:this={variantDropdownContainerEl}
+          transition:slide={{ duration: 250 }}
+          class="w-full p-5 rounded bg-[#07080a] border border-white/[0.08] space-y-4 shadow-xl"
+        >
+          <!-- Header: Title, Count Badge & Collapse Button -->
+          <div class="flex items-center justify-between gap-3 pb-3 border-b border-white/[0.06]">
+            <div class="flex items-center gap-2">
+              <Disc class="w-4 h-4 text-[#8e95a2]" />
+              <span class="text-xs font-bold uppercase tracking-wider text-white">Доступные издания и репаки</span>
+              <span class="text-[10px] font-mono font-semibold text-[#8e95a2] bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
+                {displayedVariants.length}{#if variantSearchQuery} / {g.variants.length}{/if}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              class="text-xs text-[#8e95a2] hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors py-1 px-2.5 rounded hover:bg-white/[0.06]"
+              onclick={() => (isVariantDropdownOpen = false)}
+            >
+              <span>Свернуть</span>
+              <ChevronDown class="w-3.5 h-3.5 rotate-180" />
+            </button>
+          </div>
+
+          <!-- Toolbar: Search & Sort Buttons (Aligned with Ducke System) -->
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <!-- Search Input -->
+            <div class="relative flex-1 min-w-[200px] max-w-sm">
+              <Search class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#6b7280] pointer-events-none" />
+              <input
+                type="text"
+                bind:value={variantSearchQuery}
+                placeholder="Поиск по названию или трекеру..."
+                class="w-full bg-[#0d1117] text-[#ededed] placeholder-[#5a6170] text-xs font-medium rounded pl-9 pr-7 py-1.5 border border-white/[0.08] focus:border-white/20 focus:outline-none transition-colors"
+              />
+              {#if variantSearchQuery}
+                <button
+                  type="button"
+                  class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#6b7280] hover:text-white cursor-pointer"
+                  onclick={() => (variantSearchQuery = '')}
+                >
+                  <X class="w-3.5 h-3.5" />
+                </button>
+              {/if}
+            </div>
+
+            <!-- Sort Segment Switch -->
+            <div class="flex items-center gap-2 text-xs flex-shrink-0">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-[#64748b] hidden sm:inline">Сортировка:</span>
+              <div class="flex items-center bg-[#0d1117] border border-white/[0.08] rounded p-0.5">
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-sm text-xs transition-colors cursor-pointer {variantSortBy === 'default' ? 'bg-white/10 text-white font-semibold' : 'text-[#8e95a2] hover:text-white'}"
+                  onclick={() => (variantSortBy = 'default')}
+                >
+                  По умолчанию
+                </button>
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-sm text-xs transition-colors cursor-pointer {variantSortBy === 'seeds' ? 'bg-white/10 text-white font-semibold' : 'text-[#8e95a2] hover:text-white'}"
+                  onclick={() => (variantSortBy = 'seeds')}
+                  title="Сортировать по количеству сидов"
+                >
+                  По сидам
+                </button>
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-sm text-xs transition-colors cursor-pointer {variantSortBy === 'size' ? 'bg-white/10 text-white font-semibold' : 'text-[#8e95a2] hover:text-white'}"
+                  onclick={() => (variantSortBy = 'size')}
+                  title="Сортировать по размеру"
+                >
+                  По размеру
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- List: Structured Ducke-Style Cards with Proper Visual Hierarchy -->
+          <div class="max-h-80 overflow-y-auto space-y-1.5 pr-1 no-scrollbar">
+            {#if displayedVariants.length === 0}
+              <div class="py-8 text-center text-xs text-[#64748b] flex flex-col items-center gap-1.5">
+                <span>Релизов по запросу «{variantSearchQuery}» не найдено</span>
+                <button
+                  type="button"
+                  class="text-[#8e95a2] hover:text-white hover:underline cursor-pointer"
+                  onclick={() => (variantSearchQuery = '')}
+                >
+                  Сбросить поиск
+                </button>
+              </div>
+            {:else}
+              {#each displayedVariants as variant (variant.id)}
+                {@const isSelected = (activeVariant?.id === variant.id)}
+                {@const seedInfo = variantSeeds[variant.id]}
+                {@const seedCount = seedInfo?.seeders ?? 0}
+                {@const rawSrc = formatSourceName(variant.torrentSource)}
+
+                <div
+                  role="button"
+                  tabindex="0"
+                  class="group relative p-3 rounded cursor-pointer transition-all border {isSelected ? 'bg-white/[0.06] border-white/20 before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-r before:bg-white shadow-sm' : 'bg-[#0d1117] hover:bg-[#11141c] border-white/[0.04] hover:border-white/10'}"
+                  onclick={() => {
+                    selectedVariantId = variant.id;
+                  }}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') {
+                      selectedVariantId = variant.id;
+                    }
+                  }}
+                  title={variant.rawName}
+                >
+                  <div class="flex items-center justify-between gap-4">
+                    <!-- Left: Disc icon + Title on top, metadata below -->
+                    <div class="flex items-start gap-3 min-w-0 flex-1">
+                      <div class="w-8 h-8 rounded bg-white/[0.04] border border-white/[0.06] flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:border-white/15 transition-colors">
+                        <Disc class="w-4 h-4 {isSelected ? 'text-white' : 'text-[#8e95a2] group-hover:text-white'} transition-colors" />
+                      </div>
+
+                      <div class="min-w-0 flex-1">
+                        <!-- Main Title -->
+                        <h4 class="text-xs sm:text-[13px] font-semibold leading-snug truncate {isSelected ? 'text-white' : 'text-[#ededed] group-hover:text-white'} transition-colors">
+                          {variant.rawName}
+                        </h4>
+
+                        <!-- Secondary Subtitle: Source & Format -->
+                        <div class="flex items-center gap-2 mt-1 text-[11px] text-[#8e95a2]">
+                          <span class="truncate">{variant.sourceType === 'torrent' || variant.magnetUri ? `Источник: ${rawSrc || 'Торрент'}` : 'Прямая загрузка'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Right: Seeds, Size and Button -->
+                    <div class="flex items-center gap-3 sm:gap-4 flex-shrink-0">
+                      <!-- Seeds: Clean icon + number, no border or bg -->
+                      {#if variant.sourceType === 'torrent' || variant.magnetUri}
+                        {#if seedInfo?.loading}
+                          <span class="inline-flex items-center gap-1 text-[11px] font-mono text-[#64748b] animate-pulse">
+                            <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>...</span>
+                          </span>
+                        {:else if seedInfo}
+                          <span class="inline-flex items-center gap-1 font-mono text-xs {seedCount >= 10 ? 'text-emerald-400 font-semibold' : (seedCount > 0 ? 'text-amber-400' : 'text-[#64748b]')}">
+                            <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>{formatSeedsCount(seedCount)}</span>
+                          </span>
+                        {/if}
+                      {/if}
+
+                      <!-- Size -->
+                      <span class="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-black/40 border border-white/[0.06] {isSelected ? 'text-white' : 'text-[#cbd5e1]'} text-right">
+                        {variant.sizeDisplay}
+                      </span>
+
+                      <!-- Select button / badge -->
+                      {#if isSelected}
+                        <span class="px-2.5 py-1 rounded bg-white/15 border border-white/20 text-xs font-bold text-white flex items-center gap-1.5 shadow-sm">
+                          <Check class="w-3.5 h-3.5 stroke-[3] text-emerald-400" />
+                          <span>Выбрано</span>
+                        </span>
+                      {:else}
+                        <span class="px-2.5 py-1 rounded bg-white/[0.04] group-hover:bg-white/10 border border-white/[0.06] text-xs font-medium text-[#8e95a2] group-hover:text-white transition-colors">
+                          Выбрать
+                        </span>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        </div>
+      {/if}
 
       <!-- Launch Config Modal -->
       {#if isLaunchConfigOpen && (favoriteItem || isGameInFavorites)}

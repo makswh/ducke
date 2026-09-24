@@ -492,7 +492,7 @@
 
       // 2. Fetch game catalog and torrent catalog concurrently and independently
       if (ftpAvailable) {
-        withTimeout(GetCatalog(false), 12000, [], 'GetCatalog')
+        withTimeout(GetCatalog(false), 45000, [], 'GetCatalog')
           .then((res) => {
             games = Array.isArray(res) ? res : [];
             logApp('INFO', `Catalog loaded: ${games.length} games`);
@@ -776,6 +776,11 @@
       if (!data) return;
       if (data.status === 'connecting' || data.status === 'scanning') {
         catalogStatusText = data.message || '';
+      } else if (data.status === 'ready' && data.message) {
+        catalogStatusText = data.message;
+        setTimeout(() => {
+          if (catalogStatusText === data.message) catalogStatusText = '';
+        }, 3500);
       } else {
         catalogStatusText = '';
       }
