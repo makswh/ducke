@@ -30,7 +30,8 @@
     isLoading = false,
     loadingStatusText = '',
     onStartDownload = (gameId: number, targetPath: string) => {},
-    onSelectFolder = async (): Promise<string> => ''
+    onSelectFolder = async (): Promise<string> => '',
+    onUpdateDownloadPath = (path: string) => {}
   } = $props();
 
   const SAVED_SORT_KEY = 'ducke_catalog_selected_sort';
@@ -197,7 +198,9 @@
   // Deduplicate only when raw 'games' array reference changes and precompute search corpus & flags
   let deduplicatedList = $derived.by(() => {
     const rawGames = Array.isArray(games) ? games : [];
-    const list = deduplicateGames(rawGames);
+    // If games are already deduplicated from backend (variants field is populated), skip redundant 20k DSU pass
+    const isAlreadyDeduplicated = rawGames.length > 0 && Array.isArray(rawGames[0]?.variants);
+    const list = isAlreadyDeduplicated ? rawGames : deduplicateGames(rawGames);
     return list.map((g) => {
       const gList = (Array.isArray(g.genres) ? g.genres : []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
       const tList = (Array.isArray(g.tags) ? g.tags : []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
@@ -367,7 +370,15 @@
         return scoreB - scoreA;
       });
     } else {
-      result.sort((a, b) => (b.id || 0) - (a.id || 0));
+      // date_desc: sort by Steam release year descending; games without year go to the end
+      result.sort((a, b) => {
+        const ay = a._releaseYear;
+        const by_ = b._releaseYear;
+        if (ay !== null && by_ !== null) return by_ - ay;
+        if (ay !== null) return -1;
+        if (by_ !== null) return 1;
+        return (b.id || 0) - (a.id || 0);
+      });
     }
 
     return result;
@@ -1030,9 +1041,13 @@
         <div class="px-3 py-2 mb-1.5 text-[11px] text-[#525a6c] font-mono tracking-wider uppercase truncate">
           {loadingStatusText || 'Загрузка...'}
         </div>
-        <div class="flex flex-col gap-1 w-full">
-          {#each Array(9) as _, i}
-            <div class="h-[58px] rounded sk-block p-2.5 px-3 flex flex-col justify-between" style="animation-delay: {i * 60}ms">
+        <div class="flex flex-col gap-1 w-full pointer-events-none select-none">
+          {#each Array(10) as _, i}
+            {@const opacity = (Math.max(0.03, 1 - Math.pow(i / 9, 1.25) * 0.97)).toFixed(3)}
+            <div
+              class="h-[58px] rounded sk-block p-2.5 px-3 flex flex-col justify-between transition-opacity duration-300"
+              style="animation-delay: {i * 60}ms; opacity: {opacity};"
+            >
               <div class="sk-line h-3 w-3/4"></div>
               <div class="flex justify-between items-center">
                 <div class="sk-line h-2 w-16"></div>
@@ -1129,6 +1144,7 @@
     {downloadPath}
     {onStartDownload}
     {onSelectFolder}
+    {onUpdateDownloadPath}
     onSelectGenre={(g: string) => {
       selectedGenre = g;
     }}

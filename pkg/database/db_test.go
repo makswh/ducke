@@ -184,3 +184,83 @@ func TestMatchLibraryGame(t *testing.T) {
 		t.Fatalf("expected Half-Life 3 to not match")
 	}
 }
+
+func TestConcurrentReadWhileWriting(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ducke_concurrency_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	db, err := InitDB(tempDir)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	defer db.Close()
+
+	// Seed initial items
+	var initialItems []HydraDownloadItem
+	for i := 0; i < 50; i++ {
+		initialItems = append(initialItems, HydraDownloadItem{
+			Title:      "Initial Game " + string(rune('A'+i)),
+			URIs:       []string{"magnet:?xt=urn:btih:init_" + string(rune('A'+i))},
+			FileSize:   "1 GB",
+			UploadDate: "2024-01-01",
+		})
+	}
+	if err := db.UpsertTorrentGames("src_init", "Initial Source", initialItems); err != nil {
+		t.Fatalf("failed to seed initial items: %v", err)
+	}
+
+	stopCh := make(chan struct{})
+	errCh := make(chan error, 10)
+
+	// Writer goroutine: repeatedly inserts large batch of games
+	go func() {
+		defer close(stopCh)
+		var writeItems []HydraDownloadItem
+		for i := 0; i < 1500; i++ {
+			writeItems = append(writeItems, HydraDownloadItem{
+				Title:      "Bulk Torrent Game",
+				URIs:       []string{"magnet:?xt=urn:btih:bulk_" + string(rune(i))},
+				FileSize:   "2 GB",
+				UploadDate: "2024-02-01",
+			})
+		}
+		if err := db.UpsertTorrentGames("src_bulk", "Bulk Source", writeItems); err != nil {
+			errCh <- err
+		}
+	}()
+
+	// Reader goroutines: continuously query catalog while writer is running
+	readCount := 0
+	for {
+		select {
+		case <-stopCh:
+			goto finished
+		default:
+			games, err := db.GetTorrentGames()
+			if err != nil {
+				t.Fatalf("concurrent GetTorrentGames failed: %v", err)
+			}
+			if len(games) == 0 {
+				t.Fatalf("expected non-empty games")
+			}
+			_, _ = db.GetFavorites()
+			_, _ = db.GetGameByID(1)
+			readCount++
+		}
+	}
+
+finished:
+	select {
+	case err := <-errCh:
+		t.Fatalf("writer failed with error: %v", err)
+	default:
+	}
+
+	if readCount < 5 {
+		t.Errorf("expected at least 5 concurrent reads during write, got %d", readCount)
+	}
+}
+

@@ -38,6 +38,7 @@
     downloadPath = 'C:\\Ducke',
     onStartDownload = (gameId: number, targetPath: string) => {},
     onSelectFolder = () => Promise.resolve(''),
+    onUpdateDownloadPath = (path: string) => {},
     onSearchInCatalog = (query: string) => {}
   } = $props();
 
@@ -242,6 +243,7 @@
           {downloadPath}
           {onStartDownload}
           {onSelectFolder}
+          {onUpdateDownloadPath}
         />
       </div>
     </div>

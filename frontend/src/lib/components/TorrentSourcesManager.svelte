@@ -239,7 +239,7 @@
               <div class="flex items-center gap-3 text-[11px] font-mono text-[#64748b]">
                 <span class="truncate max-w-md">{src.url}</span>
                 <span>•</span>
-                <span>Синхр: {src.lastSynced ? new Date(src.lastSynced * 1000).toLocaleString() : 'Никогда'}</span>
+                <span>Синхр: {src.lastSynced ? new Date(src.lastSynced > 1e11 ? src.lastSynced : src.lastSynced * 1000).toLocaleString() : 'Никогда'}</span>
               </div>
             </div>
 

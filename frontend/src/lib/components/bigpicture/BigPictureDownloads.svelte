@@ -18,6 +18,7 @@
     ChartLineUp
   } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
+  import { downloadsStore } from '../../stores/downloads.svelte';
 
   interface DownloadItem {
     downloadId: string;
@@ -292,37 +293,11 @@
   let diskSpace = $state<DiskInfo | null>(null);
   let peakSpeedBytes = $state<number>(0);
 
-  let safeActiveDownloads = $derived.by<DownloadItem[]>(() => {
-    return (activeDownloads || []).filter((d) => d && d.downloadId && d.status !== 'completed' && d.status !== 'cancelled');
-  });
-
-  let currentDownload = $derived.by<DownloadItem | null>(() => {
-    if (safeActiveDownloads.length === 0) return null;
-    const active = safeActiveDownloads.find((d) => d.status === 'downloading' || d.status === 'scanning');
-    return active || safeActiveDownloads[0];
-  });
-
-  let queuedDownloads = $derived.by<DownloadItem[]>(() => {
-    if (!currentDownload) return [];
-    return safeActiveDownloads.filter((d) => d.downloadId !== currentDownload?.downloadId);
-  });
-
-  let safeDownloadHistory = $derived.by<DownloadRecord[]>(() => {
-    const list = downloadHistory || [];
-    const activeIds = new Set(safeActiveDownloads.map((d) => d.downloadId));
-    const activeGameIds = new Set(safeActiveDownloads.map((d) => d.gameId));
-    return list.filter((r) => !activeIds.has(r.id) && !activeGameIds.has(r.gameId));
-  });
-
-  let totalSpeedBytes = $derived.by<number>(() => {
-    let sum = 0;
-    for (const dl of safeActiveDownloads) {
-      if (dl.status === 'downloading' && dl.speedBytesPerSec > 0) {
-        sum += dl.speedBytesPerSec;
-      }
-    }
-    return sum;
-  });
+  let safeActiveDownloads = $derived(downloadsStore.safeActiveDownloads);
+  let currentDownload = $derived(downloadsStore.currentDownload);
+  let queuedDownloads = $derived(downloadsStore.queuedDownloads);
+  let safeDownloadHistory = $derived(downloadsStore.completedHistory);
+  let totalSpeedBytes = $derived(downloadsStore.totalSpeedBytes);
 
   $effect(() => {
     if (totalSpeedBytes > peakSpeedBytes) {
@@ -515,6 +490,7 @@
 
   onMount(() => {
     isMounted = true;
+    downloadsStore.refresh();
     loadDiskSpace();
     const diskTimer = setInterval(() => {
       if (isMounted) loadDiskSpace();

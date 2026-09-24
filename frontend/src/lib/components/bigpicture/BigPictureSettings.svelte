@@ -118,6 +118,7 @@
   let selectedServerId = $state<string>('');
   let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.5' });
   let storageDrives = $state<StorageDrive[]>([]);
+  let isLoadingDrives = $state<boolean>(true);
   let isTestingConnection = $state<boolean>(false);
   let testResult = $state<{ success: boolean; message: string } | null>(null);
   let saveFeedbackVisible = $state<boolean>(false);
@@ -265,16 +266,21 @@
   });
 
   async function loadStorageDrives() {
+    isLoadingDrives = true;
     try {
+      let drives: any = null;
       if (typeof (AppAPI as any)?.GetStorageDrives === 'function') {
-        const drives = await (AppAPI as any).GetStorageDrives();
-        if (Array.isArray(drives) && drives.length > 0) storageDrives = drives;
+        drives = await (AppAPI as any).GetStorageDrives();
       } else if (typeof (window as any)?.go?.main?.App?.GetStorageDrives === 'function') {
-        const drives = await (window as any).go.main.App.GetStorageDrives();
-        if (Array.isArray(drives) && drives.length > 0) storageDrives = drives;
+        drives = await (window as any).go.main.App.GetStorageDrives();
+      }
+      if (Array.isArray(drives) && drives.length > 0) {
+        storageDrives = drives;
       }
     } catch (e) {
       console.warn('[BigPictureSettings] Failed to load drives:', e);
+    } finally {
+      isLoadingDrives = false;
     }
   }
 
@@ -326,8 +332,12 @@
 
   async function handleBrowseFolder() {
     sound.playSelect();
-    const selected = await onSelectFolder();
+    let selected = await onSelectFolder();
     if (selected) {
+      // Normalize drive roots (e.g. "F:\" -> "F:\Ducke")
+      if (/^[a-zA-Z]:\\?$/.test(selected)) {
+        selected = `${selected[0].toUpperCase()}:\\Ducke`;
+      }
       localSettings.downloadPath = selected;
       triggerSave();
       loadStorageDrives();
@@ -337,14 +347,16 @@
   function handleSetDriveAsDefault(drive: StorageDrive) {
     sound.playSelect();
     let target = drive.path;
-    if (drive.type === 'internal' && (target === 'C:\\' || target === 'C:')) {
-      target = 'C:\\Ducke';
+    // Normalize Windows drive roots (e.g. "C:\", "D:\", "F:\", "C:")
+    if (/^[a-zA-Z]:\\?$/.test(target)) {
+      const letter = target[0].toUpperCase();
+      target = `${letter}:\\Ducke`;
     } else if (drive.type === 'internal' && (target === '/home' || target === '/' || target.startsWith('/home/'))) {
       target = '/home/deck/Games/Ducke';
     } else if (drive.type === 'sdcard' || drive.type === 'removable') {
       target = `${drive.path.replace(/\/+$/, '')}/Games/Ducke`;
     } else {
-      target = drive.path;
+      target = `${drive.path.replace(/[\\/]+$/, '')}/Ducke`;
     }
     localSettings.downloadPath = target;
     triggerSave();
@@ -602,7 +614,12 @@
           <p class="text-xs text-[#8e95a2] mt-1 font-mono">Выберите накопитель и каталог для сохранения игр</p>
         </div>
 
-        {#if storageDrives.length === 0}
+        {#if isLoadingDrives}
+          <div class="p-8 rounded bg-[#0d1017] border border-white/[0.06] flex items-center justify-center gap-3 text-xs font-mono text-[#8e95a2]">
+            <RefreshCw class="w-5 h-5 animate-spin text-sky-400" />
+            <span>Определение накопителей и свободного места...</span>
+          </div>
+        {:else if storageDrives.length === 0}
           <div class="p-6 rounded bg-[#0d1017] border border-white/[0.06] space-y-4">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">

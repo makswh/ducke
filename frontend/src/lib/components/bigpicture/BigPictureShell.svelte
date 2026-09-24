@@ -35,6 +35,7 @@
     onImportFile = async () => {},
     onTestConnection = async (srv: any) => ({ success: false }),
     onSelectFolder = async () => '',
+    onUpdateDownloadPath = (path: string) => {},
     onOpenFolder = (path: string) => {},
     onOpenConfigFolder = async () => {},
     onClearMetadataCache = async (): Promise<number> => 0,
@@ -177,6 +178,7 @@
         onBack={handleBackToLibrary}
         {onStartDownload}
         {onSelectFolder}
+        {onUpdateDownloadPath}
         {activeDownloads}
       />
     {:else if activeTab === 'home'}

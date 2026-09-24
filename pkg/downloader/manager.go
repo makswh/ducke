@@ -24,6 +24,7 @@ type DownloadManager struct {
 	tasksMu       sync.RWMutex
 	queue         *QueueController
 	onEvent       func(event DownloadProgressEvent)
+	onListChanged func()
 	torrentEngine *TorrentEngine
 	scraper       *TrackerScraper
 	ticker        *time.Ticker
@@ -35,11 +36,17 @@ func NewDownloadManager(
 	db *database.Database,
 	cfgManager *config.ConfigManager,
 	onEvent func(event DownloadProgressEvent),
+	onListChanged ...func(),
 ) *DownloadManager {
 	settings := cfgManager.GetSettings()
 	te, err := NewTorrentEngine(settings.DownloadPath, settings.MaxSpeedKBps)
 	if err != nil {
 		log.Printf("[Downloader] Warning: failed to init torrent engine: %v", err)
+	}
+
+	var listChangedCb func()
+	if len(onListChanged) > 0 {
+		listChangedCb = onListChanged[0]
 	}
 
 	dm := &DownloadManager{
@@ -48,6 +55,7 @@ func NewDownloadManager(
 		tasks:         make(map[string]*DownloadTask),
 		queue:         NewQueueController(1), // Default: 1 active game downloading at a time (Steam-style)
 		onEvent:       onEvent,
+		onListChanged: listChangedCb,
 		torrentEngine: te,
 		scraper:       NewTrackerScraper(),
 		stopTicker:    make(chan struct{}),
@@ -87,6 +95,12 @@ func NewDownloadManager(
 				task.DownloadedBytes.Store(rec.DownloadedBytes)
 				dm.tasks[rec.ID] = task
 				restoredCount++
+
+				// Ensure database record is updated to paused so DB state matches in-memory state
+				if rec.Status != string(StatusPaused) {
+					rec.Status = string(StatusPaused)
+					_ = db.SaveDownloadRecord(rec)
+				}
 			}
 		}
 	}
@@ -189,6 +203,13 @@ func (dm *DownloadManager) emitTaskEvent(task *DownloadTask) {
 	}
 }
 
+// notifyListChanged notifies frontend that the queue or tasks set has structurally changed
+func (dm *DownloadManager) notifyListChanged() {
+	if dm.onListChanged != nil {
+		dm.onListChanged()
+	}
+}
+
 // StartDownload initiates a download task or enqueues it if another download is already active
 func (dm *DownloadManager) StartDownload(gameID int64, destinationPath string) (string, error) {
 	game, err := dm.db.GetGameByID(gameID)
@@ -258,6 +279,7 @@ func (dm *DownloadManager) StartDownload(gameID int64, destinationPath string) (
 
 	log.Printf("[Downloader] Task enqueued: \"%s\" [ID: %s]", game.CleanTitle, downloadID)
 	dm.emitTaskEvent(task)
+	dm.notifyListChanged()
 	dm.processQueue()
 
 	return downloadID, nil
@@ -332,6 +354,7 @@ func (dm *DownloadManager) StartTorrentDownload(game database.GameEntity, destin
 
 	log.Printf("[Downloader] Torrent task enqueued: \"%s\" [ID: %s]", game.CleanTitle, downloadID)
 	dm.emitTaskEvent(task)
+	dm.notifyListChanged()
 	dm.processQueue()
 
 	return downloadID, nil
@@ -406,6 +429,7 @@ func (dm *DownloadManager) executeTorrentDownload(task *DownloadTask) {
 		})
 
 		dm.emitTaskEvent(task)
+		dm.notifyListChanged()
 		dm.processQueue() // Auto-start next queued game
 	}()
 
@@ -482,6 +506,7 @@ scanLoop:
 	})
 
 	dm.emitTaskEvent(task)
+	dm.notifyListChanged()
 
 	// 2. Verify existing on-disk pieces against piece-completion DB.
 	//    This re-hashes data already downloaded in a prior session and marks those
@@ -577,6 +602,7 @@ func (dm *DownloadManager) executeDownload(task *DownloadTask, srvCfg config.Ser
 		})
 
 		dm.emitTaskEvent(task)
+		dm.notifyListChanged()
 		dm.processQueue() // Auto-start next queued game
 	}()
 
@@ -657,6 +683,7 @@ func (dm *DownloadManager) PauseDownload(downloadID string) error {
 	})
 
 	dm.emitTaskEvent(task)
+	dm.notifyListChanged()
 	dm.processQueue()
 	return nil
 }
@@ -779,6 +806,7 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 	task.mu.Unlock()
 
 	dm.emitTaskEvent(task)
+	dm.notifyListChanged()
 
 	if task.IsTorrent {
 		if dm.torrentEngine != nil {
@@ -796,6 +824,7 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 			task.mu.Unlock()
 			log.Printf("[Downloader] ERROR: [%s] Cannot resume: no active FTP/SFTP server configured", task.GameTitle)
 			dm.emitTaskEvent(task)
+			dm.notifyListChanged()
 		}
 	}
 
@@ -840,6 +869,7 @@ func (dm *DownloadManager) CancelDownload(downloadID string) error {
 	})
 
 	dm.emitTaskEvent(task)
+	dm.notifyListChanged()
 	dm.processQueue()
 	return nil
 }
@@ -863,6 +893,7 @@ func (dm *DownloadManager) PauseAll() {
 	for _, id := range ids {
 		_ = dm.PauseDownload(id)
 	}
+	dm.notifyListChanged()
 }
 
 // ResumeAll marks all paused or failed downloads as queued and triggers queue processing
@@ -884,6 +915,7 @@ func (dm *DownloadManager) ResumeAll() {
 	if count > 0 {
 		log.Printf("[Downloader] Resuming %d downloads", count)
 	}
+	dm.notifyListChanged()
 	dm.processQueue()
 }
 
@@ -906,6 +938,7 @@ func (dm *DownloadManager) CancelAll() {
 	for _, id := range ids {
 		_ = dm.CancelDownload(id)
 	}
+	dm.notifyListChanged()
 }
 
 // ClearCompleted removes completed and cancelled tasks from memory and database
@@ -923,6 +956,7 @@ func (dm *DownloadManager) ClearCompleted() error {
 	dm.tasksMu.Unlock()
 
 	log.Printf("[Downloader] Cleared %d completed/cancelled downloads from view", count)
+	dm.notifyListChanged()
 	return dm.db.ClearCompletedDownloads()
 }
 
@@ -947,6 +981,7 @@ func (dm *DownloadManager) DeleteTask(downloadID string, removeFiles bool) error
 	}
 
 	log.Printf("[Downloader] Deleted task record: %s (Delete files: %v)", downloadID, removeFiles)
+	dm.notifyListChanged()
 	return dm.db.DeleteDownloadRecord(downloadID)
 }
 

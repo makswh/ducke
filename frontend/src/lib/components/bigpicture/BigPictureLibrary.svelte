@@ -65,7 +65,10 @@
 
   // Deduplicate once per games array reference change and precalculate search corpus & metadata flags
   let deduplicatedList = $derived.by(() => {
-    const list = deduplicateGames(games || []);
+    const rawGames = games || [];
+    // If games are already deduplicated from backend (variants field is populated), skip redundant 20k DSU pass
+    const isAlreadyDeduplicated = rawGames.length > 0 && Array.isArray(rawGames[0]?.variants);
+    const list = isAlreadyDeduplicated ? rawGames : deduplicateGames(rawGames);
     return list.map((g) => {
       const glist = (g.genres || []).map((x: any) => typeof x === 'string' ? x.toLowerCase().trim() : '').filter(Boolean);
       const title = (g.cleanTitle || g.rawName || '').toLowerCase();
@@ -75,11 +78,18 @@
 
       const hasSteam = !!((g.steamAppId && g.steamAppId !== 0) || g.capsuleImage || g.steamSynced);
 
+      let releaseYear: number | null = null;
+      if (g.releaseDate) {
+        const m = g.releaseDate.match(/\b(19\d\d|20\d\d)\b/);
+        if (m) releaseYear = parseInt(m[1], 10);
+      }
+
       return {
         ...g,
         _searchCorpus: searchCorpus,
         _genreLowerSet: new Set(glist),
-        _hasSteam: hasSteam
+        _hasSteam: hasSteam,
+        _releaseYear: releaseYear
       };
     });
   });
@@ -160,8 +170,15 @@
     } else if (selectedSort === 'size_desc') {
       result.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0));
     } else {
-      // Default: date_desc (newest added first)
-      result.sort((a, b) => (b.id || 0) - (a.id || 0));
+      // Default: date_desc — sort by Steam release year descending; games without year go to the end
+      result.sort((a, b) => {
+        const ay = a._releaseYear;
+        const by_ = b._releaseYear;
+        if (ay !== null && by_ !== null) return by_ - ay;
+        if (ay !== null) return -1;
+        if (by_ !== null) return 1;
+        return (b.id || 0) - (a.id || 0);
+      });
     }
 
     return result;

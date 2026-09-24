@@ -24,7 +24,8 @@
     downloadPath = 'C:\\Ducke',
     onStartDownload = (gameId: number, targetPath: string) => {},
     onSelectFolder = () => Promise.resolve(''),
-    onOpenCatalog = () => {}
+    onOpenCatalog = () => {},
+    onUpdateDownloadPath = (path: string) => {}
   } = $props();
 
   let favorites = $state<any[]>([]);
@@ -541,6 +542,7 @@
         {downloadPath}
         {onStartDownload}
         {onSelectFolder}
+        {onUpdateDownloadPath}
         favoriteItem={selectedItem}
       />
     {:else}

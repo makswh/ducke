@@ -74,10 +74,23 @@ func formatSizeGB(bytes int64) string {
 }
 
 func getFolderSize(path string) int64 {
+	clean := filepath.Clean(path)
+	vol := filepath.VolumeName(clean)
+	if clean == "" || clean == vol || clean == vol+"\\" || clean == "/" || len(clean) <= 3 {
+		return 0
+	}
 	var size int64
-	_ = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if err == nil && info != nil && !info.IsDir() {
+	var count int
+	_ = filepath.Walk(clean, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info != nil && !info.IsDir() {
 			size += info.Size()
+			count++
+			if count > 30000 {
+				return filepath.SkipDir
+			}
 		}
 		return nil
 	})
@@ -156,7 +169,10 @@ func GetSystemDrives(currentDownloadPath string) []StorageDriveInfo {
 
 			var duckeBytes int64
 			if isDefault && currentDownloadPath != "" {
-				duckeBytes = getFolderSize(currentDownloadPath)
+				vol := filepath.VolumeName(currentDownloadPath)
+				if currentDownloadPath != vol && currentDownloadPath != vol+"\\" && len(currentDownloadPath) > 3 {
+					duckeBytes = getFolderSize(currentDownloadPath)
+				}
 			}
 
 			drives = append(drives, StorageDriveInfo{

@@ -43,7 +43,10 @@
     Copy,
     Gear as Settings,
     SteamLogo,
-    UploadSimple
+    UploadSimple,
+    ThumbsUp,
+    ThumbsDown,
+    ChatText
   } from 'phosphor-svelte';
   import VideoPlayer from './VideoPlayer.svelte';
   import type {
@@ -52,11 +55,15 @@
     SteamMovie,
     MediaItem,
     SteamCandidateItem,
-    GamePageDetails
+    GamePageDetails,
+    SteamAnonymizedReview,
+    SteamReviewsResponse
   } from '../types/game';
-  import { EventsOn } from '../../../wailsjs/runtime/runtime';
-  import { SetFavoriteStatus, RemoveFromFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig, AddGameToSteam, CheckGameInSteam, RemoveGameFromSteam, GetTorrentSeedsBatch } from '../../../wailsjs/go/main/App';
+  import { EventsOn, BrowserOpenURL } from '../../../wailsjs/runtime/runtime';
+  import { SetFavoriteStatus, RemoveFromFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig, AddGameToSteam, CheckGameInSteam, RemoveGameFromSteam, GetTorrentSeedsBatch, GetSteamReviews, OpenURL } from '../../../wailsjs/go/main/App';
   import { isPlaceholderTitle, cleanTorrentTitle, getDisplayTitle } from '../utils/titleUtils';
+  import { downloadsStore } from '../stores/downloads.svelte';
+  import { formatSteamReviewBBCode, formatReviewDate } from '../utils/steamReviewFormatter';
 
 
   let {
@@ -68,6 +75,7 @@
     onSelectFolder = async (): Promise<string> => '',
     onSelectGenre = (genre: string) => {},
     onSelectTag = (tag: string) => {},
+    onUpdateDownloadPath = (path: string) => {},
     favoriteItem = null as any
   } = $props();
 
@@ -307,8 +315,95 @@
   let customDownloadPath = $state<string>('');
   let pageDetails = $state<GamePageDetails | null>(null);
   let isLoadingDetails = $state<boolean>(false);
-  let activeTab = $state<'description' | 'info' | 'requirements' | 'specs'>('description');
+  let activeTab = $state<'description' | 'info' | 'requirements' | 'specs' | 'reviews'>('description');
   let activeMediaIndex = $state<number>(0);
+
+  // Steam Reviews state
+  let steamReviews = $state<SteamAnonymizedReview[]>([]);
+  let steamReviewsCursor = $state<string>('*');
+  let steamReviewsHasMore = $state<boolean>(false);
+  let steamReviewsTotal = $state<number>(0);
+  let isLoadingReviews = $state<boolean>(false);
+  let isLoadingMoreReviews = $state<boolean>(false);
+  let reviewLanguage = $state<'russian' | 'all'>('russian');
+  let expandedReviewIds = $state<Record<string, boolean>>({});
+  let lastLoadedReviewsAppId = $state<number>(0);
+
+  function toggleReviewExpand(id: string) {
+    expandedReviewIds[id] = !expandedReviewIds[id];
+  }
+
+  function handleOpenSteamStore() {
+    const curGame = pageDetails?.game || game;
+    const appId = curGame?.steamAppId;
+    if (!appId || appId <= 0) return;
+    const storeUrl = `https://store.steampowered.com/app/${appId}`;
+    try {
+      BrowserOpenURL(storeUrl);
+    } catch {
+      OpenURL(storeUrl);
+    }
+  }
+
+  async function loadSteamReviews(reset = false) {
+    const curGame = pageDetails?.game || game;
+    const appId = curGame?.steamAppId;
+    if (!appId || appId <= 0) {
+      steamReviews = [];
+      steamReviewsHasMore = false;
+      steamReviewsTotal = 0;
+      return;
+    }
+
+    if (reset) {
+      steamReviewsCursor = '*';
+      isLoadingReviews = true;
+    } else {
+      isLoadingMoreReviews = true;
+    }
+
+    try {
+      const res: SteamReviewsResponse = await GetSteamReviews(appId, reset ? '*' : steamReviewsCursor, reviewLanguage);
+      if (res) {
+        if (reset) {
+          steamReviews = res.reviews || [];
+        } else {
+          const existingIds = new Set(steamReviews.map(r => r.id));
+          const newOnes = (res.reviews || []).filter(r => !existingIds.has(r.id));
+          steamReviews = [...steamReviews, ...newOnes];
+        }
+        steamReviewsCursor = res.cursor || '';
+        steamReviewsHasMore = !!res.hasMore;
+        steamReviewsTotal = res.totalReviews || steamReviews.length;
+      }
+    } catch (e) {
+      console.error('Failed to load Steam reviews:', e);
+    } finally {
+      isLoadingReviews = false;
+      isLoadingMoreReviews = false;
+    }
+  }
+
+  function handleLanguageChange(lang: 'russian' | 'all') {
+    if (reviewLanguage === lang) return;
+    reviewLanguage = lang;
+    loadSteamReviews(true);
+  }
+
+  $effect(() => {
+    const curGame = pageDetails?.game || game;
+    const currentAppId = curGame?.steamAppId || 0;
+    if (currentAppId > 0 && currentAppId !== lastLoadedReviewsAppId) {
+      lastLoadedReviewsAppId = currentAppId;
+      loadSteamReviews(true);
+    } else if (currentAppId <= 0 && lastLoadedReviewsAppId !== 0) {
+      lastLoadedReviewsAppId = 0;
+      steamReviews = [];
+      steamReviewsHasMore = false;
+      steamReviewsTotal = 0;
+    }
+  });
+
   let imageLoadFailed = $state<Record<string, boolean>>({});
   let dynamicAccentColor = $state<string>(STEAM_DEFAULT_ACCENT);
   let coverColorCache = new Map<string, string>();
@@ -455,9 +550,19 @@
     const rawSrc = (v.torrentSource || '').trim();
     const resolvedName = formatSourceName(rawSrc);
     if (isTorrent) {
+      let displayName = 'Торрент';
+      if (resolvedName) {
+        if (resolvedName.toLowerCase().startsWith('торрент')) {
+          displayName = resolvedName;
+        } else if (resolvedName.includes('(') && resolvedName.endsWith(')')) {
+          displayName = `Торрент: ${resolvedName}`;
+        } else {
+          displayName = `Торрент (${resolvedName})`;
+        }
+      }
       return {
         type: 'torrent',
-        name: resolvedName ? `Торрент (${resolvedName})` : 'Торрент',
+        name: displayName,
         shortName: resolvedName || 'Торрент',
         badgeClass: 'bg-white/[0.04] border-white/10 text-[#cbd5e1]'
       };
@@ -582,7 +687,7 @@
   let isSavingSteam = $state<boolean>(false);
 
   $effect(() => {
-    if (downloadPath && !customDownloadPath) {
+    if (downloadPath) {
       customDownloadPath = downloadPath;
     }
   });
@@ -654,7 +759,7 @@
       downloadProgress: null,
       localPath: '',
       isInstalled: false,
-      logoUrl: g.iconUrl || '',
+      logoUrl: '',
       bannerUrl: g.backgroundImage || g.headerImage || '',
       coverUrl: g.capsuleImage || '',
       backgroundUrl: g.backgroundImage || '',
@@ -1118,9 +1223,13 @@
   }
 
   async function handleBrowseFolder() {
-    const selected = await onSelectFolder();
+    let selected = await onSelectFolder();
     if (selected) {
+      if (/^[a-zA-Z]:\\?$/.test(selected)) {
+        selected = `${selected[0].toUpperCase()}:\\Ducke`;
+      }
       customDownloadPath = selected;
+      onUpdateDownloadPath(selected);
     }
   }
 
@@ -1330,9 +1439,11 @@
 
     // Runtime events
     const unsubProgress = EventsOn('download:progress', (event: any) => {
-      if (!isMounted) return;
-      if (event && game && event.gameId === game.id) {
-        if (pageDetails) {
+      if (!isMounted || !event) return;
+      const cur = pageDetails?.game || game;
+      if (cur) {
+        const matches = event.gameId === cur.id || (cur.variants && cur.variants.some((v: any) => v.id === event.gameId));
+        if (matches && pageDetails) {
           pageDetails.downloadStatus = event.status;
           pageDetails.downloadProgress = event;
           if (event.status === 'completed') {
@@ -1416,13 +1527,23 @@
     );
   });
 
+  let activeGameDownload = $derived.by(() => {
+    const targetGame = pageDetails?.game || game;
+    if (!targetGame) return null;
+    return downloadsStore.getDownloadForGame(targetGame);
+  });
+
   let isDownloading = $derived(
+    (activeGameDownload && (activeGameDownload.status === 'downloading' || activeGameDownload.status === 'queued' || activeGameDownload.status === 'scanning' || activeGameDownload.status === 'paused')) ||
     pageDetails?.downloadStatus === 'downloading' ||
     pageDetails?.downloadStatus === 'queued' ||
-    pageDetails?.downloadStatus === 'scanning'
+    pageDetails?.downloadStatus === 'scanning' ||
+    pageDetails?.downloadStatus === 'paused'
   );
 
   let isDownloadCompleted = $derived(
+    (activeGameDownload && activeGameDownload.status === 'completed') ||
+    downloadsStore.isGameInstalled(pageDetails?.game || game) ||
     !!(pageDetails?.isInstalled || pageDetails?.downloadStatus === 'completed')
   );
 
@@ -1506,7 +1627,7 @@
       {@const coverUrl = getPrimaryCoverUrl(g)}
       {@const hasCover = !!(coverUrl && !imageLoadFailed[coverUrl])}
       {@const logoUrl = pageDetails?.logoUrl}
-      {@const hasLogo = !!(logoUrl && !imageLoadFailed[logoUrl])}
+      {@const hasLogo = !!(logoUrl && !imageLoadFailed[logoUrl] && !isHorizontalAsset(logoUrl))}
 
       <!-- Atmospheric Steam Backdrop with Dark Scrim for High-Contrast Readability -->
       {#if bgUrl}
@@ -1605,7 +1726,10 @@
                     alt={getDisplayTitle(g)}
                     class="max-h-36 sm:max-h-44 md:max-h-48 max-w-[440px] sm:max-w-[580px] object-contain object-left select-none filter drop-shadow-md"
                     onerror={() => {
-                      if (logoUrl) imageLoadFailed[logoUrl] = true;
+                      if (logoUrl) {
+                        imageLoadFailed[logoUrl] = true;
+                        if (pageDetails) pageDetails.logoUrl = '';
+                      }
                     }}
                   />
                 </div>
@@ -1822,6 +1946,22 @@
               {/if}
             {/snippet}
 
+            {#snippet openSteamStoreButton()}
+              {#if g.steamAppId && g.steamAppId > 0}
+                <button
+                  data-nav-item
+                  type="button"
+                  title="Открыть страницу игры в магазине Steam"
+                  class="h-11 px-3.5 flex items-center justify-center gap-2 rounded transition-all cursor-pointer border text-xs font-medium bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] border-white/10 text-[#cbd5e1] hover:text-white"
+                  onclick={handleOpenSteamStore}
+                >
+                  <SteamLogo size={16} weight="bold" class="flex-shrink-0 text-[#66c0f4]" />
+                  <span>В Steam</span>
+                  <ExternalLink class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
+                </button>
+              {/if}
+            {/snippet}
+
             {#if isDownloadCompleted || pageDetails?.isInstalled}
 
               <!-- ALREADY INSTALLED / DOWNLOAD COMPLETED STATE: PLAY + GEAR + FOLDER + FAVORITE -->
@@ -1840,6 +1980,7 @@
                   {@render gearButton()}
                   {@render folderButton()}
                   {@render steamButton()}
+                  {@render openSteamStoreButton()}
                   {@render favoriteButton()}
                 </div>
 
@@ -1875,12 +2016,13 @@
 
             {:else if isDownloading}
               <!-- ACTIVE DOWNLOADING / QUEUED STATE -->
-              {@const prog = pageDetails?.downloadProgress}
+              {@const prog = activeGameDownload || pageDetails?.downloadProgress}
+              {@const dlStatus = activeGameDownload?.status || pageDetails?.downloadStatus}
               <div class="space-y-3 max-w-md bg-[#07080a] p-4 rounded border border-white/[0.06]">
                 <div class="flex items-center justify-between text-xs font-bold text-white">
                   <div class="flex items-center gap-2">
                     <Download class="w-4 h-4 text-[var(--game-accent)]" />
-                    <span>{pageDetails?.downloadStatus === 'queued' ? 'В очереди загрузки...' : (pageDetails?.downloadStatus === 'scanning' ? 'Получение метаданных торрента...' : 'Скачивается...')}</span>
+                    <span>{dlStatus === 'paused' ? 'Приостановлено' : (dlStatus === 'queued' ? 'В очереди загрузки...' : (dlStatus === 'scanning' ? 'Получение метаданных торрента...' : 'Скачивается...'))}</span>
                   </div>
                   <span class="font-mono text-[var(--game-accent)]">{Math.round(prog?.progressPercent || 0)}%</span>
                 </div>
@@ -1902,7 +2044,10 @@
                       {/if}
                     </div>
                   {/if}
-                  {@render favoriteButton()}
+                  <div class="flex items-center gap-2">
+                    {@render openSteamStoreButton()}
+                    {@render favoriteButton()}
+                  </div>
                 </div>
               </div>
 
@@ -1937,6 +2082,7 @@
                     {@render gearButton()}
                     {@render folderButton()}
                     {@render steamButton()}
+                    {@render openSteamStoreButton()}
                     {@render favoriteButton()}
                   {:else}
                     <!-- Unified Split Download Button -->
@@ -2021,6 +2167,7 @@
                     </div>
 
                     {@render steamButton()}
+                    {@render openSteamStoreButton()}
                     {@render favoriteButton()}
                     {@render gearButton()}
                   {/if}
@@ -2464,17 +2611,20 @@
             {/if}
 
             {#if downloadSourceInfo}
-              <div class="flex items-center justify-between py-2">
-                <span class="text-[#8e95a2]">Источник скачивания</span>
-                <span class="font-medium {downloadSourceInfo.type === 'torrent' ? 'text-sky-400' : 'text-emerald-400'}">
+              <div class="flex items-center justify-between py-2 gap-3">
+                <span class="text-[#8e95a2] flex-shrink-0">Источник</span>
+                <span
+                  class="font-medium text-right truncate max-w-[230px] {downloadSourceInfo.type === 'torrent' ? 'text-sky-400' : 'text-emerald-400'}"
+                  title={downloadSourceInfo.name}
+                >
                   {downloadSourceInfo.name}
                 </span>
               </div>
             {/if}
 
-            <div class="flex items-center justify-between py-2">
-              <span class="text-[#8e95a2]">Управление</span>
-              <span class="text-white font-medium flex items-center gap-1.5">
+            <div class="flex items-center justify-between py-2 gap-3">
+              <span class="text-[#8e95a2] flex-shrink-0">Управление</span>
+              <span class="text-white font-medium flex items-center gap-1.5 whitespace-nowrap">
                 {#if g.controllerSupport === 'full'}
                   <Gamepad2 class="w-3.5 h-3.5 text-emerald-400" />
                   <span>Геймпад (Полная)</span>
@@ -2485,18 +2635,33 @@
               </span>
             </div>
 
-            <div class="flex items-center justify-between py-2">
-              <span class="text-[#8e95a2]">Метаданные Steam</span>
-              <button
-                data-nav-item
-                type="button"
-                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 text-[#cbd5e1] hover:text-white transition-colors cursor-pointer text-xs"
-                onclick={() => openSteamModal(g)}
-                title="Найти в Steam / Изменить метаданные"
-              >
-                <span class="font-mono">{g.steamAppId > 0 ? `AppID: ${g.steamAppId}` : (g.steamAppId < 0 ? `SGDB: ${-g.steamAppId}` : 'Привязать')}</span>
-                <Edit3 class="w-3 h-3 text-[#8e95a2]" />
-              </button>
+            <div class="flex items-center justify-between py-2 gap-2">
+              <span class="text-[#8e95a2] flex-shrink-0 whitespace-nowrap">Steam AppID</span>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                {#if g.steamAppId > 0}
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="h-7 px-2.5 rounded-sm bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 transition-colors cursor-pointer text-xs whitespace-nowrap inline-flex items-center gap-1.5"
+                    onclick={handleOpenSteamStore}
+                    title="Открыть страницу игры в магазине Steam"
+                  >
+                    <SteamLogo size={13} weight="bold" class="flex-shrink-0" />
+                    <span>В Steam</span>
+                    <ExternalLink class="w-3 h-3 text-sky-400/80 flex-shrink-0" />
+                  </button>
+                {/if}
+                <button
+                  data-nav-item
+                  type="button"
+                  class="h-7 px-2.5 rounded-sm bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 text-[#cbd5e1] hover:text-white transition-colors cursor-pointer text-xs whitespace-nowrap inline-flex items-center gap-1.5"
+                  onclick={() => openSteamModal(g)}
+                  title="Найти в Steam / Изменить метаданные"
+                >
+                  <span class="font-mono">{g.steamAppId > 0 ? g.steamAppId : (g.steamAppId < 0 ? `SGDB: ${-g.steamAppId}` : 'Привязать')}</span>
+                  <Edit3 class="w-3 h-3 text-[#8e95a2] flex-shrink-0" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2570,6 +2735,188 @@
         </div>
       {/snippet}
 
+      {#snippet steamReviewsSection()}
+        {#if g.steamAppId && g.steamAppId > 0}
+          <div class="space-y-4 pt-2">
+            <!-- Section Header -->
+            <div class="flex items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
+              <div class="flex items-center gap-2.5">
+                <ChatText class="w-4 h-4 text-[#66c0f4]" />
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider">Отзывы сообщества Steam</h3>
+                {#if steamReviewsTotal > 0}
+                  <span class="text-xs text-[#8e95a2] font-mono">({formatReviewsCount(steamReviewsTotal)})</span>
+                {/if}
+              </div>
+
+              <div class="flex items-center gap-2">
+                <!-- Language Selector -->
+                <div class="inline-flex rounded bg-[#0d1117] border border-white/10 p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    class="px-2.5 py-1 rounded transition-colors cursor-pointer font-medium {reviewLanguage === 'russian' ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:text-white'}"
+                    onclick={() => handleLanguageChange('russian')}
+                  >
+                    Русские
+                  </button>
+                  <button
+                    type="button"
+                    class="px-2.5 py-1 rounded transition-colors cursor-pointer font-medium {reviewLanguage === 'all' ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:text-white'}"
+                    onclick={() => handleLanguageChange('all')}
+                  >
+                    Все языки
+                  </button>
+                </div>
+
+                <!-- Open in Steam button -->
+                <button
+                  data-nav-item
+                  type="button"
+                  class="hidden sm:inline-flex items-center gap-1.5 text-xs text-[#8e95a2] hover:text-[#66c0f4] px-2.5 py-1 rounded bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] transition-colors cursor-pointer"
+                  onclick={handleOpenSteamStore}
+                  title="Открыть страницу игры в магазине Steam"
+                >
+                  <SteamLogo size={14} weight="bold" />
+                  <span>В Steam</span>
+                  <ExternalLink class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            <!-- Reviews Content -->
+            {#if isLoadingReviews}
+              <!-- Loading skeletons -->
+              <div class="space-y-3">
+                {#each [1, 2, 3] as _}
+                  <div class="p-4 rounded bg-[#0d1117]/80 border border-white/[0.06] space-y-3 animate-pulse">
+                    <div class="flex items-center justify-between">
+                      <div class="h-5 w-28 bg-white/10 rounded"></div>
+                      <div class="h-4 w-20 bg-white/10 rounded"></div>
+                    </div>
+                    <div class="space-y-1.5">
+                      <div class="h-3.5 w-full bg-white/5 rounded"></div>
+                      <div class="h-3.5 w-4/5 bg-white/5 rounded"></div>
+                      <div class="h-3.5 w-2/3 bg-white/5 rounded"></div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {:else if steamReviews.length === 0}
+              <div class="p-6 rounded bg-[#0d1117]/60 border border-white/[0.06] text-center text-xs text-[#8e95a2] space-y-1.5">
+                <p>Отзывов не найдено{reviewLanguage === 'russian' ? ' на русском языке' : ''}.</p>
+                {#if reviewLanguage === 'russian'}
+                  <button
+                    type="button"
+                    class="text-sky-400 hover:text-sky-300 hover:underline cursor-pointer"
+                    onclick={() => handleLanguageChange('all')}
+                  >
+                    Попробовать показать отзывы на всех языках
+                  </button>
+                {/if}
+              </div>
+            {:else}
+              <div class="space-y-3">
+                {#each steamReviews as rev (rev.id)}
+                  {@const isExpanded = !!expandedReviewIds[rev.id]}
+                  {@const isLong = rev.review.length > 340 || rev.review.split('\n').length > 5}
+                  
+                  <div class="p-4 rounded bg-[#0d1117] border border-white/[0.07] hover:border-white/15 transition-colors space-y-3">
+                    <!-- Top Row: Recommendation + Playtime + Date -->
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <div class="flex flex-wrap items-center gap-2">
+                        {#if rev.votedUp}
+                          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#66c0f4]/10 border border-[#66c0f4]/30 text-[#66c0f4] text-xs font-bold">
+                            <ThumbsUp class="w-3.5 h-3.5" weight="fill" />
+                            <span>Рекомендую</span>
+                          </div>
+                        {:else}
+                          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-bold">
+                            <ThumbsDown class="w-3.5 h-3.5" weight="fill" />
+                            <span>Не рекомендую</span>
+                          </div>
+                        {/if}
+
+                        <span class="text-xs text-[#cbd5e1] font-medium font-mono">
+                          {rev.playtimeHours} в игре
+                        </span>
+
+                        {#if rev.playtimeAtReview}
+                          <span class="text-[11px] text-[#64748b] hidden sm:inline">
+                            ({rev.playtimeAtReview} на момент отзыва)
+                          </span>
+                        {/if}
+                      </div>
+
+                      <div class="text-[11px] text-[#64748b]">
+                        {formatReviewDate(rev.timestampCreated)}
+                      </div>
+                    </div>
+
+                    <!-- Review Text (anonymized, formatted BBCode) -->
+                    <div class="relative">
+                      <div
+                        class="text-xs text-[#cbd5e1] leading-relaxed break-words {isLong && !isExpanded ? 'max-h-28 overflow-hidden' : ''}"
+                      >
+                        {@html formatSteamReviewBBCode(rev.review)}
+                      </div>
+
+                      {#if isLong && !isExpanded}
+                        <div class="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#0d1117] to-transparent pointer-events-none"></div>
+                      {/if}
+                    </div>
+
+                    <!-- Bottom Row: Helpful votes count & Expand button -->
+                    <div class="flex items-center justify-between gap-2 pt-1 border-t border-white/[0.04] text-[11px] text-[#8e95a2]">
+                      <div class="flex items-center gap-3">
+                        {#if rev.votesUp > 0}
+                          <span class="inline-flex items-center gap-1">
+                            <ThumbsUp class="w-3 h-3 text-[#8e95a2]" />
+                            <span>{rev.votesUp} посчитали полезным</span>
+                          </span>
+                        {/if}
+                        {#if rev.votesFunny > 0}
+                          <span>😄 {rev.votesFunny}</span>
+                        {/if}
+                      </div>
+
+                      {#if isLong}
+                        <button
+                          type="button"
+                          class="text-xs font-semibold text-[#8e95a2] hover:text-white transition-colors cursor-pointer hover:underline"
+                          onclick={() => toggleReviewExpand(rev.id)}
+                        >
+                          {isExpanded ? 'Свернуть' : 'Читать полностью'}
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+
+              <!-- Load More Button -->
+              {#if steamReviewsHasMore}
+                <div class="pt-2 text-center">
+                  <button
+                    data-nav-item
+                    type="button"
+                    disabled={isLoadingMoreReviews}
+                    class="px-5 py-2.5 rounded bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 text-xs font-bold text-[#cbd5e1] hover:text-white transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
+                    onclick={() => loadSteamReviews(false)}
+                  >
+                    {#if isLoadingMoreReviews}
+                      <RefreshCw class="w-3.5 h-3.5 animate-spin text-[#66c0f4]" />
+                      <span>Загрузка отзывов...</span>
+                    {:else}
+                      <ChevronDown class="w-3.5 h-3.5" />
+                      <span>Показать ещё отзывы</span>
+                    {/if}
+                  </button>
+                </div>
+              {/if}
+            {/if}
+          </div>
+        {/if}
+      {/snippet}
+
       <!-- BOTTOM SECTION: Content Area (Tabs on small screens, 2-column on wide screens) -->
       <div class="space-y-6 pt-4">
         
@@ -2633,6 +2980,25 @@
                 ></span>
               {/if}
             </button>
+
+            {#if g.steamAppId && g.steamAppId > 0}
+              <button
+                data-nav-item
+                class="relative py-3.5 px-1 text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer flex-shrink-0 {activeTab === 'reviews' ? 'text-white' : 'text-[#8e95a2] hover:text-[#d1d5db]'}"
+                onclick={() => (activeTab = 'reviews')}
+              >
+                <span>Отзывы</span>
+                {#if steamReviewsTotal > 0}
+                  <span class="text-[10px] text-[#8e95a2] font-mono ml-1">({steamReviewsTotal})</span>
+                {/if}
+                {#if activeTab === 'reviews'}
+                  <span
+                    class="absolute bottom-0 left-0 right-0 h-[2px] rounded-full transition-all duration-300"
+                    style="background-color: var(--game-accent);"
+                  ></span>
+                {/if}
+              </button>
+            {/if}
           </div>
 
           <!-- Small screens view (<xl): Tab-switched -->
@@ -2648,6 +3014,8 @@
               {@render requirementsCard()}
             {:else if activeTab === 'specs'}
               {@render specsCard()}
+            {:else if activeTab === 'reviews'}
+              {@render steamReviewsSection()}
             {/if}
           </div>
 
@@ -2655,6 +3023,7 @@
           <div class="hidden xl:grid xl:grid-cols-12 xl:gap-8 xl:items-start">
             <div class="xl:col-span-7 2xl:col-span-8 space-y-6 min-w-0">
               {@render mediaAndDescription()}
+              {@render steamReviewsSection()}
             </div>
             <div class="xl:col-span-5 2xl:col-span-4 space-y-5 min-w-0">
               {@render genresAndTagsCard()}

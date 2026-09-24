@@ -43,6 +43,8 @@ type App struct {
 	downloader         *downloader.DownloadManager
 	collectionsService *collections.StopGameService
 	catalogMu           sync.Mutex
+	catalogCache        []database.GameEntity
+	catalogCacheValid   bool
 	torrentMu           sync.RWMutex
 	torrentCache        []database.GameEntity
 	torrentCacheByID    map[int64]int
@@ -127,7 +129,13 @@ func (a *App) startup(ctx context.Context) {
 
 	// Initialize downloader and stream progress via Wails Events
 	a.downloader = downloader.NewDownloadManager(db, cfgMgr, func(event downloader.DownloadProgressEvent) {
-		wailsRuntime.EventsEmit(a.ctx, "download:progress", event)
+		if a.ctx != nil {
+			wailsRuntime.EventsEmit(a.ctx, "download:progress", event)
+		}
+	}, func() {
+		if a.ctx != nil {
+			wailsRuntime.EventsEmit(a.ctx, "downloads:updated", nil)
+		}
 	})
 
 	// Pre-warm torrent catalog cache into memory in background immediately
@@ -147,6 +155,10 @@ func (a *App) startup(ctx context.Context) {
 		log.Printf("[System] Starting background enrichment worker...")
 		a.triggerBackgroundEnrichment()
 	}()
+
+	if a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "downloads:updated", nil)
+	}
 }
 
 func (a *App) triggerBackgroundEnrichment() {
@@ -197,6 +209,12 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	a.catalogMu.Lock()
 	defer a.catalogMu.Unlock()
 
+	if !forceRefresh && a.catalogCacheValid && a.catalogCache != nil {
+		res := make([]database.GameEntity, len(a.catalogCache))
+		copy(res, a.catalogCache)
+		return res, nil
+	}
+
 	if forceRefresh {
 		_, _ = a.db.PurgeMismatchedMetadata(metadata.CalculateTitleSimilarity, 0.70)
 		_, _ = a.db.ResetUnmatchedGames()
@@ -209,7 +227,11 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	}
 
 	if len(games) > 0 && !forceRefresh {
-		return games, nil
+		a.catalogCache = games
+		a.catalogCacheValid = true
+		res := make([]database.GameEntity, len(games))
+		copy(res, games)
+		return res, nil
 	}
 
 	// Scan remote repository
@@ -254,7 +276,15 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	}
 
 	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "ready", "message": ""})
-	return a.db.GetAllGames()
+	finalGames, finalErr := a.db.GetAllGames()
+	if finalErr == nil {
+		a.catalogCache = finalGames
+		a.catalogCacheValid = true
+		res := make([]database.GameEntity, len(finalGames))
+		copy(res, finalGames)
+		return res, nil
+	}
+	return finalGames, finalErr
 }
 
 type GamePageDetails struct {
@@ -288,11 +318,16 @@ func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 		DownloadStatus: "none",
 	}
 
-	// 1. Check if game is in active download tasks
+	// 1. Check if game is in active download tasks (match primary game ID or any variant ID)
+	matchIDs := map[int64]bool{gameID: true}
+	for _, v := range game.Variants {
+		matchIDs[v.ID] = true
+	}
+
 	if a.downloader != nil {
 		tasks := a.downloader.GetTasks()
 		for _, t := range tasks {
-			if t.GameID == gameID {
+			if matchIDs[t.GameID] {
 				taskCopy := t
 				details.DownloadProgress = &taskCopy
 				details.DownloadStatus = string(t.Status)
@@ -304,9 +339,12 @@ func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 
 	// 2. If not active, check download history in database
 	if details.DownloadProgress == nil {
-		if rec, err := a.db.GetDownloadRecordByGameID(gameID); err == nil && rec != nil {
-			details.DownloadStatus = rec.Status
-			details.LocalPath = rec.LocalPath
+		for mID := range matchIDs {
+			if rec, err := a.db.GetDownloadRecordByGameID(mID); err == nil && rec != nil {
+				details.DownloadStatus = rec.Status
+				details.LocalPath = rec.LocalPath
+				break
+			}
 		}
 	}
 
@@ -875,6 +913,23 @@ func (a *App) GetGameMovies(appID int) ([]database.SteamMovie, error) {
 	return meta.Movies, nil
 }
 
+// GetSteamReviews fetches depersonalized community reviews from Steam's official API
+func (a *App) GetSteamReviews(appID int, cursor string, language string) (*metadata.SteamReviewsResponse, error) {
+	if a.steamService == nil {
+		return &metadata.SteamReviewsResponse{Reviews: []metadata.SteamAnonymizedReview{}, HasMore: false}, nil
+	}
+	return a.steamService.FetchReviews(appID, cursor, language)
+}
+
+// OpenURL opens the specified URL in the system default browser
+func (a *App) OpenURL(rawURL string) error {
+	if rawURL == "" {
+		return fmt.Errorf("empty URL")
+	}
+	wailsRuntime.BrowserOpenURL(a.ctx, rawURL)
+	return nil
+}
+
 type SteamSearchResult struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
@@ -1196,6 +1251,18 @@ func (a *App) UpdateSpeedLimit(kbps int) error {
 	return a.SaveSettings(settings)
 }
 
+// UpdateDownloadPath updates default game download directory and emits settings:updated
+func (a *App) UpdateDownloadPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = config.GetDefaultDownloadPath()
+	}
+	settings := a.cfgManager.GetSettings()
+	settings.DownloadPath = path
+	settings.Sanitize()
+	return a.SaveSettings(settings)
+}
+
 // SetActiveServer switches active server by ID
 func (a *App) SetActiveServer(serverID string) error {
 	if err := a.cfgManager.SetActiveServer(serverID); err != nil {
@@ -1466,6 +1533,13 @@ func (a *App) invalidateTorrentCache() {
 	a.torrentMu.Unlock()
 }
 
+func (a *App) invalidateCatalogCache() {
+	a.catalogMu.Lock()
+	a.catalogCache = nil
+	a.catalogCacheValid = false
+	a.catalogMu.Unlock()
+}
+
 func (a *App) rebuildTorrentCacheIndexLocked() {
 	a.torrentCacheByID = make(map[int64]int, len(a.torrentCache)*2)
 	a.torrentCacheByAppID = make(map[int][]int, len(a.torrentCache))
@@ -1713,6 +1787,7 @@ func (a *App) ClearMetadataCache() (int, error) {
 	resetCount, _ := a.db.ResetUnmatchedGames()
 	_, _ = a.db.SyncDuplicateGamesMetadata()
 	a.invalidateTorrentCache()
+	a.invalidateCatalogCache()
 	a.triggerBackgroundEnrichment()
 	return purged + int(resetCount), err
 }

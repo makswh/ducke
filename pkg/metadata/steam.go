@@ -301,8 +301,9 @@ type SteamService struct {
 	isEnriching bool
 	progress    MetadataProgress
 	onProgress  func(progress MetadataProgress)
-	searchCache sync.Map // canonicalTitle string -> searchCacheEntry
-	cdnCache    sync.Map // url string -> bool
+	searchCache      sync.Map // canonicalTitle string -> searchCacheEntry
+	cdnCache         sync.Map // url string -> bool
+	reviewsListCache sync.Map // cacheKey string -> steamReviewsCacheItem
 }
 
 func NewSteamService(db *database.Database) *SteamService {
@@ -1406,6 +1407,182 @@ func (s *SteamService) FetchSteamReviewSummary(appID int) (string, int, int, int
 		return r.Desc, r.Percent, r.Total, r.Pos
 	}
 	return "", 0, 0, 0
+}
+
+// SteamAnonymizedReview represents an authentic Steam user review with all personal identities stripped
+type SteamAnonymizedReview struct {
+	ID               string `json:"id"`
+	VotedUp          bool   `json:"votedUp"`
+	Review           string `json:"review"`
+	PlaytimeHours    string `json:"playtimeHours"`
+	PlaytimeAtReview string `json:"playtimeAtReview,omitempty"`
+	VotesUp          int    `json:"votesUp"`
+	VotesFunny       int    `json:"votesFunny"`
+	TimestampCreated int64  `json:"timestampCreated"`
+	Language         string `json:"language"`
+}
+
+// SteamReviewsResponse represents paginated anonymized Steam reviews
+type SteamReviewsResponse struct {
+	Reviews      []SteamAnonymizedReview `json:"reviews"`
+	Cursor       string                  `json:"cursor"`
+	TotalReviews int                     `json:"totalReviews"`
+	HasMore      bool                    `json:"hasMore"`
+}
+
+type steamReviewsCacheItem struct {
+	data      *SteamReviewsResponse
+	expiresAt time.Time
+}
+
+type steamRawReviewAuthor struct {
+	PlaytimeForever  int `json:"playtime_forever"`
+	PlaytimeAtReview int `json:"playtime_at_review"`
+}
+
+type steamRawReviewItem struct {
+	RecommendationID string               `json:"recommendationid"`
+	Author           steamRawReviewAuthor `json:"author"`
+	Language         string               `json:"language"`
+	Review           string               `json:"review"`
+	TimestampCreated int64                `json:"timestamp_created"`
+	VotedUp          bool                 `json:"voted_up"`
+	VotesUp          int                  `json:"votes_up"`
+	VotesFunny       int                  `json:"votes_funny"`
+}
+
+type steamRawReviewsResponse struct {
+	Success      int                  `json:"success"`
+	QuerySummary struct {
+		NumReviews   int `json:"num_reviews"`
+		TotalReviews int `json:"total_reviews"`
+	} `json:"query_summary"`
+	Cursor  string               `json:"cursor"`
+	Reviews []steamRawReviewItem `json:"reviews"`
+}
+
+func formatPlaytimeHours(minutes int) string {
+	if minutes <= 0 {
+		return "0 ч."
+	}
+	hours := float64(minutes) / 60.0
+	if hours < 0.1 {
+		return "< 0.1 ч."
+	}
+	if hours < 10 {
+		return fmt.Sprintf("%.1f ч.", hours)
+	}
+	return fmt.Sprintf("%d ч.", int(math.Round(hours)))
+}
+
+// FetchReviews fetches depersonalized community reviews from Steam's official API with pagination support
+func (s *SteamService) FetchReviews(appID int, cursor string, language string) (*SteamReviewsResponse, error) {
+	if appID <= 0 {
+		return &SteamReviewsResponse{Reviews: []SteamAnonymizedReview{}, HasMore: false}, nil
+	}
+	cleanLang := strings.TrimSpace(strings.ToLower(language))
+	if cleanLang == "" {
+		cleanLang = "russian"
+	}
+	cleanCursor := strings.TrimSpace(cursor)
+	if cleanCursor == "" {
+		cleanCursor = "*"
+	}
+
+	cacheKey := fmt.Sprintf("%d:%s:%s", appID, cleanLang, cleanCursor)
+	if val, ok := s.reviewsListCache.Load(cacheKey); ok {
+		if item, ok := val.(steamReviewsCacheItem); ok && time.Now().Before(item.expiresAt) {
+			return item.data, nil
+		}
+	}
+
+	key := fmt.Sprintf("fetch_revs:%s", cacheKey)
+	res, err, _ := s.sf.Do(key, func() (interface{}, error) {
+		s.limiter.TakeFast(false)
+
+		endpoint := fmt.Sprintf(
+			"https://store.steampowered.com/appreviews/%d?json=1&cursor=%s&language=%s&filter=all&review_type=all&purchase_type=all&num_per_page=10",
+			appID,
+			url.QueryEscape(cleanCursor),
+			url.QueryEscape(cleanLang),
+		)
+
+		req, err := http.NewRequest("GET", endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", steamUserAgent)
+		req.Header.Set("Cookie", steamAgeCookie)
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("steam reviews api returned status %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		var raw steamRawReviewsResponse
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return nil, err
+		}
+
+		response := &SteamReviewsResponse{
+			Reviews:      make([]SteamAnonymizedReview, 0, len(raw.Reviews)),
+			Cursor:       raw.Cursor,
+			TotalReviews: raw.QuerySummary.TotalReviews,
+			HasMore:      false,
+		}
+
+		for _, r := range raw.Reviews {
+			cleanText := strings.TrimSpace(r.Review)
+			if cleanText == "" {
+				continue
+			}
+
+			item := SteamAnonymizedReview{
+				ID:               r.RecommendationID,
+				VotedUp:          r.VotedUp,
+				Review:           cleanText,
+				PlaytimeHours:    formatPlaytimeHours(r.Author.PlaytimeForever),
+				VotesUp:          r.VotesUp,
+				VotesFunny:       r.VotesFunny,
+				TimestampCreated: r.TimestampCreated,
+				Language:         r.Language,
+			}
+			if r.Author.PlaytimeAtReview > 0 && r.Author.PlaytimeAtReview != r.Author.PlaytimeForever {
+				item.PlaytimeAtReview = formatPlaytimeHours(r.Author.PlaytimeAtReview)
+			}
+			response.Reviews = append(response.Reviews, item)
+		}
+
+		if len(raw.Reviews) > 0 && raw.Cursor != "" && raw.Cursor != cleanCursor {
+			response.HasMore = true
+		}
+
+		s.reviewsListCache.Store(cacheKey, steamReviewsCacheItem{
+			data:      response,
+			expiresAt: time.Now().Add(10 * time.Minute),
+		})
+
+		return response, nil
+	})
+
+	if err != nil {
+		return &SteamReviewsResponse{Reviews: []SteamAnonymizedReview{}, HasMore: false}, err
+	}
+
+	if r, ok := res.(*SteamReviewsResponse); ok {
+		return r, nil
+	}
+	return &SteamReviewsResponse{Reviews: []SteamAnonymizedReview{}, HasMore: false}, nil
 }
 
 // FetchAppTags fetches popular user tags for a Steam app using the lightweight apphoverpublic endpoint

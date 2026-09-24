@@ -120,3 +120,22 @@ export interface GamePageDetails {
   backgroundUrl?: string;
 }
 
+export interface SteamAnonymizedReview {
+  id: string;
+  votedUp: boolean;
+  review: string;
+  playtimeHours: string;
+  playtimeAtReview?: string;
+  votesUp: number;
+  votesFunny: number;
+  timestampCreated: number;
+  language: string;
+}
+
+export interface SteamReviewsResponse {
+  reviews: SteamAnonymizedReview[];
+  cursor: string;
+  totalReviews: number;
+  hasMore: boolean;
+}
+

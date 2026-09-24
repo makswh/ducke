@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -159,8 +160,8 @@ type DownloadRecord struct {
 }
 
 type Database struct {
-	mu sync.RWMutex
-	db *sql.DB
+	writeMu sync.Mutex
+	db      *sql.DB
 
 	matcherMu sync.RWMutex
 	matcher   *LibraryMatcher
@@ -172,16 +173,24 @@ func InitDB(appDir string) (*Database, error) {
 	}
 
 	dbPath := filepath.Join(appDir, "gamevault.db")
-	db, err := sql.Open("sqlite", dbPath)
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-64000)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(268435456)&_pragma=foreign_keys(1)", filepath.ToSlash(dbPath))
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database at %s: %w", dbPath, err)
 	}
 
-	// Optimize SQLite performance & concurrency
+	// Configure pool for high-performance concurrent readers + serialized writer
+	maxConns := max(4, runtime.NumCPU())
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(max(2, maxConns/2))
+	db.SetConnMaxLifetime(1 * time.Hour)
+
+	// Ensure pragmas are applied to primary connection as well
 	if _, err := db.Exec(`
 		PRAGMA journal_mode = WAL;
 		PRAGMA synchronous = NORMAL;
-		PRAGMA busy_timeout = 5000;
+		PRAGMA busy_timeout = 10000;
 		PRAGMA cache_size = -64000;
 		PRAGMA temp_store = MEMORY;
 		PRAGMA mmap_size = 268435456;
@@ -200,8 +209,8 @@ func InitDB(appDir string) (*Database, error) {
 }
 
 func (d *Database) Close() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 	if d.db != nil {
 		return d.db.Close()
 	}
@@ -264,8 +273,10 @@ func (d *Database) migrate() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_games_clean_title ON games(clean_title);
+	CREATE INDEX IF NOT EXISTS idx_games_search_title ON games(search_title);
 	CREATE INDEX IF NOT EXISTS idx_games_steam_appid ON games(steam_appid);
 	CREATE INDEX IF NOT EXISTS idx_games_steam_synced ON games(steam_synced);
+	CREATE INDEX IF NOT EXISTS idx_games_synced_appid ON games(steam_synced, steam_appid);
 	CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status);
 	`
 
@@ -305,6 +316,8 @@ func (d *Database) migrate() error {
 	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_source_type ON games(source_type)")
 	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_torrent_source ON games(torrent_source)")
 	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_source_id ON games(source_type, id DESC)")
+	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_search_title ON games(search_title)")
+	_, _ = d.db.Exec("CREATE INDEX IF NOT EXISTS idx_games_synced_appid ON games(steam_synced, steam_appid)")
 
 	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN is_torrent INTEGER DEFAULT 0")
 	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN magnet_uri TEXT DEFAULT ''")
@@ -334,8 +347,8 @@ func (d *Database) migrate() error {
 
 // BackfillCanonicalKeys ensures all legacy records have a precomputed canonical_key
 func (d *Database) BackfillCanonicalKeys() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	rows, err := d.db.Query(`SELECT id, clean_title FROM games WHERE canonical_key IS NULL OR canonical_key = '' LIMIT 25000`)
 	if err != nil {
@@ -384,8 +397,8 @@ func (d *Database) BackfillCanonicalKeys() {
 
 // UpsertGames updates or inserts remote game records
 func (d *Database) UpsertGames(items []remote.RemoteItem) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	tx, err := d.db.Begin()
 	if err != nil {
@@ -448,8 +461,8 @@ func (d *Database) UpsertGames(items []remote.RemoteItem) error {
 
 // ResetInvalidSteamMatches clears false steam matches (e.g. Assassins Guild)
 func (d *Database) ResetInvalidSteamMatches() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`
 		UPDATE games 
@@ -914,9 +927,6 @@ func DeduplicateGames(games []GameEntity) []GameEntity {
 
 // GetAllGames returns all FTP games with joined Steam metadata
 func (d *Database) GetAllGames() ([]GameEntity, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	query := `
 		SELECT ` + gameSelectFieldsLite + `
 		FROM games g
@@ -946,9 +956,6 @@ func (d *Database) GetAllGames() ([]GameEntity, error) {
 
 // GetTorrentGames returns all Torrent games with joined Steam metadata
 func (d *Database) GetTorrentGames() ([]GameEntity, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	query := `
 		SELECT ` + gameSelectFieldsLite + `
 		FROM games g
@@ -978,8 +985,6 @@ func (d *Database) GetTorrentGames() ([]GameEntity, error) {
 
 // GetGameByID returns a single game entity with full details (FTP or Torrent)
 func (d *Database) GetGameByID(id int64) (*GameEntity, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 	return d.getGameByIDInternal(id)
 }
 
@@ -1065,8 +1070,8 @@ func (d *Database) getGameByIDInternal(id int64) (*GameEntity, error) {
 
 // SetFavorite adds or updates a game in favorites with a status and cached game data JSON
 func (d *Database) SetFavorite(gameID int64, status string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	// Get game entity snapshot for complete offline resilience
 	var gameDataJSON string
@@ -1092,8 +1097,8 @@ func (d *Database) SetFavorite(gameID int64, status string) error {
 
 // RemoveFavorite removes a game from favorites
 func (d *Database) RemoveFavorite(gameID int64) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec("DELETE FROM favorites WHERE game_id = ?", gameID)
 	return err
@@ -1101,9 +1106,6 @@ func (d *Database) RemoveFavorite(gameID int64) error {
 
 // GetFavorites returns all favorite items with full metadata (offline-first)
 func (d *Database) GetFavorites() ([]FavoriteItem, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	rows, err := d.db.Query(`
 		SELECT game_id, status, game_data, COALESCE(added_at, ''), COALESCE(updated_at, ''),
 		       COALESCE(custom_exe_path, ''), COALESCE(launch_arguments, '') 
@@ -1146,8 +1148,8 @@ func (d *Database) GetFavorites() ([]FavoriteItem, error) {
 
 // SetFavoriteLaunchConfig sets custom executable path and launch parameters for a favorite game
 func (d *Database) SetFavoriteLaunchConfig(gameID int64, exePath, launchArgs string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	stmt := `
 		UPDATE favorites 
@@ -1179,9 +1181,6 @@ func (d *Database) SetFavoriteLaunchConfig(gameID int64, exePath, launchArgs str
 
 // GetFavoriteLaunchConfig returns custom_exe_path and launch_arguments for a game
 func (d *Database) GetFavoriteLaunchConfig(gameID int64) (string, string, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	var exePath, launchArgs string
 	err := d.db.QueryRow(`
 		SELECT COALESCE(custom_exe_path, ''), COALESCE(launch_arguments, '') 
@@ -1195,41 +1194,13 @@ func (d *Database) GetFavoriteLaunchConfig(gameID int64) (string, string, error)
 
 // UpsertTorrentGames adds or updates games imported from a Hydra torrent source
 func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []HydraDownloadItem) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	tx, err := d.db.Begin()
-	if err != nil {
-		return err
+	if len(items) == 0 {
+		return nil
 	}
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(`
-		INSERT INTO games (
-			raw_name, clean_title, search_title, canonical_key, remote_path, size_bytes, size_display,
-			is_directory, is_collection, parent_path, steam_appid, steam_synced,
-			source_type, torrent_source, uris, upload_date, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'torrent', ?, ?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(remote_path) DO UPDATE SET
-			raw_name = excluded.raw_name,
-			clean_title = excluded.clean_title,
-			search_title = excluded.search_title,
-			canonical_key = excluded.canonical_key,
-			size_bytes = excluded.size_bytes,
-			size_display = excluded.size_display,
-			torrent_source = excluded.torrent_source,
-			uris = excluded.uris,
-			upload_date = excluded.upload_date,
-			updated_at = CURRENT_TIMESTAMP
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
 
 	// Pre-load known Steam metadata titles into memory for lightning-fast O(1) matching
 	cachedMetadata := make(map[string]int)
-	if rows, err := tx.Query(`SELECT LOWER(title), appid FROM steam_metadata WHERE appid > 0`); err == nil {
+	if rows, err := d.db.Query(`SELECT LOWER(title), appid FROM steam_metadata WHERE appid > 0`); err == nil {
 		for rows.Next() {
 			var t string
 			var aid int
@@ -1240,50 +1211,101 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 		rows.Close()
 	}
 
-	for _, item := range items {
-		if len(item.URIs) == 0 || strings.TrimSpace(item.URIs[0]) == "" {
-			continue
+	const batchSize = 1000
+	for i := 0; i < len(items); i += batchSize {
+		end := i + batchSize
+		if end > len(items) {
+			end = len(items)
 		}
-		primaryURI := strings.TrimSpace(item.URIs[0])
-		urisJSON, _ := json.Marshal(item.URIs)
+		chunk := items[i:end]
 
-		cleanTitle := remote.CleanDisplayTitle(item.Title)
-		searchTitle := remote.SanitizeForSteamSearch(cleanTitle)
-		canonicalKey := remote.CleanCanonicalKey(cleanTitle)
-		sizeBytes := remote.ParseFileSize(item.FileSize)
-		sizeDisplay := strings.TrimSpace(item.FileSize)
-		if sizeDisplay == "" && sizeBytes > 0 {
-			sizeDisplay = formatBytes(sizeBytes)
+		if err := func() error {
+			d.writeMu.Lock()
+			defer d.writeMu.Unlock()
+
+			tx, err := d.db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+
+			stmt, err := tx.Prepare(`
+				INSERT INTO games (
+					raw_name, clean_title, search_title, canonical_key, remote_path, size_bytes, size_display,
+					is_directory, is_collection, parent_path, steam_appid, steam_synced,
+					source_type, torrent_source, uris, upload_date, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'torrent', ?, ?, ?, CURRENT_TIMESTAMP)
+				ON CONFLICT(remote_path) DO UPDATE SET
+					raw_name = excluded.raw_name,
+					clean_title = excluded.clean_title,
+					search_title = excluded.search_title,
+					canonical_key = excluded.canonical_key,
+					size_bytes = excluded.size_bytes,
+					size_display = excluded.size_display,
+					torrent_source = excluded.torrent_source,
+					uris = excluded.uris,
+					upload_date = excluded.upload_date,
+					updated_at = CURRENT_TIMESTAMP
+			`)
+			if err != nil {
+				return err
+			}
+			defer stmt.Close()
+
+			for _, item := range chunk {
+				if len(item.URIs) == 0 || strings.TrimSpace(item.URIs[0]) == "" {
+					continue
+				}
+				primaryURI := strings.TrimSpace(item.URIs[0])
+				urisJSON, _ := json.Marshal(item.URIs)
+
+				cleanTitle := remote.CleanDisplayTitle(item.Title)
+				searchTitle := remote.SanitizeForSteamSearch(cleanTitle)
+				canonicalKey := remote.CleanCanonicalKey(cleanTitle)
+				sizeBytes := remote.ParseFileSize(item.FileSize)
+				sizeDisplay := strings.TrimSpace(item.FileSize)
+				if sizeDisplay == "" && sizeBytes > 0 {
+					sizeDisplay = formatBytes(sizeBytes)
+				}
+
+				steamAppID := 0
+				steamSynced := 0
+				if aid, ok := cachedMetadata[strings.ToLower(cleanTitle)]; ok && aid > 0 {
+					steamAppID = aid
+					steamSynced = 1
+				} else if aid, ok := cachedMetadata[strings.ToLower(searchTitle)]; ok && aid > 0 {
+					steamAppID = aid
+					steamSynced = 1
+				}
+
+				if _, err := stmt.Exec(
+					item.Title, cleanTitle, searchTitle, canonicalKey, primaryURI, sizeBytes, sizeDisplay,
+					sourceName, steamAppID, steamSynced,
+					sourceID, string(urisJSON), item.UploadDate,
+				); err != nil {
+					log.Printf("[Database] Failed to upsert torrent item %s: %v", item.Title, err)
+					continue
+				}
+			}
+
+			return tx.Commit()
+		}(); err != nil {
+			return err
 		}
 
-		// Fast in-memory check if steam_metadata already has this title to reuse cache immediately
-		steamAppID := 0
-		steamSynced := 0
-		if aid, ok := cachedMetadata[strings.ToLower(cleanTitle)]; ok && aid > 0 {
-			steamAppID = aid
-			steamSynced = 1
-		} else if aid, ok := cachedMetadata[strings.ToLower(searchTitle)]; ok && aid > 0 {
-			steamAppID = aid
-			steamSynced = 1
-		}
-
-		if _, err := stmt.Exec(
-			item.Title, cleanTitle, searchTitle, canonicalKey, primaryURI, sizeBytes, sizeDisplay,
-			sourceName, steamAppID, steamSynced,
-			sourceID, string(urisJSON), item.UploadDate,
-		); err != nil {
-			log.Printf("[Database] Failed to upsert torrent item %s: %v", item.Title, err)
-			continue
+		// Yield briefly between batches so concurrent writers (favorites, downloads) slip in seamlessly
+		if end < len(items) {
+			time.Sleep(1 * time.Millisecond)
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // DeleteTorrentGamesBySource prunes games belonging to a specific torrent source
 func (d *Database) DeleteTorrentGamesBySource(sourceID string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`DELETE FROM games WHERE source_type = 'torrent' AND torrent_source = ?`, sourceID)
 	return err
@@ -1291,9 +1313,6 @@ func (d *Database) DeleteTorrentGamesBySource(sourceID string) error {
 
 // GetUnsyncedGames returns list of games needing Steam metadata (skipping duplicate releases to optimize API requests)
 func (d *Database) GetUnsyncedGames() ([]GameEntity, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	query := `
 		SELECT g.id, g.clean_title, g.search_title, g.steam_appid
 		FROM games g
@@ -1332,38 +1351,31 @@ func (d *Database) GetUnsyncedGames() ([]GameEntity, error) {
 
 // SetGameAppID assigns a Steam AppID to a game and all its duplicate releases in DB
 func (d *Database) SetGameAppID(gameID int64, appID int) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
-	_, err := d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, appID, gameID)
-	if err != nil {
-		return err
-	}
-
-	// Also propagate AppID and synced status to all duplicate sibling rows in DB
 	var clean, search, canonical string
 	_ = d.db.QueryRow(`SELECT clean_title, search_title, canonical_key FROM games WHERE id = ?`, gameID).Scan(&clean, &search, &canonical)
 	if canonical == "" && clean != "" {
 		canonical = remote.CleanCanonicalKey(clean)
 	}
 
-	if search != "" {
-		_, _ = d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE search_title = ? AND (steam_appid = 0 OR steam_synced = 0)`, appID, search)
-	}
-	if clean != "" {
-		_, _ = d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE clean_title = ? AND (steam_appid = 0 OR steam_synced = 0)`, appID, clean)
-	}
-	if canonical != "" {
-		_, _ = d.db.Exec(`UPDATE games SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE canonical_key = ? AND (steam_appid = 0 OR steam_synced = 0)`, appID, canonical)
-	}
-
-	return nil
+	// Single indexed update covering the primary game and any sibling duplicate releases
+	_, err := d.db.Exec(`
+		UPDATE games 
+		SET steam_appid = ?, steam_synced = 1, updated_at = CURRENT_TIMESTAMP 
+		WHERE id = ? 
+		   OR (search_title = ? AND search_title != '' AND (steam_appid = 0 OR steam_synced = 0))
+		   OR (clean_title = ? AND clean_title != '' AND (steam_appid = 0 OR steam_synced = 0))
+		   OR (canonical_key = ? AND canonical_key != '' AND (steam_appid = 0 OR steam_synced = 0))
+	`, appID, gameID, search, clean, canonical)
+	return err
 }
 
 // SyncDuplicateGamesMetadata propagates Steam AppID and synced status to all duplicate rows in DB
 func (d *Database) SyncDuplicateGamesMetadata() (int64, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	rows, err := d.db.Query(`SELECT clean_title, search_title, steam_appid FROM games WHERE steam_appid != 0`)
 	if err != nil {
@@ -1440,8 +1452,8 @@ func (d *Database) SyncDuplicateGamesMetadata() (int64, error) {
 
 // MarkGameSynced marks a game as synced (even if no Steam AppID was found)
 func (d *Database) MarkGameSynced(gameID int64) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`UPDATE games SET steam_synced = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, gameID)
 	return err
@@ -1449,8 +1461,8 @@ func (d *Database) MarkGameSynced(gameID int64) error {
 
 // ResetGameMetadata unlinks steam metadata from a game and marks it unsynced for fresh lookup
 func (d *Database) ResetGameMetadata(gameID int64) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`UPDATE games SET steam_appid = 0, steam_synced = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, gameID)
 	return err
@@ -1458,8 +1470,8 @@ func (d *Database) ResetGameMetadata(gameID int64) error {
 
 // ResetUnmatchedGames resets all games without a Steam AppID back to unsynced so the new engine can match them
 func (d *Database) ResetUnmatchedGames() (int64, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	// Re-sanitize search_title only for games in DB with missing search_title
 	if rows, err := d.db.Query(`SELECT id, clean_title FROM games WHERE search_title = '' OR search_title IS NULL`); err == nil {
@@ -1512,8 +1524,8 @@ func (d *Database) ResetUnmatchedGames() (int64, error) {
 
 // PurgeMismatchedMetadata detects and resets any existing corrupt or false metadata matches in DB
 func (d *Database) PurgeMismatchedMetadata(similarityChecker func(query, candidate string) float64, threshold float64) (int, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	rows, err := d.db.Query(`
 		SELECT g.id, g.clean_title, COALESCE(s.title, ''), g.steam_appid
@@ -1581,8 +1593,8 @@ func (d *Database) PurgeMismatchedMetadata(similarityChecker func(query, candida
 
 // SaveSteamMetadata saves Steam store details to cache
 func (d *Database) SaveSteamMetadata(meta SteamMetadata) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	screenshotsJSON, _ := json.Marshal(meta.Screenshots)
 	moviesJSON, _ := json.Marshal(meta.Movies)
@@ -1635,8 +1647,6 @@ func (d *Database) SaveSteamMetadata(meta SteamMetadata) error {
 
 // GetSteamMetadataFromCache retrieves cached Steam metadata for an AppID
 func (d *Database) GetSteamMetadataFromCache(appID int) (*SteamMetadata, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 
 	row := d.db.QueryRow(`
 		SELECT appid, title, short_description, detailed_description, header_image, capsule_image,
@@ -1675,8 +1685,8 @@ func (d *Database) GetSteamMetadataFromCache(appID int) (*SteamMetadata, error) 
 
 // UpdateSteamMetadataTags updates the tags for a given appID
 func (d *Database) UpdateSteamMetadataTags(appID int, tags []string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	tagsJSON, _ := json.Marshal(tags)
 	_, err := d.db.Exec(`UPDATE steam_metadata SET tags = ? WHERE appid = ?`, string(tagsJSON), appID)
@@ -1685,8 +1695,8 @@ func (d *Database) UpdateSteamMetadataTags(appID int, tags []string) error {
 
 // UpdateSteamMetadataCover updates the capsule_image for a given appID
 func (d *Database) UpdateSteamMetadataCover(appID int, coverURL string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`UPDATE steam_metadata SET capsule_image = ? WHERE appid = ?`, coverURL, appID)
 	return err
@@ -1694,8 +1704,8 @@ func (d *Database) UpdateSteamMetadataCover(appID int, coverURL string) error {
 
 // UpdateSteamMetadataIcon updates the icon_url for a given appID
 func (d *Database) UpdateSteamMetadataIcon(appID int, iconURL string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`UPDATE steam_metadata SET icon_url = ? WHERE appid = ?`, iconURL, appID)
 	return err
@@ -1703,8 +1713,8 @@ func (d *Database) UpdateSteamMetadataIcon(appID int, iconURL string) error {
 
 // UpdateSteamMetadataTitle updates the title for a given appID
 func (d *Database) UpdateSteamMetadataTitle(appID int, title string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`UPDATE steam_metadata SET title = ? WHERE appid = ?`, title, appID)
 	return err
@@ -1718,9 +1728,6 @@ type MissingIconItem struct {
 
 // GetGamesMissingIcons returns distinct games that have SteamAppID but lack an icon or title
 func (d *Database) GetGamesMissingIcons() ([]MissingIconItem, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	rows, err := d.db.Query(`
 		SELECT g.id, g.steam_appid, COALESCE(NULLIF(s.title, ''), g.clean_title)
 		FROM games g
@@ -1745,8 +1752,8 @@ func (d *Database) GetGamesMissingIcons() ([]MissingIconItem, error) {
 
 // UpdateSteamReviewSummary updates review score description, percent and counts for an appID
 func (d *Database) UpdateSteamReviewSummary(appID int, desc string, percent, total, positive int) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`
 		UPDATE steam_metadata
@@ -1761,8 +1768,8 @@ func (d *Database) UpdateSteamReviewSummary(appID int, desc string, percent, tot
 // ==========================================
 
 func (d *Database) SaveDownloadRecord(rec DownloadRecord) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	now := time.Now().Unix()
 	if rec.CreatedAt == 0 {
@@ -1799,9 +1806,6 @@ func (d *Database) SaveDownloadRecord(rec DownloadRecord) error {
 }
 
 func (d *Database) GetAllDownloads() ([]DownloadRecord, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	rows, err := d.db.Query(`
 		SELECT id, game_id, game_title, remote_path, local_path, total_bytes, downloaded_bytes,
 		       status, error_message, COALESCE(is_torrent, 0), COALESCE(magnet_uri, ''), created_at, updated_at
@@ -1833,16 +1837,16 @@ func (d *Database) GetAllDownloads() ([]DownloadRecord, error) {
 }
 
 func (d *Database) DeleteDownloadRecord(id string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`DELETE FROM downloads WHERE id = ?`, id)
 	return err
 }
 
 func (d *Database) ClearCompletedDownloads() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`DELETE FROM downloads WHERE status IN ('completed', 'cancelled')`)
 	return err
@@ -1850,9 +1854,6 @@ func (d *Database) ClearCompletedDownloads() error {
 
 // GetDownloadRecordByGameID retrieves the latest download record for a game
 func (d *Database) GetDownloadRecordByGameID(gameID int64) (*DownloadRecord, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	row := d.db.QueryRow(`
 		SELECT id, game_id, game_title, remote_path, local_path, total_bytes, downloaded_bytes,
 		       status, error_message, COALESCE(is_torrent, 0), COALESCE(magnet_uri, ''), created_at, updated_at
@@ -1902,9 +1903,6 @@ func formatBytes(bytes int64) string {
 
 // GetStopGameCache retrieves cached JSON if updated_at is within maxAge
 func (d *Database) GetStopGameCache(key string, maxAge time.Duration) (string, bool) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	minTimestamp := time.Now().Add(-maxAge).Unix()
 	var jsonStr string
 	err := d.db.QueryRow(`
@@ -1919,8 +1917,8 @@ func (d *Database) GetStopGameCache(key string, maxAge time.Duration) (string, b
 
 // SetStopGameCache stores JSON in stopgame_cache
 func (d *Database) SetStopGameCache(key string, responseJSON string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	_, err := d.db.Exec(`
 		INSERT INTO stopgame_cache (cache_key, response_json, updated_at)
@@ -1971,7 +1969,6 @@ func (d *Database) ensureMatcher() *LibraryMatcher {
 		lastBuilt:     time.Now(),
 	}
 
-	d.mu.RLock()
 	rows, err := d.db.Query(`
 		SELECT ` + gameSelectFieldsLite + `
 		FROM games g
@@ -2007,7 +2004,6 @@ func (d *Database) ensureMatcher() *LibraryMatcher {
 			}
 		}
 	}
-	d.mu.RUnlock()
 
 	d.matcher = newMatcher
 	return newMatcher

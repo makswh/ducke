@@ -117,6 +117,7 @@
   let selectedServerId = $state<string>('');
   let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.5' });
   let storageDrives = $state<StorageDrive[]>([]);
+  let isLoadingDrives = $state<boolean>(true);
   let isTestingConnection = $state<boolean>(false);
   let testResult = $state<{ success: boolean; message: string } | null>(null);
   let isSaved = $state<boolean>(false);
@@ -271,16 +272,21 @@
   });
 
   async function loadStorageDrives() {
+    isLoadingDrives = true;
     try {
+      let drives: any = null;
       if (typeof (AppAPI as any)?.GetStorageDrives === 'function') {
-        const drives = await (AppAPI as any).GetStorageDrives();
-        if (Array.isArray(drives) && drives.length > 0) storageDrives = drives;
+        drives = await (AppAPI as any).GetStorageDrives();
       } else if (typeof (window as any)?.go?.main?.App?.GetStorageDrives === 'function') {
-        const drives = await (window as any).go.main.App.GetStorageDrives();
-        if (Array.isArray(drives) && drives.length > 0) storageDrives = drives;
+        drives = await (window as any).go.main.App.GetStorageDrives();
+      }
+      if (Array.isArray(drives) && drives.length > 0) {
+        storageDrives = drives;
       }
     } catch (e) {
       console.warn('Failed to load storage drives:', e);
+    } finally {
+      isLoadingDrives = false;
     }
   }
 
@@ -320,8 +326,12 @@
   });
 
   async function handleBrowseFolder() {
-    const selected = await onSelectFolder();
+    let selected = await onSelectFolder();
     if (selected) {
+      // Normalize drive roots (e.g. "F:\" -> "F:\Ducke")
+      if (/^[a-zA-Z]:\\?$/.test(selected)) {
+        selected = `${selected[0].toUpperCase()}:\\Ducke`;
+      }
       localSettings.downloadPath = selected;
       handleSave();
       loadStorageDrives();
@@ -330,14 +340,16 @@
 
   function handleSetDriveAsDefault(drive: StorageDrive) {
     let target = drive.path;
-    if (drive.type === 'internal' && (target === 'C:\\' || target === 'C:')) {
-      target = 'C:\\Ducke';
+    // Normalize Windows drive roots (e.g. "C:\", "D:\", "F:\", "C:")
+    if (/^[a-zA-Z]:\\?$/.test(target)) {
+      const letter = target[0].toUpperCase();
+      target = `${letter}:\\Ducke`;
     } else if (drive.type === 'internal' && (target === '/home' || target === '/' || target.startsWith('/home/'))) {
       target = '/home/deck/Games/Ducke';
     } else if (drive.type === 'sdcard' || drive.type === 'removable') {
       target = `${drive.path.replace(/\/+$/, '')}/Games/Ducke`;
     } else {
-      target = drive.path;
+      target = `${drive.path.replace(/[\\/]+$/, '')}/Ducke`;
     }
     localSettings.downloadPath = target;
     handleSave();
@@ -600,98 +612,140 @@
         </div>
 
         <div class="space-y-4">
-          {#each storageDrives as drive}
-            {@const total = drive.totalBytes || 1}
-            {@const duckePct = Math.min(100, Math.max(0, (drive.duckeBytes / total) * 100))}
-            {@const otherBytes = Math.max(0, (drive.usedBytes - drive.duckeBytes))}
-            {@const otherPct = Math.min(100 - duckePct, Math.max(0, (otherBytes / total) * 100))}
-
-            <div class="p-4 rounded bg-[#0d1117] border border-white/[0.06] space-y-3">
-              <!-- Header Row -->
+          {#if isLoadingDrives}
+            <div class="p-8 rounded bg-[#0d1117] border border-white/[0.06] flex items-center justify-center gap-3 text-xs font-mono text-[#8e95a2]">
+              <RefreshCw class="w-4 h-4 animate-spin text-sky-400" />
+              <span>Определение накопителей и свободного места...</span>
+            </div>
+          {:else if storageDrives.length === 0}
+            <div class="p-5 rounded bg-[#0d1117] border border-white/[0.06] space-y-4">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2.5">
                   <HardDrive class="w-4 h-4 text-sky-400" />
-                  <span class="text-xs font-bold text-white font-mono">{drive.label}</span>
-                  {#if drive.isDefault}
-                    <span class="px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/25 text-[10px] font-mono font-semibold uppercase">
-                      Основной
-                    </span>
-                  {/if}
-                </div>
-
-                <div class="text-xs font-mono text-[#8e95a2]">
-                  <span class="text-white font-medium">{drive.freeGB}</span> свободно из {drive.totalGB}
+                  <span class="text-xs font-bold text-white font-mono">Основное хранилище</span>
+                  <span class="px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/25 text-[10px] font-mono font-semibold uppercase">
+                    Основной
+                  </span>
                 </div>
               </div>
 
-              <!-- Path Label in Steam Style -->
-              <div class="text-[11px] font-mono text-[#64748b] truncate">
-                {drive.isDefault ? localSettings.downloadPath : drive.path}
+              <div class="text-xs font-mono text-[#cbd5e1]">
+                Папка для загрузок: <span class="text-white font-bold">{localSettings.downloadPath}</span>
               </div>
 
-              <!-- Steam Single Storage Bar -->
-              <div class="w-full h-2 rounded-none bg-white/[0.06] overflow-hidden flex">
-                {#if duckePct > 0}
-                  <div class="h-full bg-sky-400" style="width: {duckePct}%;"></div>
-                {/if}
-                {#if otherPct > 0}
-                  <div class="h-full bg-slate-500" style="width: {otherPct}%;"></div>
-                {/if}
-              </div>
-
-              <!-- Steam Storage Legend -->
-              <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs font-mono pt-0.5">
-                {#if drive.duckeBytes > 0}
-                  <div class="flex items-center gap-1.5 text-sky-400">
-                    <span class="text-xs leading-none">●</span>
-                    <span class="text-slate-200">Ducke</span>
-                    <span class="text-[#8e95a2] lowercase">({drive.duckeGB})</span>
-                  </div>
-                {/if}
-
-                <div class="flex items-center gap-1.5 text-slate-400">
-                  <span class="text-xs leading-none">●</span>
-                  <span class="text-slate-200">Другие файлы</span>
-                  <span class="text-[#8e95a2] lowercase">({formatBytesReadable(otherBytes)})</span>
-                </div>
-
-                <div class="flex items-center gap-1.5 text-slate-500">
-                  <span class="text-xs leading-none">●</span>
-                  <span class="text-slate-200">Свободно</span>
-                  <span class="text-[#8e95a2] lowercase">({drive.freeGB})</span>
-                </div>
-              </div>
-
-              <!-- Action Links -->
-              <div class="pt-1 flex items-center gap-4 text-xs font-mono text-[#8e95a2]">
-                {#if !drive.isDefault}
-                  <button
-                    data-nav-item
-                    class="text-sky-400 hover:text-sky-300 hover:underline cursor-pointer"
-                    onclick={() => handleSetDriveAsDefault(drive)}
-                  >
-                    Сделать основным
-                  </button>
-                {/if}
-
+              <div class="pt-1 flex items-center gap-3">
                 <button
                   data-nav-item
-                  class="hover:text-white hover:underline cursor-pointer"
+                  class="px-3 py-1.5 rounded bg-white/10 hover:bg-white/15 text-xs text-white border border-white/10 font-medium transition-colors cursor-pointer flex items-center gap-1.5"
                   onclick={handleBrowseFolder}
                 >
-                  Выбрать папку
+                  <Folder class="w-3.5 h-3.5" />
+                  <span>Выбрать папку</span>
                 </button>
 
                 <button
                   data-nav-item
-                  class="hover:text-white hover:underline cursor-pointer"
-                  onclick={() => onOpenFolder(drive.isDefault ? localSettings.downloadPath : drive.path)}
+                  class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-xs text-[#8e95a2] hover:text-white border border-white/5 transition-colors cursor-pointer"
+                  onclick={() => onOpenFolder(localSettings.downloadPath)}
                 >
                   Открыть в проводнике
                 </button>
               </div>
             </div>
-          {/each}
+          {:else}
+            {#each storageDrives as drive}
+              {@const total = drive.totalBytes || 1}
+              {@const duckePct = Math.min(100, Math.max(0, (drive.duckeBytes / total) * 100))}
+              {@const otherBytes = Math.max(0, (drive.usedBytes - drive.duckeBytes))}
+              {@const otherPct = Math.min(100 - duckePct, Math.max(0, (otherBytes / total) * 100))}
+
+              <div class="p-4 rounded bg-[#0d1117] border border-white/[0.06] space-y-3">
+                <!-- Header Row -->
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <HardDrive class="w-4 h-4 text-sky-400" />
+                    <span class="text-xs font-bold text-white font-mono">{drive.label}</span>
+                    {#if drive.isDefault}
+                      <span class="px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/25 text-[10px] font-mono font-semibold uppercase">
+                        Основной
+                      </span>
+                    {/if}
+                  </div>
+
+                  <div class="text-xs font-mono text-[#8e95a2]">
+                    <span class="text-white font-medium">{drive.freeGB}</span> свободно из {drive.totalGB}
+                  </div>
+                </div>
+
+                <!-- Path Label in Steam Style -->
+                <div class="text-[11px] font-mono text-[#64748b] truncate">
+                  {drive.isDefault ? localSettings.downloadPath : drive.path}
+                </div>
+
+                <!-- Steam Single Storage Bar -->
+                <div class="w-full h-2 rounded-none bg-white/[0.06] overflow-hidden flex">
+                  {#if duckePct > 0}
+                    <div class="h-full bg-sky-400" style="width: {duckePct}%;"></div>
+                  {/if}
+                  {#if otherPct > 0}
+                    <div class="h-full bg-slate-500" style="width: {otherPct}%;"></div>
+                  {/if}
+                </div>
+
+                <!-- Steam Storage Legend -->
+                <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs font-mono pt-0.5">
+                  {#if drive.duckeBytes > 0}
+                    <div class="flex items-center gap-1.5 text-sky-400">
+                      <span class="text-xs leading-none">●</span>
+                      <span class="text-slate-200">Ducke</span>
+                      <span class="text-[#8e95a2] lowercase">({drive.duckeGB})</span>
+                    </div>
+                  {/if}
+
+                  <div class="flex items-center gap-1.5 text-slate-400">
+                    <span class="text-xs leading-none">●</span>
+                    <span class="text-slate-200">Другие файлы</span>
+                    <span class="text-[#8e95a2] lowercase">({formatBytesReadable(otherBytes)})</span>
+                  </div>
+
+                  <div class="flex items-center gap-1.5 text-slate-500">
+                    <span class="text-xs leading-none">●</span>
+                    <span class="text-slate-200">Свободно</span>
+                    <span class="text-[#8e95a2] lowercase">({drive.freeGB})</span>
+                  </div>
+                </div>
+
+                <!-- Action Links -->
+                <div class="pt-1 flex items-center gap-4 text-xs font-mono text-[#8e95a2]">
+                  {#if !drive.isDefault}
+                    <button
+                      data-nav-item
+                      class="text-sky-400 hover:text-sky-300 hover:underline cursor-pointer"
+                      onclick={() => handleSetDriveAsDefault(drive)}
+                    >
+                      Сделать основным
+                    </button>
+                  {/if}
+
+                  <button
+                    data-nav-item
+                    class="hover:text-white hover:underline cursor-pointer"
+                    onclick={handleBrowseFolder}
+                  >
+                    Выбрать папку
+                  </button>
+
+                  <button
+                    data-nav-item
+                    class="hover:text-white hover:underline cursor-pointer"
+                    onclick={() => onOpenFolder(drive.isDefault ? localSettings.downloadPath : drive.path)}
+                  >
+                    Открыть в проводнике
+                  </button>
+                </div>
+              </div>
+            {/each}
+          {/if}
         </div>
       </div>
 
@@ -1004,6 +1058,7 @@
                   data-nav-item
                   type="number"
                   min="0"
+                  max="1000000"
                   step="512"
                   bind:value={localSettings.maxSpeedKBps}
                   onchange={handleSave}

@@ -178,8 +178,8 @@
           {/if}
         </button>
 
-        <!-- Floating Tooltip Card for Active Download on Hover -->
-        {#if downloadProgress.isDownloading}
+        <!-- Floating Tooltip Card for Active Download on Hover (only when not on downloads tab) -->
+        {#if downloadProgress.isDownloading && activeTab !== 'downloads'}
           <div
             class="pointer-events-none group-hover/dl:opacity-100 group-hover/dl:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-3 py-2 bg-[#12161f] border border-white/10 rounded shadow-2xl flex flex-col gap-1 min-w-[190px] max-w-[260px]"
           >

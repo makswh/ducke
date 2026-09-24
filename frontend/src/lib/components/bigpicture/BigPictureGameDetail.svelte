@@ -24,19 +24,30 @@
     Image as ImageIcon,
     UploadSimple,
     Info,
-    Magnet
+    Magnet,
+    SteamLogo,
+    ThumbsUp,
+    ThumbsDown,
+    ChatText,
+    ArrowSquareOut as ExternalLink
   } from 'phosphor-svelte';
   import Hls from 'hls.js';
   import { sound } from '../../navigation/audio';
   import * as AppAPI from '../../../../wailsjs/go/main/App';
+  import { BrowserOpenURL } from '../../../../wailsjs/runtime/runtime';
   import type {
     GameEntity,
     SteamMovie,
     SteamCandidateItem,
-    GamePageDetails
+    GamePageDetails,
+    SteamAnonymizedReview,
+    SteamReviewsResponse
   } from '../../types/game';
   import { formatTorrentSourceName } from '../../utils/sourceFormatter';
   import { getDisplayTitle } from '../../utils/titleUtils';
+  import { downloadsStore } from '../../stores/downloads.svelte';
+  import { formatSteamReviewBBCode, formatReviewDate } from '../../utils/steamReviewFormatter';
+
 
   let {
     game = null as any,
@@ -44,6 +55,7 @@
     onBack = () => {},
     onStartDownload = (gameId: number, targetPath: string) => {},
     onSelectFolder = async (): Promise<string> => '',
+    onUpdateDownloadPath = (path: string) => {},
     activeDownloads = [] as any[]
   } = $props();
 
@@ -67,8 +79,88 @@
 
   // Game Description Modal state (Triggered by [X])
   let isDescriptionModalOpen = $state<boolean>(false);
-  let descTab = $state<'about' | 'details' | 'specs' | 'variants'>('about');
+  let descTab = $state<'about' | 'details' | 'specs' | 'variants' | 'reviews'>('about');
   let descScrollEl = $state<HTMLDivElement | null>(null);
+
+  // Steam Reviews state (Big Picture)
+  let steamReviews = $state<SteamAnonymizedReview[]>([]);
+  let steamReviewsCursor = $state<string>('*');
+  let steamReviewsHasMore = $state<boolean>(false);
+  let steamReviewsTotal = $state<number>(0);
+  let isLoadingReviews = $state<boolean>(false);
+  let isLoadingMoreReviews = $state<boolean>(false);
+  let reviewLanguage = $state<'russian' | 'all'>('russian');
+  let lastReviewsAppId = $state<number>(0);
+
+  function handleOpenSteamStore() {
+    sound.playSelect();
+    const appId = activeGame?.steamAppId;
+    if (!appId || appId <= 0) return;
+    const storeUrl = `https://store.steampowered.com/app/${appId}`;
+    try {
+      BrowserOpenURL(storeUrl);
+    } catch {
+      AppAPI.OpenURL(storeUrl);
+    }
+  }
+
+  async function loadSteamReviews(reset = false) {
+    const appId = activeGame?.steamAppId;
+    if (!appId || appId <= 0) {
+      steamReviews = [];
+      steamReviewsHasMore = false;
+      steamReviewsTotal = 0;
+      return;
+    }
+
+    if (reset) {
+      steamReviewsCursor = '*';
+      isLoadingReviews = true;
+    } else {
+      isLoadingMoreReviews = true;
+    }
+
+    try {
+      const res: SteamReviewsResponse = await AppAPI.GetSteamReviews(appId, reset ? '*' : steamReviewsCursor, reviewLanguage);
+      if (res) {
+        if (reset) {
+          steamReviews = res.reviews || [];
+        } else {
+          const existingIds = new Set(steamReviews.map(r => r.id));
+          const newOnes = (res.reviews || []).filter(r => !existingIds.has(r.id));
+          steamReviews = [...steamReviews, ...newOnes];
+        }
+        steamReviewsCursor = res.cursor || '';
+        steamReviewsHasMore = !!res.hasMore;
+        steamReviewsTotal = res.totalReviews || steamReviews.length;
+      }
+    } catch (e) {
+      console.error('Failed to load Steam reviews (BigPicture):', e);
+    } finally {
+      isLoadingReviews = false;
+      isLoadingMoreReviews = false;
+    }
+  }
+
+  function handleLanguageChange(lang: 'russian' | 'all') {
+    sound.playSelect();
+    if (reviewLanguage === lang) return;
+    reviewLanguage = lang;
+    loadSteamReviews(true);
+  }
+
+  $effect(() => {
+    const currentAppId = activeGame?.steamAppId || 0;
+    if (currentAppId > 0 && currentAppId !== lastReviewsAppId) {
+      lastReviewsAppId = currentAppId;
+      loadSteamReviews(true);
+    } else if (currentAppId <= 0 && lastReviewsAppId !== 0) {
+      lastReviewsAppId = 0;
+      steamReviews = [];
+      steamReviewsHasMore = false;
+      steamReviewsTotal = 0;
+    }
+  });
 
   function openDescriptionModal() {
     sound.playSelect();
@@ -85,8 +177,9 @@
   }
 
   function cycleDescTab(delta: number) {
-    const tabs: ('about' | 'details' | 'specs' | 'variants')[] = ['about', 'details', 'specs'];
+    const tabs: ('about' | 'details' | 'specs' | 'variants' | 'reviews')[] = ['about', 'details', 'specs'];
     if (activeVariantsList && activeVariantsList.length > 1) tabs.push('variants');
+    if (activeGame?.steamAppId > 0) tabs.push('reviews');
     const curIdx = tabs.indexOf(descTab);
     const nextIdx = (curIdx + delta + tabs.length) % tabs.length;
     descTab = tabs[nextIdx];
@@ -282,17 +375,19 @@
   });
 
   let activeDownload = $derived.by(() => {
-    if (!game) return null;
-    return (activeDownloads || []).find((d) => d && d.gameId === game.id);
+    const curGame = pageDetails?.game || game;
+    if (!curGame) return null;
+    return downloadsStore.getDownloadForGame(curGame);
   });
 
   let isDownloading = $derived(
-    (activeDownload && (activeDownload.status === 'downloading' || activeDownload.status === 'queued' || activeDownload.status === 'scanning')) ||
-    (pageDetails && (pageDetails.downloadStatus === 'downloading' || pageDetails.downloadStatus === 'queued' || pageDetails.downloadStatus === 'scanning'))
+    (activeDownload && (activeDownload.status === 'downloading' || activeDownload.status === 'queued' || activeDownload.status === 'scanning' || activeDownload.status === 'paused')) ||
+    (pageDetails && (pageDetails.downloadStatus === 'downloading' || pageDetails.downloadStatus === 'queued' || pageDetails.downloadStatus === 'scanning' || pageDetails.downloadStatus === 'paused'))
   );
 
   let isCompleted = $derived(
     (activeDownload && activeDownload.status === 'completed') ||
+    downloadsStore.isGameInstalled(pageDetails?.game || game) ||
     pageDetails?.isInstalled
   );
 
@@ -943,9 +1038,13 @@
   async function handleBrowseFolder() {
     sound.playSelect();
     try {
-      const selected = await onSelectFolder();
+      let selected = await onSelectFolder();
       if (selected) {
+        if (/^[a-zA-Z]:\\?$/.test(selected)) {
+          selected = `${selected[0].toUpperCase()}:\\Ducke`;
+        }
         customDownloadPath = selected;
+        onUpdateDownloadPath(selected);
       }
     } catch (e) {
       console.error(e);
@@ -1545,7 +1644,7 @@
 
     <!-- Middle Hero Stage: Game Title/Logo, Meta Badges & Action Buttons -->
     {#if activeGame}
-      <div class="max-w-3xl space-y-3.5 my-auto z-20">
+      <div class="max-w-4xl space-y-4 my-auto z-20">
         <!-- Official Steam Logo or Large Google Sans Title -->
         <div class="min-h-[60px] sm:min-h-[80px] flex items-end">
           {#if activeGame.steamAppId && !logoFailedMap[activeGame.steamAppId]}
@@ -1564,32 +1663,32 @@
           {/if}
         </div>
 
-        <!-- Meta Chips Row -->
+        <!-- 1. Status & Source Badges Strip -->
         <div class="flex flex-wrap items-center gap-2 pt-0.5">
-          <span class="px-2 py-0.5 rounded bg-white/10 text-white text-[10px] font-black tracking-widest border border-white/20 uppercase">
+          <span class="px-2 py-0.5 rounded bg-white/[0.08] text-[#8e95a2] text-[10px] font-black tracking-widest border border-white/10 uppercase font-mono">
             PC
           </span>
 
           {#if isCompleted}
-            <span class="px-2.5 py-0.5 rounded bg-white/[0.06] border border-white/10 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
-              <Check class="w-3.5 h-3.5 stroke-[3]" />
+            <span class="px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
+              <Check class="w-3.5 h-3.5 stroke-[2.5]" />
               <span>Установлено</span>
             </span>
           {:else if isDownloading}
-            <span class="px-2.5 py-0.5 rounded bg-white/[0.06] border border-white/10 text-sky-400 text-xs font-semibold flex items-center gap-1.5">
+            <span class="px-2.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-semibold flex items-center gap-1.5">
               <Download class="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>{Math.round(activeDownload?.progress || pageDetails?.downloadProgress?.progressPercent || 0)}%</span>
+              <span>{Math.round(activeDownload?.progressPercent ?? (activeDownload as any)?.progress ?? pageDetails?.downloadProgress?.progressPercent ?? 0)}%</span>
             </span>
           {/if}
 
           {#if downloadSourceInfo}
-            <span class="px-2.5 py-0.5 rounded border border-white/10 bg-white/[0.06] text-[#cbd5e1] text-xs font-semibold flex items-center gap-1.5">
+            <span class="px-2.5 py-0.5 rounded border border-white/10 bg-white/[0.05] text-[#94a3b8] text-xs font-medium flex items-center gap-1.5">
               <span>{downloadSourceInfo.name}</span>
             </span>
           {/if}
 
           {#if currentFavoriteStatus}
-            <span class="px-2.5 py-0.5 rounded bg-white/[0.06] border border-white/10 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
+            <span class="px-2.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
               <Star class="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
               <span>
                 {#if currentFavoriteStatus === 'playing'}
@@ -1602,50 +1701,70 @@
               </span>
             </span>
           {/if}
+        </div>
 
+        <!-- 2. Metadata Factline (No trailing bullets, clean typography) -->
+        <div class="flex flex-wrap items-center gap-y-1 gap-x-2 text-xs text-[#8e95a2]">
           {#if activeGame.releaseDate || activeGame.steamReleaseDate}
-            <span class="text-xs font-semibold text-[#8e95a2]">
-              {activeGame.releaseDate || activeGame.steamReleaseDate}
-            </span>
-            <span class="text-white/20">•</span>
+            <span>{activeGame.releaseDate || activeGame.steamReleaseDate}</span>
+          {/if}
+
+          {#if (activeGame.releaseDate || activeGame.steamReleaseDate) && (activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr)}
+            <span class="text-white/20 select-none">•</span>
           {/if}
 
           {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
-            <span class="text-xs font-semibold text-[#8e95a2] font-mono">
-              {activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
+            <span class="font-mono text-[#cbd5e1]">{activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}</span>
+          {/if}
+
+          {#if !isCompleted && currentVariantSeedInfo}
+            {#if (activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr || activeGame.releaseDate || activeGame.steamReleaseDate)}
+              <span class="text-white/20 select-none">•</span>
+            {/if}
+            <span class="inline-flex items-center gap-1 font-mono {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#8e95a2]'}">
+              <UploadSimple class="w-3 h-3 stroke-[2.5]" />
+              {#if currentVariantSeedInfo.loading}
+                <span class="animate-pulse text-[#64748b]">...</span>
+              {:else}
+                <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
+              {/if}
             </span>
-            <span class="text-white/20">•</span>
           {/if}
 
           {#if activeGame.reviewPercent}
-            <span class="text-xs font-bold text-white flex items-center gap-1">
+            {#if (activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr || activeGame.releaseDate || activeGame.steamReleaseDate || (!isCompleted && currentVariantSeedInfo))}
+              <span class="text-white/20 select-none">•</span>
+            {/if}
+            <span class="font-bold text-white flex items-center gap-1">
               <Star class="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
               <span>{activeGame.reviewPercent}%</span>
             </span>
-            <span class="text-white/20">•</span>
           {/if}
 
           {#if activeGame.genres && Array.isArray(activeGame.genres) && activeGame.genres.length > 0}
-            <span class="text-xs text-[#8e95a2]">
-              {activeGame.genres.slice(0, 2).join(', ')}
+            {#if (activeGame.reviewPercent || activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr || activeGame.releaseDate || (!isCompleted && currentVariantSeedInfo))}
+              <span class="text-white/20 select-none">•</span>
+            {/if}
+            <span class="text-[#8e95a2]">
+              {activeGame.genres.slice(0, 3).join(', ')}
             </span>
           {/if}
         </div>
 
-        <!-- Short Synopsis Preview -->
+        <!-- 3. Short Synopsis Preview -->
         {#if activeGame.shortDescription}
-          <p class="text-xs sm:text-sm text-[#cbd5e1] leading-relaxed line-clamp-2 max-w-2xl font-normal drop-shadow-sm">
+          <p class="text-xs sm:text-sm text-[#cbd5e1]/90 leading-relaxed line-clamp-2 max-w-2xl font-normal drop-shadow-sm">
             {activeGame.shortDescription.replace(/<[^>]*>?/gm, '')}
           </p>
         {/if}
 
-        <!-- Tactile Action Buttons Row -->
-        <div class="flex flex-wrap items-center gap-3 pt-1">
+        <!-- 4. Tactile Action Buttons Row (Unified single-row Steam Deck layout) -->
+        <div class="flex items-center gap-2.5 pt-1.5 flex-wrap">
           <!-- Primary Action Pill (A) -->
           <button
             data-nav-item
             type="button"
-            class="px-7 py-3 rounded bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+            class="h-11 px-6 rounded-md bg-white hover:bg-slate-100 text-black font-extrabold text-sm inline-flex items-center gap-2.5 transition-all cursor-pointer shadow-lg shadow-white/5 active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
             onclick={handlePrimaryAction}
           >
             {#if isCompleted}
@@ -1653,7 +1772,7 @@
               <span>Играть</span>
             {:else if isDownloading}
               <Download class="w-4 h-4 stroke-[2.5]" />
-              <span>Скачивается...</span>
+              <span>{activeDownload?.status === 'paused' || pageDetails?.downloadStatus === 'paused' ? 'Приостановлено' : (activeDownload?.status === 'queued' || pageDetails?.downloadStatus === 'queued' ? 'В очереди...' : 'Скачивается...')}</span>
             {:else}
               <Download class="w-4 h-4 stroke-[2.5]" />
               <span>Скачать</span>
@@ -1661,14 +1780,14 @@
                 <span class="text-xs font-mono opacity-60 font-bold">• {activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}</span>
               {/if}
             {/if}
-            <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center">A</span>
+            <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center ml-0.5">A</span>
           </button>
 
           <!-- Description Button (X) -->
           <button
             data-nav-item
             type="button"
-            class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2.5 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+            class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
             onclick={openDescriptionModal}
             title="Открыть описание игры [X]"
           >
@@ -1682,7 +1801,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
               onclick={handleOpenGameFolder}
               title="Открыть папку с игрой"
             >
@@ -1693,7 +1812,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
+              class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
               onclick={openDownloadWizard}
               title="Выбрать версию ({activeVariantsList.length} доступно)"
             >
@@ -1702,25 +1821,48 @@
             </button>
           {/if}
 
-          <!-- Live Seeds Indicator (if active variant is torrent) -->
-          {#if currentVariantSeedInfo}
-            <div class="px-3 py-3 rounded-sm bg-white/10 border border-white/15 text-xs font-mono flex items-center gap-1.5 select-none {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#8e95a2]'}">
-              <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
-              {#if currentVariantSeedInfo.loading}
-                <span class="animate-pulse text-[#64748b]">...</span>
+          <!-- Open Steam Store Page -->
+          {#if activeGame?.steamAppId && activeGame.steamAppId > 0}
+            <button
+              data-nav-item
+              type="button"
+              class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
+              onclick={handleOpenSteamStore}
+              title="Открыть страницу игры в магазине Steam"
+            >
+              <SteamLogo size={16} weight="bold" class="text-sky-400" />
+              <span>В Steam</span>
+              <ExternalLink class="w-3.5 h-3.5 text-[#8e95a2]" />
+            </button>
+          {/if}
+
+          <!-- Watch Media Fullscreen Button (↑) -->
+          {#if unifiedMediaList.length > 0}
+            <button
+              data-nav-item
+              type="button"
+              class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
+              onclick={() => enterTheaterMode(0)}
+              title="Смотреть во весь экран [↑]"
+            >
+              {#if movieList.length > 0}
+                <Volume2 class="w-4 h-4 text-sky-400" />
+                <span>Трейлер</span>
               {:else}
-                <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
+                <ImageIcon class="w-4 h-4 text-sky-400" />
+                <span>Медиа</span>
               {/if}
-            </div>
+              <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center font-mono">↑</span>
+            </button>
           {/if}
 
           <!-- Favorite Toggle (Y) -->
-          <div class="relative">
+          <div class="relative flex-shrink-0">
             <button
               bind:this={favoriteDropdownTriggerEl}
               data-nav-item
               type="button"
-              class="p-3 rounded bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none flex items-center gap-1.5"
+              class="h-11 px-3.5 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none inline-flex items-center gap-2"
               onclick={() => {
                 isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
               }}
@@ -1733,7 +1875,7 @@
             {#if isFavoriteDropdownOpen}
               <div
                 bind:this={favoriteDropdownContainerEl}
-                class="absolute left-0 bottom-full mb-3 z-50 w-52 rounded bg-[#0d1117] border border-white/15 shadow-2xl p-1.5 space-y-1"
+                class="absolute left-0 bottom-full mb-3 z-50 w-52 rounded-md bg-[#0d1117] border border-white/15 shadow-2xl p-1.5 space-y-1"
               >
                 <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#64748b]">
                   Статус игры
@@ -1788,26 +1930,6 @@
               </div>
             {/if}
           </div>
-
-          <!-- Watch Media Fullscreen Button (↑) -->
-          {#if unifiedMediaList.length > 0}
-            <button
-              data-nav-item
-              type="button"
-              class="px-4 py-3 rounded bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center gap-2 border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-1 focus:ring-white focus:outline-none"
-              onclick={() => enterTheaterMode(0)}
-              title="Смотреть во весь экран [↑]"
-            >
-              {#if movieList.length > 0}
-                <Volume2 class="w-4 h-4 text-sky-400" />
-                <span>Трейлер</span>
-              {:else}
-                <ImageIcon class="w-4 h-4 text-sky-400" />
-                <span>Скриншоты</span>
-              {/if}
-              <span class="px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-mono">↑</span>
-            </button>
-          {/if}
         </div>
       </div>
     {/if}
@@ -1918,12 +2040,12 @@
         </div>
 
         <!-- 2. SteamOS Horizontal Tab Rail (Baseline Tabs) -->
-        <div class="px-6 sm:px-8 border-b border-white/10 flex items-center justify-between flex-shrink-0 bg-[#090b10]">
-          <div class="flex items-center gap-1 sm:gap-2 overflow-x-auto scrollbar-none">
+        <div class="px-6 sm:px-8 border-b border-white/10 flex items-center justify-between flex-shrink-0 bg-[#090b10] gap-4">
+          <div class="flex items-center gap-1 sm:gap-2 flex-1 min-w-0 overflow-x-auto scrollbar-none">
             <!-- LB Bumper Hint -->
             <button
               type="button"
-              class="hidden sm:inline-flex items-center justify-center px-1.5 py-0.5 rounded-sm bg-white/5 hover:bg-white/10 border border-white/10 font-mono text-[10px] font-bold text-[#8e95a2] hover:text-white mr-1 cursor-pointer transition-colors focus:outline-none"
+              class="hidden sm:inline-flex items-center justify-center px-1.5 py-0.5 rounded-sm bg-white/5 hover:bg-white/10 border border-white/10 font-mono text-[10px] font-bold text-[#8e95a2] hover:text-white mr-1 cursor-pointer transition-colors focus:outline-none flex-shrink-0"
               onclick={() => cycleDescTab(-1)}
               title="Предыдущая вкладка (LB / Q / ←)"
             >
@@ -1934,7 +2056,7 @@
             <button
               data-nav-item
               type="button"
-              class="relative px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'about' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+              class="relative whitespace-nowrap flex-shrink-0 px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'about' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
               onclick={() => {
                 descTab = 'about';
                 sound.playTab();
@@ -1947,7 +2069,7 @@
             <button
               data-nav-item
               type="button"
-              class="relative px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'details' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+              class="relative whitespace-nowrap flex-shrink-0 px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'details' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
               onclick={() => {
                 descTab = 'details';
                 sound.playTab();
@@ -1960,7 +2082,7 @@
             <button
               data-nav-item
               type="button"
-              class="relative px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'specs' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+              class="relative whitespace-nowrap flex-shrink-0 px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'specs' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
               onclick={() => {
                 descTab = 'specs';
                 sound.playTab();
@@ -1974,7 +2096,7 @@
               <button
                 data-nav-item
                 type="button"
-                class="relative px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'variants' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+                class="relative whitespace-nowrap flex-shrink-0 px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'variants' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
                 onclick={() => {
                   descTab = 'variants';
                   sound.playTab();
@@ -1984,10 +2106,25 @@
               </button>
             {/if}
 
+            <!-- Tab 5: Отзывы Steam -->
+            {#if activeGame?.steamAppId && activeGame.steamAppId > 0}
+              <button
+                data-nav-item
+                type="button"
+                class="relative whitespace-nowrap flex-shrink-0 px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer focus:outline-none focus:text-white -mb-px {descTab === 'reviews' ? 'text-white font-bold border-b border-white' : 'text-[#8e95a2] hover:text-white border-b border-transparent'}"
+                onclick={() => {
+                  descTab = 'reviews';
+                  sound.playTab();
+                }}
+              >
+                Отзывы Steam {#if steamReviewsTotal > 0}<span class="text-xs opacity-75 font-mono">({steamReviewsTotal})</span>{/if}
+              </button>
+            {/if}
+
             <!-- RB Bumper Hint -->
             <button
               type="button"
-              class="hidden sm:inline-flex items-center justify-center px-1.5 py-0.5 rounded-sm bg-white/5 hover:bg-white/10 border border-white/10 font-mono text-[10px] font-bold text-[#8e95a2] hover:text-white ml-1 cursor-pointer transition-colors focus:outline-none"
+              class="hidden sm:inline-flex items-center justify-center px-1.5 py-0.5 rounded-sm bg-white/5 hover:bg-white/10 border border-white/10 font-mono text-[10px] font-bold text-[#8e95a2] hover:text-white ml-1 cursor-pointer transition-colors focus:outline-none flex-shrink-0"
               onclick={() => cycleDescTab(1)}
               title="Следующая вкладка (RB / E / →)"
             >
@@ -1996,7 +2133,7 @@
           </div>
 
           <!-- Quick Navigation Tip -->
-          <div class="hidden md:flex items-center gap-1.5 text-[11px] text-[#64748b]">
+          <div class="hidden xl:flex items-center gap-1.5 text-[11px] text-[#64748b] flex-shrink-0">
             <span>Вкладки:</span>
             <span class="font-mono text-[10px] text-[#8e95a2]">LB / RB</span>
             <span class="mx-1 text-white/10">•</span>
@@ -2169,6 +2306,157 @@
                   </div>
                 </div>
               {/each}
+            </div>
+
+          {:else if descTab === 'reviews'}
+            <div class="max-w-4xl mx-auto space-y-6">
+              <!-- Top Controls: Header + Language switcher + Open in Steam -->
+              <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-white/10">
+                <div class="flex items-center gap-3">
+                  <ChatText class="w-5 h-5 text-sky-400" />
+                  <span class="text-sm font-bold uppercase tracking-wider text-white">Отзывы сообщества Steam</span>
+                  {#if steamReviewsTotal > 0}
+                    <span class="text-xs text-[#8e95a2] font-mono">({formatReviewsCount(steamReviewsTotal)})</span>
+                  {/if}
+                </div>
+
+                <div class="flex items-center gap-3">
+                  <div class="inline-flex rounded bg-black/40 border border-white/10 p-1 text-xs">
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="px-3 py-1.5 rounded font-medium cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none {reviewLanguage === 'russian' ? 'bg-white/20 text-white font-bold' : 'text-[#8e95a2] hover:text-white'}"
+                      onclick={() => handleLanguageChange('russian')}
+                    >
+                      Русские
+                    </button>
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="px-3 py-1.5 rounded font-medium cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none {reviewLanguage === 'all' ? 'bg-white/20 text-white font-bold' : 'text-[#8e95a2] hover:text-white'}"
+                      onclick={() => handleLanguageChange('all')}
+                    >
+                      Все языки
+                    </button>
+                  </div>
+
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="px-3.5 py-2 rounded bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/10 transition-colors cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
+                    onclick={handleOpenSteamStore}
+                    title="Открыть страницу игры в магазине Steam"
+                  >
+                    <SteamLogo size={14} weight="bold" />
+                    <span>В Steam</span>
+                    <ExternalLink class="w-3 h-3 text-[#8e95a2]" />
+                  </button>
+                </div>
+              </div>
+
+              <!-- Reviews Body -->
+              {#if isLoadingReviews}
+                <div class="space-y-4">
+                  {#each [1, 2, 3] as _}
+                    <div class="p-5 rounded-md bg-[#0e1219] border border-white/10 space-y-3 animate-pulse">
+                      <div class="h-5 w-32 bg-white/10 rounded"></div>
+                      <div class="space-y-2">
+                        <div class="h-3.5 w-full bg-white/5 rounded"></div>
+                        <div class="h-3.5 w-3/4 bg-white/5 rounded"></div>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {:else if steamReviews.length === 0}
+                <div class="p-8 rounded-md bg-[#0e1219] border border-white/10 text-center text-sm text-[#8e95a2] space-y-2">
+                  <p>Отзывов не найдено{reviewLanguage === 'russian' ? ' на русском языке' : ''}.</p>
+                  {#if reviewLanguage === 'russian'}
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="text-sky-400 hover:text-sky-300 underline font-medium cursor-pointer"
+                      onclick={() => handleLanguageChange('all')}
+                    >
+                      Показать отзывы на всех языках
+                    </button>
+                  {/if}
+                </div>
+              {:else}
+                <div class="space-y-4">
+                  {#each steamReviews as rev (rev.id)}
+                    <div class="p-5 rounded-md bg-[#0e1219] border border-white/10 hover:border-white/20 transition-colors space-y-3 shadow-md">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex items-center gap-2.5">
+                          {#if rev.votedUp}
+                            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-sky-500/15 border border-sky-500/30 text-sky-400 text-xs font-bold">
+                              <ThumbsUp class="w-3.5 h-3.5" weight="fill" />
+                              <span>Рекомендую</span>
+                            </div>
+                          {:else}
+                            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs font-bold">
+                              <ThumbsDown class="w-3.5 h-3.5" weight="fill" />
+                              <span>Не рекомендую</span>
+                            </div>
+                          {/if}
+
+                          <span class="text-xs text-white font-mono font-medium">
+                            {rev.playtimeHours} в игре
+                          </span>
+
+                          {#if rev.playtimeAtReview}
+                            <span class="text-xs text-[#64748b]">
+                              ({rev.playtimeAtReview} на момент отзыва)
+                            </span>
+                          {/if}
+                        </div>
+
+                        <span class="text-xs text-[#64748b]">
+                          {formatReviewDate(rev.timestampCreated)}
+                        </span>
+                      </div>
+
+                      <div class="text-sm text-[#d1d5db] leading-relaxed break-words">
+                        {@html formatSteamReviewBBCode(rev.review)}
+                      </div>
+
+                      {#if rev.votesUp > 0 || rev.votesFunny > 0}
+                        <div class="pt-2 border-t border-white/[0.06] flex items-center gap-3 text-xs text-[#8e95a2]">
+                          {#if rev.votesUp > 0}
+                            <span class="inline-flex items-center gap-1">
+                              <ThumbsUp class="w-3 h-3 text-[#8e95a2]" />
+                              <span>{rev.votesUp} посчитали полезным</span>
+                            </span>
+                          {/if}
+                          {#if rev.votesFunny > 0}
+                            <span>😄 {rev.votesFunny}</span>
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+
+                <!-- Load More Button -->
+                {#if steamReviewsHasMore}
+                  <div class="pt-4 text-center">
+                    <button
+                      data-nav-item
+                      type="button"
+                      disabled={isLoadingMoreReviews}
+                      class="px-6 py-3 rounded bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-bold text-white transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50 focus:ring-1 focus:ring-white focus:outline-none"
+                      onclick={() => loadSteamReviews(false)}
+                    >
+                      {#if isLoadingMoreReviews}
+                        <RefreshCw class="w-4 h-4 animate-spin text-sky-400" />
+                        <span>Загрузка отзывов...</span>
+                      {:else}
+                        <ChevronDown class="w-4 h-4" />
+                        <span>Показать ещё отзывы</span>
+                      {/if}
+                    </button>
+                  </div>
+                {/if}
+              {/if}
             </div>
           {/if}
         </div>

@@ -89,6 +89,38 @@ func (s *AppSettings) Sanitize() {
 			log.Printf("[Config] Migrating Linux download path from \"%s\" to \"%s\" to prevent binary file collision", s.DownloadPath, newPath)
 			s.DownloadPath = newPath
 		}
+
+		// 3. If DownloadPath is a drive root (e.g. "C:\", "D:\", "F:\") or Unix root ("/", "/home"),
+		// never allow downloading directly into disk root. Append "Ducke" subfolder.
+		vol := filepath.VolumeName(s.DownloadPath)
+		cleanSlash := filepath.ToSlash(s.DownloadPath)
+		if runtime.GOOS == "windows" {
+			// Check for drive letter roots like "D:", "D:.", "D:\", "D:/"
+			if len(s.DownloadPath) >= 2 && s.DownloadPath[1] == ':' {
+				letter := strings.ToUpper(string(s.DownloadPath[0]))
+				rest := s.DownloadPath[2:]
+				if rest == "" || rest == "." || rest == "\\" || rest == "/" {
+					newPath := letter + ":\\Ducke"
+					log.Printf("[Config] DownloadPath \"%s\" is a drive root. Normalizing to \"%s\"", s.DownloadPath, newPath)
+					s.DownloadPath = newPath
+				}
+			} else if s.DownloadPath == vol || s.DownloadPath == vol+"\\" || s.DownloadPath == vol+"/" || len(s.DownloadPath) <= 3 {
+				newPath := filepath.Join(s.DownloadPath, "Ducke")
+				log.Printf("[Config] DownloadPath \"%s\" is a drive root. Normalizing to \"%s\"", s.DownloadPath, newPath)
+				s.DownloadPath = newPath
+			}
+		} else {
+			if cleanSlash == "/" || cleanSlash == "/home" {
+				newPath := GetDefaultDownloadPath()
+				log.Printf("[Config] DownloadPath \"%s\" is a system root. Normalizing to \"%s\"", s.DownloadPath, newPath)
+				s.DownloadPath = newPath
+			}
+		}
+
+		// Ensure download directory exists
+		if err := os.MkdirAll(s.DownloadPath, 0755); err != nil {
+			log.Printf("[Config] Warning: could not create download directory \"%s\": %v", s.DownloadPath, err)
+		}
 	}
 
 	if s.MaxConcurrentFiles < 1 {

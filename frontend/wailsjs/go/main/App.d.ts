@@ -67,6 +67,8 @@ export function GetMetadataProgress():Promise<metadata.MetadataProgress>;
 
 export function GetSettings():Promise<config.AppSettings>;
 
+export function GetSteamReviews(arg1:number,arg2:string,arg3:string):Promise<metadata.SteamReviewsResponse>;
+
 export function GetStopGameCompilationDetail(arg1:string,arg2:boolean):Promise<collections.CompilationDetail>;
 
 export function GetStopGameCompilations(arg1:string,arg2:number):Promise<collections.CompilationsResponse>;
@@ -106,6 +108,8 @@ export function OpenConfigFolder():Promise<void>;
 export function OpenGameFolder(arg1:number):Promise<void>;
 
 export function OpenLocalFolder(arg1:string):Promise<void>;
+
+export function OpenURL(arg1:string):Promise<void>;
 
 export function PauseAllDownloads():Promise<void>;
 
@@ -156,6 +160,8 @@ export function TestConnection(arg1:config.ServerConfig):Promise<main.Connection
 export function ToggleTorrentSource(arg1:string,arg2:boolean):Promise<void>;
 
 export function TriggerSteamOSKeyboard():Promise<void>;
+
+export function UpdateDownloadPath(arg1:string):Promise<void>;
 
 export function UpdateSpeedLimit(arg1:number):Promise<void>;
 

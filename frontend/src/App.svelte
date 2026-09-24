@@ -10,6 +10,7 @@
   import CollectionsView from './lib/components/CollectionsView.svelte';
   import GamepadHUD from './lib/components/GamepadHUD.svelte';
   import { gamepad } from './lib/navigation/gamepad';
+  import { downloadsStore } from './lib/stores/downloads.svelte';
 
   import {
     GetCatalog,
@@ -71,8 +72,8 @@
   let searchQuery = $state<string>('');
   let games = $state.raw<any[]>([]);
   let torrentGames = $state.raw<any[]>([]);
-  let activeDownloads = $state<any[]>([]);
-  let downloadHistory = $state<any[]>([]);
+  let activeDownloads = $derived(downloadsStore.activeDownloads);
+  let downloadHistory = $derived(downloadsStore.downloadHistory);
   let settings = $state<any | null>(null);
   let isRefreshing = $state<boolean>(false);
   let isCatalogLoading = $state<boolean>(true);
@@ -360,7 +361,7 @@
             // Background async loader - does not block initial load completion
             (async () => {
               const bgStart = Date.now();
-              const BATCH_SIZE = 2; // Stream 2 chunks at a time to prevent WebView2 IPC pipe congestion
+              const BATCH_SIZE = 4; // Stream 4 chunks at a time to minimize reactive layout sweeps
               const seenIds = new Set<number>(allGames.map((g) => g.id));
 
               for (let i = 0; i < remainingOffsets.length; i += BATCH_SIZE) {
@@ -389,7 +390,7 @@
                 }
 
                 // Yield to browser event loop so UI stays fluid at 60fps
-                await new Promise((r) => setTimeout(r, 20));
+                await new Promise((r) => setTimeout(r, 40));
               }
 
               logApp('INFO', `Background chunk streaming completed: total ${allGames.length} games (took ${Date.now() - bgStart}ms)`);
@@ -453,10 +454,9 @@
         }
       }
 
-      // 1. Fetch downloads, history, and torrent sources immediately
-      const [fetchedDownloads, fetchedHistory, fetchedSources] = await Promise.all([
-        withTimeout(GetDownloads(), 5000, [], 'GetDownloads'),
-        withTimeout(GetDownloadHistory(), 5000, [], 'GetDownloadHistory'),
+      // 1. Fetch torrent sources and initialize downloadsStore
+      const [_, fetchedSources] = await Promise.all([
+        downloadsStore.refresh(),
         withTimeout(GetTorrentSources(), 5000, [], 'GetTorrentSources')
       ]);
 
@@ -469,10 +469,7 @@
         settings = { torrentSources: fetchedSources, savedServers: [] };
       }
 
-      activeDownloads = Array.isArray(fetchedDownloads) ? fetchedDownloads : [];
-      downloadHistory = Array.isArray(fetchedHistory) ? fetchedHistory : [];
-
-      logApp('INFO', `Downloads count: ${activeDownloads.length}, History count: ${downloadHistory.length}, Torrent sources: ${settings?.torrentSources?.length || 0}`);
+      logApp('INFO', `Downloads count: ${downloadsStore.activeDownloads.length}, History count: ${downloadsStore.downloadHistory.length}, Torrent sources: ${settings?.torrentSources?.length || 0}`);
 
       if (settings && settings.steamDeckMode) {
         switchToBigPicture();
@@ -548,11 +545,9 @@
 
   async function handleStartDownload(gameId: number, targetPath: string) {
     try {
-      const dlId = await StartDownload(gameId, targetPath);
+      await downloadsStore.start(gameId, targetPath);
       activeTab = 'downloads';
       showToast('Загрузка добавлена в очередь');
-      const dls = await GetDownloads();
-      activeDownloads = Array.isArray(dls) ? dls : [];
     } catch (e: any) {
       showToast('Не удалось начать загрузку: ' + (e?.message || e));
     }
@@ -560,7 +555,7 @@
 
   async function handlePauseDownload(id: string) {
     try {
-      await PauseDownload(id);
+      await downloadsStore.pause(id);
     } catch (e: any) {
       console.error(e);
     }
@@ -568,12 +563,8 @@
 
   async function handleResumeDownload(id: string) {
     try {
-      await ResumeDownload(id);
+      await downloadsStore.resume(id);
       showToast('Загрузка возобновлена');
-      const dls = await GetDownloads();
-      activeDownloads = Array.isArray(dls) ? dls : [];
-      const hist = await GetDownloadHistory();
-      downloadHistory = Array.isArray(hist) ? hist : [];
     } catch (e: any) {
       showToast('Ошибка возобновления: ' + (e?.message || e));
     }
@@ -581,10 +572,7 @@
 
   async function handleCancelDownload(id: string) {
     try {
-      await CancelDownload(id);
-      activeDownloads = (activeDownloads || []).filter((d) => d && d.downloadId !== id);
-      const hist = await GetDownloadHistory();
-      downloadHistory = Array.isArray(hist) ? hist : [];
+      await downloadsStore.cancel(id);
     } catch (e: any) {
       console.error(e);
     }
@@ -600,10 +588,7 @@
 
   async function handlePauseAll() {
     try {
-      const app = (window as any)?.go?.main?.App;
-      if (app && app.PauseAllDownloads) {
-        await app.PauseAllDownloads();
-      }
+      await downloadsStore.pauseAll();
     } catch (e: any) {
       console.error(e);
     }
@@ -611,13 +596,8 @@
 
   async function handleResumeAll() {
     try {
-      const app = (window as any)?.go?.main?.App;
-      if (app && app.ResumeAllDownloads) {
-        await app.ResumeAllDownloads();
-        showToast('Все загрузки возобновлены');
-        const dls = await GetDownloads();
-        activeDownloads = Array.isArray(dls) ? dls : [];
-      }
+      await downloadsStore.resumeAll();
+      showToast('Все загрузки возобновлены');
     } catch (e: any) {
       console.error(e);
     }
@@ -625,14 +605,8 @@
 
   async function handleClearCompleted() {
     try {
-      const app = (window as any)?.go?.main?.App;
-      if (app && app.ClearCompletedDownloads) {
-        await app.ClearCompletedDownloads();
-        activeDownloads = (activeDownloads || []).filter((d) => d && d.status !== 'completed' && d.status !== 'cancelled');
-        const hist = await GetDownloadHistory();
-        downloadHistory = Array.isArray(hist) ? hist : [];
-        showToast('Завершенные загрузки очищены');
-      }
+      await downloadsStore.clearCompleted();
+      showToast('Завершенные загрузки очищены');
     } catch (e: any) {
       console.error(e);
     }
@@ -640,13 +614,7 @@
 
   async function handleDeleteRecord(id: string, removeFiles: boolean = false) {
     try {
-      const app = (window as any)?.go?.main?.App;
-      if (app && app.DeleteDownloadRecord) {
-        await app.DeleteDownloadRecord(id, removeFiles);
-        activeDownloads = (activeDownloads || []).filter((d) => d && d.downloadId !== id);
-        const hist = await GetDownloadHistory();
-        downloadHistory = Array.isArray(hist) ? hist : [];
-      }
+      await downloadsStore.deleteRecord(id, removeFiles);
     } catch (e: any) {
       console.error(e);
     }
@@ -673,6 +641,28 @@
       showToast('Настройки успешно сохранены');
     } catch (e: any) {
       showToast('Ошибка сохранения: ' + (e?.message || e));
+    }
+  }
+
+  async function handleUpdateDownloadPath(newPath: string) {
+    if (!newPath) return;
+    try {
+      if (/^[a-zA-Z]:\\?$/.test(newPath)) {
+        newPath = `${newPath[0].toUpperCase()}:\\Ducke`;
+      }
+      const app = (window as any)?.go?.main?.App;
+      if (app && typeof app.UpdateDownloadPath === 'function') {
+        await app.UpdateDownloadPath(newPath);
+      } else if (settings) {
+        const fresh = { ...settings, downloadPath: newPath };
+        await SaveSettings(fresh);
+      }
+      const freshSettings = await GetSettings();
+      if (freshSettings) settings = freshSettings;
+      showToast(`Папка загрузок: ${newPath}`);
+    } catch (e: any) {
+      console.error('Failed to update download path:', e);
+      showToast('Ошибка сохранения папки: ' + (e?.message || e));
     }
   }
 
@@ -750,28 +740,7 @@
     });
 
     loadInitialData();
-
-    // Listen to real-time download progress events
-    EventsOn('download:progress', async (event: any) => {
-      if (!event) return;
-      const list = activeDownloads || [];
-      const existingIdx = list.findIndex((d) => d && d.downloadId === event.downloadId);
-      if (existingIdx >= 0) {
-        list[existingIdx] = event;
-        activeDownloads = [...list];
-      } else {
-        activeDownloads = [...list, event];
-      }
-
-      if (event.status === 'completed' || event.status === 'cancelled') {
-        try {
-          const hist = await GetDownloadHistory();
-          downloadHistory = Array.isArray(hist) ? hist : [];
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    });
+    downloadsStore.init();
 
     // Listen to progressive Steam enrichment events
     EventsOn('game:enriched', (enrichedGame: any) => {
@@ -877,7 +846,7 @@
       batchFlushTimer = null;
     }
     gamepad.stop();
-    EventsOff('download:progress');
+    downloadsStore.destroy();
     EventsOff('game:enriched');
     EventsOff('metadata:progress');
     EventsOff('torrents:updated');
@@ -913,6 +882,7 @@
     onImportFile={handleImportXMLFile}
     onTestConnection={TestConnection}
     onSelectFolder={SelectDirectory}
+    onUpdateDownloadPath={handleUpdateDownloadPath}
     onOpenFolder={handleOpenFolder}
     onOpenConfigFolder={handleOpenConfigFolder}
     onClearMetadataCache={handleClearMetadataCache}
@@ -956,6 +926,7 @@
           downloadPath={settings?.downloadPath || 'C:\\Ducke'}
           onStartDownload={handleStartDownload}
           onSelectFolder={SelectDirectory}
+          onUpdateDownloadPath={handleUpdateDownloadPath}
         />
       {:else if activeTab === 'torrents'}
         <MasterDetailCatalog
@@ -966,12 +937,14 @@
           downloadPath={settings?.downloadPath || 'C:\\Ducke'}
           onStartDownload={handleStartDownload}
           onSelectFolder={SelectDirectory}
+          onUpdateDownloadPath={handleUpdateDownloadPath}
         />
       {:else if activeTab === 'collections'}
         <CollectionsView
           downloadPath={settings?.downloadPath || 'C:\\Ducke'}
           onStartDownload={handleStartDownload}
           onSelectFolder={SelectDirectory}
+          onUpdateDownloadPath={handleUpdateDownloadPath}
           onSearchInCatalog={(query: string) => {
             searchQuery = query;
             activeTab = hasTorrentSources ? 'torrents' : (hasFtpServers ? 'catalog' : 'settings');
@@ -982,6 +955,7 @@
           downloadPath={settings?.downloadPath || 'C:\\Ducke'}
           onStartDownload={handleStartDownload}
           onSelectFolder={SelectDirectory}
+          onUpdateDownloadPath={handleUpdateDownloadPath}
           onOpenCatalog={() => (activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'settings'))}
         />
       {:else if activeTab === 'downloads'}

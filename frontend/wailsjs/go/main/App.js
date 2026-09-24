@@ -118,6 +118,10 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function GetSteamReviews(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetSteamReviews'](arg1, arg2, arg3);
+}
+
 export function GetStopGameCompilationDetail(arg1, arg2) {
   return window['go']['main']['App']['GetStopGameCompilationDetail'](arg1, arg2);
 }
@@ -196,6 +200,10 @@ export function OpenGameFolder(arg1) {
 
 export function OpenLocalFolder(arg1) {
   return window['go']['main']['App']['OpenLocalFolder'](arg1);
+}
+
+export function OpenURL(arg1) {
+  return window['go']['main']['App']['OpenURL'](arg1);
 }
 
 export function PauseAllDownloads() {
@@ -296,6 +304,10 @@ export function ToggleTorrentSource(arg1, arg2) {
 
 export function TriggerSteamOSKeyboard() {
   return window['go']['main']['App']['TriggerSteamOSKeyboard']();
+}
+
+export function UpdateDownloadPath(arg1) {
+  return window['go']['main']['App']['UpdateDownloadPath'](arg1);
 }
 
 export function UpdateSpeedLimit(arg1) {
