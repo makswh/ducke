@@ -63,6 +63,7 @@
   import { EventsOn, BrowserOpenURL } from '../../../wailsjs/runtime/runtime';
   import { SetFavoriteStatus, RemoveFromFavorites, SetFavoriteLaunchConfig, SelectGameExeFile, LaunchGameWithCustomConfig, AddGameToSteam, CheckGameInSteam, RemoveGameFromSteam, GetTorrentSeedsBatch, GetSteamReviews, OpenURL } from '../../../wailsjs/go/main/App';
   import { isPlaceholderTitle, cleanTorrentTitle, getDisplayTitle } from '../utils/titleUtils';
+  import { parseDateToMs } from '../utils/dateUtils';
   import { downloadsStore } from '../stores/downloads.svelte';
   import { formatSteamReviewBBCode, formatReviewDate } from '../utils/steamReviewFormatter';
 
@@ -210,6 +211,7 @@
   async function handleLaunchWithCustom() {
     if (!game) return;
     try {
+      try { localStorage.setItem('ducke_last_launched_game_id', String(game.id)); } catch {}
       await LaunchGameWithCustomConfig(game.id);
     } catch (err: any) {
       console.error('[GameDetailView] Failed to launch with custom config:', err);
@@ -420,7 +422,7 @@
   let secondaryVariantDropdownTriggerEl = $state<HTMLButtonElement | null>(null);
   let variantDropdownContainerEl = $state<HTMLDivElement | null>(null);
   let variantSearchQuery = $state<string>('');
-  let variantSortBy = $state<'default' | 'seeds' | 'size'>('default');
+  let variantSortBy = $state<'default' | 'date' | 'seeds' | 'size'>('default');
 
   let currentGame = $derived(pageDetails?.game || game);
 
@@ -438,7 +440,14 @@
       );
     }
 
-    if (variantSortBy === 'seeds') {
+    if (variantSortBy === 'date') {
+      filtered.sort((a: GameVariant, b: GameVariant) => {
+        const da = Math.max(parseDateToMs(a.uploadDate), parseDateToMs(a.createdAt), parseDateToMs(a.updatedAt));
+        const db = Math.max(parseDateToMs(b.uploadDate), parseDateToMs(b.createdAt), parseDateToMs(b.updatedAt));
+        if (da !== db) return db - da;
+        return (b.id || 0) - (a.id || 0);
+      });
+    } else if (variantSortBy === 'seeds') {
       filtered.sort((a: GameVariant, b: GameVariant) => {
         const sa = variantSeeds[a.id]?.seeders ?? -1;
         const sb = variantSeeds[b.id]?.seeders ?? -1;
@@ -1015,6 +1024,18 @@
     return /capsule_231x87|capsule_616x353|capsule_467x181|header\.jpg|header_alt/i.test(url);
   }
 
+  function getHeaderBannerUrl(g: GameEntity | null): string {
+    if (!g) return '';
+    if (g.steamAppId && g.steamAppId > 0) {
+      const header = `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/header.jpg`;
+      if (!imageLoadFailed[header]) return header;
+    }
+    if (g.headerImage && !imageLoadFailed[g.headerImage]) return g.headerImage;
+    if (pageDetails?.bannerUrl && !imageLoadFailed[pageDetails.bannerUrl]) return pageDetails.bannerUrl;
+    if (g.capsuleImage && !imageLoadFailed[g.capsuleImage]) return g.capsuleImage;
+    return getPrimaryCoverUrl(g);
+  }
+
   function getPrimaryCoverUrl(g: GameEntity | null): string {
     if (!g) return '';
     if (pageDetails?.coverUrl && !imageLoadFailed[pageDetails.coverUrl]) {
@@ -1261,6 +1282,7 @@
   async function handleLaunchGame() {
     if (!game) return;
     try {
+      try { localStorage.setItem('ducke_last_launched_game_id', String(game.id)); } catch {}
       const app = typeof window !== 'undefined' ? (window as any)?.go?.main?.App : null;
       if (app && app.LaunchGameByGameID) {
         await app.LaunchGameByGameID(game.id);
@@ -1579,69 +1601,45 @@
 
 <div
   bind:this={scrollContainer}
-  class="flex-1 flex flex-col h-full overflow-y-auto relative select-none bg-[#090a0d] panel-detail"
+  class="flex-1 flex flex-col h-full overflow-y-auto relative select-none bg-gradient-to-b from-[#0F1218] to-[#0B0F1E] panel-detail"
   style="--game-accent: {dynamicAccentColor}; --game-accent-text: {dynamicAccentTextColor};"
 >
   {#if game}
     {#if isSwitching}
       <!-- Minimal Skeleton: hairline blocks, single shimmer sweep, no decorative cards -->
-      <div class="relative z-10 w-full max-w-[1280px] mx-auto flex flex-col flex-1 p-6 lg:p-10 pb-28 select-none" aria-hidden="true">
+      <div class="relative z-10 w-full max-w-[1280px] mx-auto flex flex-col flex-1 p-4 sm:p-6 lg:p-8 space-y-5 pb-20 select-none" aria-hidden="true">
 
-        <!-- Hero row: cover placeholder + info lines -->
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-start mb-10">
+        <!-- Showcase island skeleton -->
+        <div class="w-full space-y-4 mb-6">
+          <div class="sk-line h-3.5 w-48"></div>
+          <div class="sk-line h-8 w-80"></div>
 
-          <!-- Cover: plain rectangle, no border/icon -->
-          <div class="md:col-span-4 lg:col-span-3 flex justify-center md:justify-start">
-            <div class="w-full max-w-[220px] aspect-[2/3] rounded sk-block"></div>
+          <div class="grid grid-cols-12 gap-3 sm:gap-4 lg:gap-5 items-stretch">
+            <div class="col-span-8 2xl:col-span-8 space-y-3 flex flex-col justify-between">
+              <div class="sk-block w-full flex-1 min-h-[220px] rounded-[18px]"></div>
+              <div class="flex gap-2 flex-shrink-0">
+                {#each [1,2,3,4] as _}
+                  <div class="sk-block flex-shrink-0 w-28 aspect-video rounded-[12px]"></div>
+                {/each}
+              </div>
+            </div>
+
+            <div class="col-span-4 2xl:col-span-4 space-y-3.5">
+              <div class="sk-block w-full aspect-[460/215] rounded-[16px]"></div>
+              <div class="space-y-2">
+                <div class="sk-line h-3.5 w-full"></div>
+                <div class="sk-line h-3.5 w-5/6"></div>
+                <div class="sk-line h-3.5 w-3/4"></div>
+              </div>
+              <div class="space-y-2 pt-2">
+                <div class="sk-line h-3 w-1/2"></div>
+                <div class="sk-line h-3 w-2/3"></div>
+                <div class="sk-line h-3 w-1/3"></div>
+              </div>
+            </div>
           </div>
 
-          <!-- Info column: lines only -->
-          <div class="md:col-span-8 lg:col-span-9 pt-2 flex flex-col gap-5">
-            <!-- Title -->
-            <div class="space-y-2.5">
-              <div class="sk-line h-7 w-2/3"></div>
-              <div class="sk-line h-3.5 w-1/4"></div>
-            </div>
-
-            <!-- Synopsis -->
-            <div class="space-y-2 pt-1">
-              <div class="sk-line h-3.5 w-full max-w-xl"></div>
-              <div class="sk-line h-3.5 w-5/6 max-w-lg"></div>
-              <div class="sk-line h-3.5 w-3/4 max-w-md"></div>
-            </div>
-
-            <!-- Action area -->
-            <div class="flex items-center gap-3 pt-2">
-              <div class="sk-block h-9 w-28 rounded"></div>
-              <div class="sk-block h-9 w-20 rounded"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tabs bar -->
-        <div class="border-b border-white/[0.05] pb-3 mb-6 flex gap-8">
-          <div class="sk-line h-4 w-20"></div>
-          <div class="sk-line h-4 w-28 opacity-50"></div>
-          <div class="sk-line h-4 w-28 opacity-30"></div>
-        </div>
-
-        <!-- Media viewport -->
-        <div class="sk-block w-full aspect-video rounded mb-3"></div>
-
-        <!-- Thumbnail strip -->
-        <div class="flex gap-2 mb-8">
-          {#each [1,2,3,4] as _}
-            <div class="sk-block flex-shrink-0 w-32 aspect-video rounded"></div>
-          {/each}
-        </div>
-
-        <!-- Description lines -->
-        <div class="space-y-2.5 max-w-2xl">
-          <div class="sk-line h-3.5 w-full"></div>
-          <div class="sk-line h-3.5 w-11/12"></div>
-          <div class="sk-line h-3.5 w-5/6"></div>
-          <div class="sk-line h-3.5 w-3/4 opacity-60"></div>
-          <div class="sk-line h-3.5 w-2/3 opacity-40"></div>
+          <div class="sk-block h-16 w-full rounded-[16px]"></div>
         </div>
 
       </div>
@@ -1653,6 +1651,7 @@
       {@const hasCover = !!(coverUrl && !imageLoadFailed[coverUrl])}
       {@const logoUrl = pageDetails?.logoUrl}
       {@const hasLogo = !!(logoUrl && !imageLoadFailed[logoUrl] && !isHorizontalAsset(logoUrl))}
+      {@const headerBannerUrl = getHeaderBannerUrl(g)}
 
       <!-- Atmospheric Steam Backdrop with Dark Scrim for High-Contrast Readability -->
       {#if bgUrl}
@@ -1669,549 +1668,311 @@
             imageLoadFailed[bgUrl] = true;
           }}
         />
-        <div class="absolute inset-0 bg-gradient-to-b from-[#090a0d]/30 via-[#090a0d]/65 to-[#090a0d]"></div>
-        <div class="absolute inset-0 bg-gradient-to-r from-[#090a0d]/75 via-transparent to-[#090a0d]/75"></div>
+        <div class="absolute inset-0 bg-gradient-to-b from-[#0F1218]/30 via-[#0F1218]/65 to-[#0B0F1E]"></div>
+        <div class="absolute inset-0 bg-gradient-to-r from-[#0F1218]/75 via-transparent to-[#0F1218]/75"></div>
       </div>
     {/if}
 
     <!-- Main Stage Container -->
-    <div class="relative z-10 w-full max-w-[1280px] mx-auto flex flex-col flex-1 p-6 lg:p-10 space-y-8 pb-28">
+    <div class="relative z-10 w-full max-w-[1280px] mx-auto flex flex-col flex-1 p-4 sm:p-6 lg:p-8 space-y-5 pb-20">
       
-      <!-- TOP HERO SECTION -->
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
+      <!-- STEAM STORE TOP SHOWCASE BLOCK -->
+      <div class="w-full space-y-4">
         
-        <!-- COVER / ART COLUMN -->
-        <div class="{isCoverLandscape ? 'md:col-span-5 lg:col-span-5' : 'md:col-span-4 lg:col-span-3'} flex justify-center md:justify-start">
-          {#if hasCover}
-            <div
-              class="relative rounded overflow-hidden bg-[#07080a] group w-full {isCoverLandscape ? '' : 'max-w-[280px]'} transition-all duration-300 flex items-center justify-center border border-white/[0.08]"
-              style={coverAspectRatio ? `aspect-ratio: ${coverAspectRatio};` : (isCoverLandscape ? 'aspect-ratio: 16/9;' : 'aspect-ratio: 2/3;')}
+        <!-- Breadcrumbs & Quick Steam Link -->
+        <div class="flex items-center justify-between gap-4 text-xs">
+          <div class="flex items-center gap-1.5 text-[#8e95a2] truncate">
+            <button
+              type="button"
+              class="hover:text-white cursor-pointer transition-colors"
+              onclick={() => onSelectGenre('')}
             >
-              <img
-                src={coverUrl}
-                alt={g.cleanTitle}
-                referrerpolicy="no-referrer"
-                class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-102"
-                onload={(e) => onCoverLoaded(e.currentTarget as HTMLImageElement)}
-                onerror={() => {
-                  imageLoadFailed[coverUrl] = true;
-                }}
-              />
-              <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.03] to-white/[0.08] pointer-events-none z-20"></div>
-            </div>
-          {:else}
-            <!-- Ascetic Tactile Poster Frame for Games Pending Cover / Steam Enrichment -->
-            <div
-              class="relative rounded w-full max-w-[280px] aspect-[2/3] bg-[#07080a] border border-white/[0.08] flex flex-col items-center justify-between p-6 text-center shadow-inner"
-            >
-              <div class="flex-1 flex flex-col items-center justify-center w-full space-y-3">
-                <div class="w-14 h-14 rounded bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-[#8e95a2]">
-                  <Disc class="w-7 h-7 stroke-[1.5] text-[#8e95a2]" />
-                </div>
-                <div class="text-xs font-semibold text-white/70 line-clamp-3 px-1 leading-snug">
-                  {getDisplayTitle(g)}
-                </div>
-              </div>
+              Все игры
+            </button>
+            <span class="text-white/20 select-none">›</span>
+            {#if g.genres && g.genres[0]}
+              <button
+                type="button"
+                class="hover:text-white cursor-pointer transition-colors"
+                onclick={() => onSelectGenre(g.genres[0])}
+              >
+                {g.genres[0]}
+              </button>
+              <span class="text-white/20 select-none">›</span>
+            {/if}
+            <span class="text-white font-medium truncate">{getDisplayTitle(g)}</span>
+          </div>
 
-              <div class="pt-3 w-full border-t border-white/[0.04]">
-                {#if isEnrichingCurrentGame}
-                  <div class="inline-flex items-center gap-1.5 text-[11px] text-[#8e95a2]">
-                    <RefreshCw class="w-3 h-3 animate-spin text-[#8e95a2]" />
-                    <span>Поиск обложки...</span>
-                  </div>
-                {:else}
-                  <button
-                    data-nav-item
-                    type="button"
-                    class="w-full py-2 px-3 rounded bg-white/[0.04] hover:bg-white/[0.08] text-xs font-medium text-[#cbd5e1] hover:text-white border border-white/[0.08] hover:border-white/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                    onclick={() => openSteamModal(g)}
-                  >
-                    <Search class="w-3.5 h-3.5 text-[#8e95a2]" />
-                    <span>Найти в Steam</span>
-                  </button>
-                {/if}
-              </div>
-            </div>
+          {#if g.steamAppId && g.steamAppId > 0}
+            <button
+              data-nav-item
+              type="button"
+              class="px-3 py-1.5 rounded-[10px] bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] text-xs font-medium text-[#cbd5e1] hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1.5 flex-shrink-0"
+              onclick={handleOpenSteamStore}
+              title="Открыть страницу игры в магазине Steam"
+            >
+              <SteamLogo size={14} weight="bold" class="text-[#66c0f4]" />
+              <span>В Steam</span>
+              <ExternalLink class="w-3 h-3 text-[#8e95a2]" />
+            </button>
           {/if}
         </div>
 
-        <!-- DETAILS & ACTION COLUMN -->
-        <div class="{isCoverLandscape ? 'md:col-span-7 lg:col-span-7' : 'md:col-span-8 lg:col-span-9'} space-y-5">
+        <!-- Clean Normalized Game Title -->
+        <div>
+          <h1 class="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-tight">
+            {getDisplayTitle(g)}
+          </h1>
+        </div>
+
+        <!-- 2-Column Showcase Grid: Left Media Player & Right Metadata Sidebar -->
+        <div class="grid grid-cols-12 gap-3 sm:gap-4 lg:gap-5 items-stretch">
           
-          <!-- LOGO OR TITLE + REVIEWS / METACRITIC -->
-          <div class="flex flex-col sm:flex-row items-start justify-between gap-4 border-b border-white/[0.06] pb-4">
-            
-            <!-- Logo / Title Display -->
-            <div class="space-y-1 min-w-0">
-              {#if hasLogo}
-                <!-- Transparent Game Logo (SteamGridDB / Steam) -->
-                <div class="py-1">
-                  <img
-                    src={logoUrl}
-                    alt={getDisplayTitle(g)}
-                    class="max-h-36 sm:max-h-44 md:max-h-48 max-w-[440px] sm:max-w-[580px] object-contain object-left select-none filter drop-shadow-md"
-                    onerror={() => {
-                      if (logoUrl) {
-                        imageLoadFailed[logoUrl] = true;
-                        if (pageDetails) pageDetails.logoUrl = '';
-                      }
-                    }}
-                  />
-                </div>
-              {:else}
-                <!-- High-contrast crisp title text -->
-                <h1 class="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight uppercase leading-tight">
-                  {getDisplayTitle(g)}
-                </h1>
-              {/if}
-            </div>
+          <!-- LEFT COLUMN: Media Player & Thumbnails (~67%) -->
+          <div class="col-span-8 2xl:col-span-8 flex flex-col justify-between min-w-0 space-y-3">
+            <!-- Viewport -->
+            <div
+              bind:this={screenshotViewport}
+              class="relative w-full flex-1 min-h-[220px] rounded-[18px] overflow-hidden bg-black/60 group/viewer flex items-center justify-center select-none"
+            >
+              {#if activeMedia?.type === 'video'}
+                <VideoPlayer
+                  hls={activeMedia.hls}
+                  mp4={activeMedia.mp4}
+                  webm={activeMedia.webm}
+                  poster={activeMedia.thumbnail}
+                  title={activeMedia.name}
+                  autoplay={false}
+                  controls={true}
+                />
+              {:else if activeMedia?.type === 'image'}
+                <img
+                  src={activeMedia.url}
+                  alt={activeMedia.name}
+                  class="w-full h-full object-contain cursor-pointer select-none"
+                  ondblclick={toggleScreenshotFullscreen}
+                />
 
-            <!-- Review / Metacritic Score -->
-            {#if (g.totalReviews && g.totalReviews > 0) || (g.reviewPercent && g.reviewPercent > 0)}
-              {@const isPositive = (g.reviewPercent || 0) >= 70}
-              {@const isMixed = (g.reviewPercent || 0) >= 40 && (g.reviewPercent || 0) < 70}
-              <div class="flex items-center gap-3 bg-[#11141c] border border-white/10 p-2.5 px-3.5 rounded flex-shrink-0">
-                <div
-                  class="w-11 h-11 rounded border flex items-center justify-center font-black text-sm {isPositive ? 'bg-[#66c0f4]/15 text-[#66c0f4] border-[#66c0f4]/40' : isMixed ? 'bg-amber-500/15 text-amber-400 border-amber-500/40' : 'bg-red-500/15 text-red-400 border-red-500/40'}"
-                >
-                  {g.reviewPercent || 0}%
-                </div>
-                <div class="space-y-0.5">
-                  <div class="text-xs font-bold {isPositive ? 'text-[#66c0f4]' : isMixed ? 'text-amber-400' : 'text-red-400'} leading-tight">
-                    {g.reviewScoreDesc || (isPositive ? 'Положительные' : isMixed ? 'Смешанные' : 'Отрицательные')}
-                  </div>
-                  <div class="text-[10px] font-medium tracking-wide text-[#8e95a2]">
-                    {formatReviewsCount(g.totalReviews || 0)}
-                  </div>
-                </div>
-              </div>
-            {:else if g.metacriticScore && g.metacriticScore > 0}
-              <div class="flex items-center gap-3 bg-[#11141c] border border-white/10 p-2.5 px-3.5 rounded flex-shrink-0">
-                <div
-                  class="w-11 h-11 rounded border flex items-center justify-center font-black text-sm"
-                  style="border-color: var(--game-accent); color: var(--game-accent); background-color: color-mix(in srgb, var(--game-accent) 15%, transparent);"
-                >
-                  {g.metacriticScore}
-                </div>
-                <div class="space-y-0.5">
-                  <div class="flex items-center text-amber-400 text-xs tracking-widest">★ ★ ★ ★ ★</div>
-                  <div class="text-[10px] font-black uppercase tracking-wider text-[#9ca3af]">METACRITIC</div>
-                </div>
-              </div>
-            {/if}
-          </div>
-
-          <!-- Discreet Steam Enrichment / Metadata status -->
-          {#if isEnrichingCurrentGame}
-            <div class="flex items-center gap-2 text-xs text-[#8e95a2] py-0.5">
-              <RefreshCw class="w-3.5 h-3.5 animate-spin text-[#8e95a2] flex-shrink-0" />
-              <span>Синхронизация данных с базой Steam...</span>
-            </div>
-          {:else if !hasSteamMetadata}
-            <div class="flex items-center gap-2 text-xs text-[#6b7280] py-0.5">
-              <span>Данные Steam не синхронизированы.</span>
-              <button
-                data-nav-item
-                type="button"
-                class="text-[#cbd5e1] hover:text-white hover:underline inline-flex items-center gap-1 cursor-pointer font-medium"
-                onclick={() => openSteamModal(g)}
-              >
-                <Edit3 class="w-3 h-3" />
-                <span>Привязать вручную</span>
-              </button>
-            </div>
-          {/if}
-
-          <!-- Short Synopsis -->
-          {#if g.shortDescription}
-            <div class="text-sm sm:text-base text-[#cbd5e1] leading-relaxed font-normal">
-              {@html g.shortDescription}
-            </div>
-          {/if}
-
-          <!-- ACTION DECK: Smart Download / Play / Folder Controls -->
-          <div class="space-y-3 pt-2">
-            
-            {#snippet favoriteButton()}
-              <div class="relative inline-flex items-center">
-                <button
-                  bind:this={favoriteDropdownTriggerEl}
-                  data-nav-item
-                  type="button"
-                  class="h-11 inline-flex items-center gap-2 text-xs px-3.5 rounded transition-colors cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#cbd5e1] hover:text-white"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
-                  }}
-                  title="Добавить в избранное / статус прохождения"
-                >
-                  {#if effectiveFavoriteStatus === 'playing'}
-                    <Gamepad2 class="w-3.5 h-3.5 text-amber-400" />
-                    <span class="font-medium text-[#ededed]">Прохожу</span>
-                  {:else if effectiveFavoriteStatus === 'completed'}
-                    <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400" />
-                    <span class="font-medium text-[#ededed]">Прошел</span>
-                  {:else if effectiveFavoriteStatus === 'planned'}
-                    <BookmarkCheck class="w-3.5 h-3.5 text-sky-400" />
-                    <span class="font-medium text-[#ededed]">В планах</span>
-                  {:else}
-                    <Bookmark class="w-3.5 h-3.5 text-[#8e95a2]" />
-                    <span class="text-[#8e95a2]">В избранное</span>
-                  {/if}
-                  <ChevronDown class="w-3.5 h-3.5 text-[#8e95a2] transition-transform duration-200 {isFavoriteDropdownOpen ? 'rotate-180' : ''}" />
-                </button>
-
-                {#if isFavoriteDropdownOpen}
-                  <div
-                    bind:this={favoriteDropdownContainerEl}
-                    class="absolute left-0 top-full mt-2 z-50 min-w-[190px] rounded bg-[#0d1117] border border-white/10 shadow-2xl p-1.5 space-y-1 text-xs"
-                  >
-                    <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
-                      Статус в избранном
-                    </div>
-                    <button
-                      type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-sm transition-colors cursor-pointer {effectiveFavoriteStatus === 'planned' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                      onclick={() => handleToggleFavoriteStatus('planned')}
-                    >
-                      <Clock class="w-3.5 h-3.5 text-sky-400" />
-                      <span>В планах</span>
-                      {#if effectiveFavoriteStatus === 'planned'}
-                        <Check class="w-3.5 h-3.5 ml-auto text-sky-400" />
-                      {/if}
-                    </button>
-                    <button
-                      type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-sm transition-colors cursor-pointer {effectiveFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                      onclick={() => handleToggleFavoriteStatus('playing')}
-                    >
-                      <Gamepad2 class="w-3.5 h-3.5 text-amber-400" />
-                      <span>Прохожу</span>
-                      {#if effectiveFavoriteStatus === 'playing'}
-                        <Check class="w-3.5 h-3.5 ml-auto text-amber-400" />
-                      {/if}
-                    </button>
-                    <button
-                      type="button"
-                      class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-sm transition-colors cursor-pointer {effectiveFavoriteStatus === 'completed' ? 'bg-emerald-500/20 text-emerald-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                      onclick={() => handleToggleFavoriteStatus('completed')}
-                    >
-                      <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Прошел</span>
-                      {#if effectiveFavoriteStatus === 'completed'}
-                        <Check class="w-3.5 h-3.5 ml-auto text-emerald-400" />
-                      {/if}
-                    </button>
-
-                    {#if effectiveFavoriteStatus}
-                      <div class="h-px bg-white/[0.06] my-1"></div>
-                      <button
-                        type="button"
-                        class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-sm text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                        onclick={handleRemoveFavorite}
-                      >
-                        <Trash2 class="w-3.5 h-3.5" />
-                        <span>Удалить из избранного</span>
-                      </button>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            {/snippet}
-
-            {#snippet gearButton()}
-              {#if isGameInFavorites}
-                <button
-                  data-nav-item
-                  type="button"
-                  title={hasCustomExe ? "Настройки запуска (настроено)" : "Настройки запуска (укажите .exe файл)"}
-                  class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded transition-all cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
-                  onclick={openLaunchConfigModal}
-                >
-                  <Settings class="w-4 h-4" />
-                </button>
-              {/if}
-            {/snippet}
-
-            {#snippet folderButton()}
-              {#if pageDetails?.localPath || pageDetails?.isInstalled}
-                <button
-                  data-nav-item
-                  type="button"
-                  title="Открыть папку с игрой"
-                  class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded transition-all cursor-pointer border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
-                  onclick={handleOpenFolder}
-                >
-                  <FolderOpen class="w-4 h-4" />
-                </button>
-              {/if}
-            {/snippet}
-
-            {#snippet steamButton()}
-              {#if isGameInFavorites}
-                <button
-                  data-nav-item
-                  type="button"
-                  title={isGameInSteam ? "Игра добавлена в Steam (нажмите для повторной синхронизации)" : "Добавить игру со всеми обложками в библиотеку Steam"}
-                  class="h-11 px-3.5 flex items-center justify-center gap-2 rounded transition-all cursor-pointer border text-xs font-medium {isGameInSteam ? 'bg-sky-500/15 border-sky-500/30 text-sky-300 hover:bg-sky-500/25' : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10 text-[#8e95a2] hover:text-white'}"
-                  onclick={handleAddToSteam}
-                  disabled={isAddingToSteam}
-                >
-                  {#if isAddingToSteam}
-                    <RefreshCw class="w-3.5 h-3.5 animate-spin text-sky-400 flex-shrink-0" />
-                    <span>В Steam...</span>
-                  {:else if isGameInSteam}
-                    <Check class="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
-                    <span>В Steam</span>
-                  {:else}
-                    <SteamLogo size={16} weight="bold" class="flex-shrink-0" />
-                    <span>В Steam</span>
-                  {/if}
-                </button>
-              {/if}
-            {/snippet}
-
-            {#snippet openSteamStoreButton()}
-              {#if g.steamAppId && g.steamAppId > 0}
-                <button
-                  data-nav-item
-                  type="button"
-                  title="Открыть страницу игры в магазине Steam"
-                  class="h-11 px-3.5 flex items-center justify-center gap-2 rounded transition-all cursor-pointer border text-xs font-medium bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] border-white/10 text-[#cbd5e1] hover:text-white"
-                  onclick={handleOpenSteamStore}
-                >
-                  <SteamLogo size={16} weight="bold" class="flex-shrink-0 text-[#66c0f4]" />
-                  <span>В Steam</span>
-                  <ExternalLink class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
-                </button>
-              {/if}
-            {/snippet}
-
-            {#if isDownloadCompleted || pageDetails?.isInstalled}
-
-              <!-- ALREADY INSTALLED / DOWNLOAD COMPLETED STATE: PLAY + GEAR + FOLDER + FAVORITE -->
-              <div class="space-y-2">
-                <div class="flex flex-wrap items-center gap-2.5">
+                <!-- Prev / Next Navigation Arrows -->
+                {#if mediaList.length > 1}
                   <button
+                    type="button"
                     data-nav-item
-                    class="h-11 px-8 text-sm font-black rounded flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 transition-all hover:brightness-110 shadow-lg uppercase tracking-wider"
-                    style="background-color: var(--game-accent); color: var(--game-accent-text);"
-                    onclick={handlePlayButtonClick}
+                    class="absolute left-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/70 hover:bg-black/90 text-white opacity-0 group-hover/viewer:opacity-100 transition-opacity cursor-pointer active:scale-95 z-20"
+                    onclick={prevMedia}
+                    title="Предыдущее медиа [←]"
                   >
-                    <Play class="w-4 h-4 fill-current stroke-[2]" />
-                    <span>ИГРАТЬ</span>
+                    <ChevronLeft class="w-5 h-5 stroke-[2.5]" />
                   </button>
 
-                  {@render gearButton()}
-                  {@render folderButton()}
-                  {@render steamButton()}
-                  {@render openSteamStoreButton()}
-                  {@render favoriteButton()}
-                </div>
-
-                <!-- Minimalist Sleek Metadata Line: Folder Path • Size • Original Release -->
-                <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[#8e95a2] pt-0.5">
-                  {#if pageDetails?.localPath}
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1.5 font-mono text-[#94a3b8] hover:text-white transition-colors cursor-pointer hover:underline"
-                      onclick={handleOpenFolder}
-                      title="Нажмите, чтобы открыть папку в проводнике"
-                    >
-                      <Folder class="w-3.5 h-3.5 text-[#6b7280]" />
-                      <span class="truncate max-w-md">{pageDetails.localPath}</span>
-                    </button>
-                  {/if}
-
-                  {#if formatSizeDisplay(g)}
-                    {#if pageDetails?.localPath}
-                      <span class="text-white/20 select-none">•</span>
-                    {/if}
-                    <span class="font-mono text-[#8e95a2]">{formatSizeDisplay(g)}</span>
-                  {/if}
-
-                  {#if (activeVariant?.rawName || g.rawName)}
-                    <span class="text-white/20 select-none">•</span>
-                    <span class="font-mono text-[#64748b] truncate max-w-md" title={activeVariant?.rawName || g.rawName}>
-                      {activeVariant?.rawName || g.rawName}
-                    </span>
-                  {/if}
-                </div>
-              </div>
-
-            {:else if isDownloading}
-              <!-- ACTIVE DOWNLOADING / QUEUED STATE -->
-              {@const prog = activeGameDownload || pageDetails?.downloadProgress}
-              {@const dlStatus = activeGameDownload?.status || pageDetails?.downloadStatus}
-              <div class="space-y-3 max-w-md bg-[#07080a] p-4 rounded border border-white/[0.06]">
-                <div class="flex items-center justify-between text-xs font-bold text-white">
-                  <div class="flex items-center gap-2">
-                    <Download class="w-4 h-4 text-[var(--game-accent)]" />
-                    <span>{dlStatus === 'paused' ? 'Приостановлено' : (dlStatus === 'queued' ? 'В очереди загрузки...' : (dlStatus === 'scanning' ? 'Получение метаданных торрента...' : 'Скачивается...'))}</span>
-                  </div>
-                  <span class="font-mono text-[var(--game-accent)]">{Math.round(prog?.progressPercent || 0)}%</span>
-                </div>
-
-                <!-- Progress Bar -->
-                <div class="w-full h-2 rounded-none bg-black/60 overflow-hidden border border-white/5">
-                  <div
-                    class="h-full rounded-none transition-all duration-300"
-                    style="width: {Math.max(2, prog?.progressPercent || 0)}%; background-color: var(--game-accent);"
-                  ></div>
-                </div>
-
-                <div class="flex items-center justify-between pt-1">
-                  {#if prog?.speedDisplay}
-                    <div class="text-[11px] font-mono text-[#8e95a2]">
-                      <span>{prog.speedDisplay}</span>
-                      {#if prog.etaDisplay}
-                        <span class="ml-2">({prog.etaDisplay})</span>
-                      {/if}
-                    </div>
-                  {/if}
-                  <div class="flex items-center gap-2">
-                    {@render openSteamStoreButton()}
-                    {@render favoriteButton()}
-                  </div>
-                </div>
-              </div>
-
-              {#if (activeVariant?.rawName || g.rawName)}
-                <div class="flex items-center gap-2 text-[11px] font-mono text-[#64748b]">
-                  <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0" />
-                  <span class="text-[#64748b] flex-shrink-0">Оригинальный релиз:</span>
-                  <span
-                    class="text-[#cbd5e1] font-medium truncate max-w-2xl select-all"
-                    title={activeVariant?.rawName || g.rawName}
+                  <button
+                    type="button"
+                    data-nav-item
+                    class="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/70 hover:bg-black/90 text-white opacity-0 group-hover/viewer:opacity-100 transition-opacity cursor-pointer active:scale-95 z-20"
+                    onclick={nextMedia}
+                    title="Следующее медиа [→]"
                   >
-                    {activeVariant?.rawName || g.rawName}
+                    <ChevronRight class="w-5 h-5 stroke-[2.5]" />
+                  </button>
+                {/if}
+
+                <!-- Fullscreen Button -->
+                <div class="absolute top-3 right-3 flex items-center gap-2 opacity-0 group-hover/viewer:opacity-100 transition-opacity z-20">
+                  <button
+                    type="button"
+                    data-nav-item
+                    class="p-2 rounded-[10px] bg-black/70 hover:bg-black/90 text-white cursor-pointer transition-colors"
+                    onclick={toggleScreenshotFullscreen}
+                    title={isScreenshotFullscreen ? "Выйти из полноэкранного режима" : "Во весь экран"}
+                  >
+                    {#if isScreenshotFullscreen}
+                      <Minimize2 class="w-4 h-4" />
+                    {:else}
+                      <Maximize2 class="w-4 h-4" />
+                    {/if}
+                  </button>
+                </div>
+
+                <!-- Bottom-Left Label -->
+                <div class="absolute bottom-3 left-3 px-3 py-1.5 rounded-[10px] bg-black/80 text-[11px] font-semibold text-white/90 pointer-events-none flex items-center gap-2">
+                  <ImageIcon class="w-3.5 h-3.5 text-[#9ca3af]" />
+                  <span>{activeMedia.name}</span>
+                  <span class="text-[#6b7280] font-mono">({activeMediaIndex + 1} / {mediaList.length})</span>
+                </div>
+              {:else if headerBannerUrl}
+                <img
+                  src={headerBannerUrl}
+                  alt={getDisplayTitle(g)}
+                  class="w-full h-full object-cover"
+                />
+              {:else if hasCover}
+                <img
+                  src={coverUrl}
+                  alt={getDisplayTitle(g)}
+                  class="w-full h-full object-cover"
+                />
+              {:else}
+                <div class="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-3">
+                  <div class="w-14 h-14 rounded-[14px] bg-white/[0.03] flex items-center justify-center text-[#8e95a2]">
+                    <Disc class="w-7 h-7 stroke-[1.5] text-[#8e95a2]" />
+                  </div>
+                  <div class="text-xs text-[#8e95a2]">
+                    Нет медиаматериалов
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <!-- Horizontal Thumbnail Strip -->
+            {#if mediaList.length > 1}
+              <div class="flex items-center gap-2 overflow-x-auto p-1.5 -m-1.5 no-scrollbar flex-shrink-0">
+                {#each mediaList as item, idx}
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="relative flex-shrink-0 w-28 sm:w-32 aspect-video rounded-[12px] overflow-hidden transition-all cursor-pointer group/thumb text-left {activeMediaIndex === idx ? 'opacity-100 bg-white/10' : 'opacity-50 hover:opacity-90'}"
+                    onclick={() => (activeMediaIndex = idx)}
+                    title={item.name}
+                  >
+                    <img
+                      src={item.type === 'video' ? item.thumbnail : item.url}
+                      alt={item.name}
+                      class="w-full h-full object-cover"
+                    />
+
+                    {#if item.type === 'video'}
+                      <div class="absolute inset-0 bg-black/35 flex items-center justify-center group-hover/thumb:bg-black/15 transition-colors">
+                        <div class="w-5 h-5 rounded-full bg-black/80 flex items-center justify-center text-white">
+                          <Play class="w-2.5 h-2.5 ml-0.5 fill-white" />
+                        </div>
+                      </div>
+                      <span class="absolute bottom-1.5 inset-x-1.5 text-[9px] font-bold text-white truncate px-1 bg-black/80 rounded flex items-center gap-1 z-10">
+                        <Film class="w-2.5 h-2.5 text-amber-400" />
+                        <span class="truncate">{item.name}</span>
+                      </span>
+                    {:else}
+                      <span class="absolute bottom-1.5 right-1.5 text-[9px] font-mono font-bold text-white/90 px-1 py-0.5 bg-black/80 rounded z-10">
+                        {idx + 1}
+                      </span>
+                    {/if}
+
+                    <!-- Active outline border (inner overlay to guarantee no overflow clipping on any resolution/DPI) -->
+                    {#if activeMediaIndex === idx}
+                      <div class="absolute inset-0 rounded-[12px] border-2 border-white pointer-events-none z-20"></div>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+
+          </div>
+
+          <!-- RIGHT COLUMN: Capsule + Synopsis + Specs + Tags (~33%) -->
+          <div class="col-span-4 2xl:col-span-4 flex flex-col gap-3 sm:gap-3.5 text-xs min-w-0">
+            
+            <!-- Capsule / Header Banner (Steam Landscape 460x215) -->
+            {#if headerBannerUrl && mediaList.length > 0}
+              <div class="w-full aspect-[460/215] rounded-[16px] overflow-hidden bg-black/40 flex-shrink-0">
+                <img
+                  src={headerBannerUrl}
+                  alt={getDisplayTitle(g)}
+                  class="w-full h-full object-cover"
+                  onerror={() => {
+                    imageLoadFailed[headerBannerUrl] = true;
+                  }}
+                />
+              </div>
+            {/if}
+
+            <!-- Short Synopsis -->
+            {#if g.shortDescription}
+              <div class="text-xs text-[#cbd5e1] leading-relaxed font-light line-clamp-3 sm:line-clamp-4">
+                {@html g.shortDescription}
+              </div>
+            {/if}
+
+            <!-- Metadata Specs Table (Steam Store Style) -->
+            <div class="space-y-1.5 pt-2 border-t border-white/[0.04]">
+              
+              <!-- Steam Community Reviews -->
+              {#if (g.totalReviews && g.totalReviews > 0) || (g.reviewPercent && g.reviewPercent > 0)}
+                {@const isPositive = (g.reviewPercent || 0) >= 70}
+                {@const isMixed = (g.reviewPercent || 0) >= 40 && (g.reviewPercent || 0) < 70}
+                <div class="flex items-baseline justify-between gap-2 py-0.5">
+                  <span class="text-[11px] uppercase tracking-wider text-[#8e95a2] flex-shrink-0">Все обзоры:</span>
+                  <span class="text-right font-medium min-w-0 {isPositive ? 'text-[#66c0f4]' : isMixed ? 'text-amber-400' : 'text-red-400'}">
+                    {g.reviewScoreDesc || (isPositive ? 'Положительные' : isMixed ? 'Смешанные' : 'Отрицательные')}
+                    {#if g.totalReviews}
+                      <span class="text-[11px] font-normal text-[#8e95a2] ml-1">({formatReviewsCount(g.totalReviews)})</span>
+                    {/if}
+                  </span>
+                </div>
+              {:else if g.metacriticScore && g.metacriticScore > 0}
+                <div class="flex items-baseline justify-between gap-2 py-0.5">
+                  <span class="text-[11px] uppercase tracking-wider text-[#8e95a2] flex-shrink-0">Metacritic:</span>
+                  <span class="text-right font-bold text-amber-400">{g.metacriticScore} / 100</span>
+                </div>
+              {/if}
+
+              <!-- Release Date -->
+              {#if g.releaseDate}
+                <div class="flex items-baseline justify-between gap-2 py-0.5">
+                  <span class="text-[11px] uppercase tracking-wider text-[#8e95a2] flex-shrink-0">Дата выхода:</span>
+                  <span class="text-right text-white font-medium">{g.releaseDate}</span>
+                </div>
+              {/if}
+
+              <!-- Developer -->
+              {#if g.developers && g.developers.length > 0}
+                <div class="flex items-baseline justify-between gap-2 py-0.5">
+                  <span class="text-[11px] uppercase tracking-wider text-[#8e95a2] flex-shrink-0">Разработчик:</span>
+                  <span class="text-right text-[#66c0f4] font-medium truncate max-w-[170px]" title={g.developers.join(', ')}>
+                    {g.developers.join(', ')}
                   </span>
                 </div>
               {/if}
 
-            {:else}
-              <!-- NOT INSTALLED / READY TO DOWNLOAD STATE -->
-              <div class="space-y-2">
-                <div class="flex flex-wrap items-center gap-2.5">
-                  {#if hasCustomExe}
-                    <!-- ИГРАТЬ via custom exe -->
+              <!-- Publisher -->
+              {#if g.publishers && g.publishers.length > 0}
+                <div class="flex items-baseline justify-between gap-2 py-0.5">
+                  <span class="text-[11px] uppercase tracking-wider text-[#8e95a2] flex-shrink-0">Издатель:</span>
+                  <span class="text-right text-[#66c0f4] font-medium truncate max-w-[170px]" title={g.publishers.join(', ')}>
+                    {g.publishers.join(', ')}
+                  </span>
+                </div>
+              {/if}
+
+              <!-- Source / Size -->
+              {#if downloadSourceInfo || formatSizeDisplay(g)}
+                <div class="flex items-baseline justify-between gap-2 py-0.5">
+                  <span class="text-[11px] uppercase tracking-wider text-[#8e95a2] flex-shrink-0">Источник / Размер:</span>
+                  <span class="text-right font-mono text-[#8e95a2]">
+                    {#if downloadSourceInfo}{downloadSourceInfo.shortName}{/if}
+                    {#if downloadSourceInfo && formatSizeDisplay(g)} • {/if}
+                    {#if formatSizeDisplay(g)}<span class="text-white font-bold">{formatSizeDisplay(g)}</span>{/if}
+                  </span>
+                </div>
+              {/if}
+            </div>
+
+            <!-- Popular User Tags -->
+            {#if g.tags && g.tags.length > 0}
+              <div class="space-y-1 pt-2 border-t border-white/[0.04]">
+                <div class="text-[11px] text-[#8e95a2]">
+                  Популярные метки:
+                </div>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  {#each g.tags.slice(0, 4) as tag}
                     <button
                       data-nav-item
-                      class="h-11 px-8 text-xs sm:text-sm font-black rounded flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider shadow-lg"
-                      style="background-color: var(--game-accent); color: var(--game-accent-text);"
-                      onclick={handleLaunchWithCustom}
+                      type="button"
+                      class="px-2 py-0.5 rounded-[8px] bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] text-[11px] font-normal text-[#cbd5e1] hover:text-white transition-colors cursor-pointer"
+                      onclick={() => onSelectTag(tag)}
+                      title="Искать игры с меткой {tag}"
                     >
-                      <Play class="w-4 h-4 fill-current stroke-[2]" />
-                      <span>ИГРАТЬ</span>
+                      {tag}
                     </button>
-                    {@render gearButton()}
-                    {@render folderButton()}
-                    {@render steamButton()}
-                    {@render openSteamStoreButton()}
-                    {@render favoriteButton()}
-                  {:else}
-                    <!-- Unified Split Download Button -->
-                    <div class="relative inline-flex items-stretch rounded shadow-lg border border-white/10 overflow-visible {isVariantDropdownOpen ? 'z-30' : ''}">
-                      <button
-                        data-nav-item
-                        class="h-11 px-7 text-xs sm:text-sm font-black flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider {g.variants && g.variants.length > 1 ? 'rounded-l' : 'rounded'}"
-                        style="background-color: var(--game-accent); color: var(--game-accent-text);"
-                        onclick={() => onStartDownload(selectedVariantId || g.id, customDownloadPath)}
-                      >
-                        <Download class="w-4 h-4 stroke-[2.5]" />
-                        <span>СКАЧАТЬ</span>
-                        <span class="opacity-35 font-normal">|</span>
-                        <span class="font-mono text-xs font-bold tracking-normal">{activeVariant?.sizeDisplay || formatSizeDisplay(g)}</span>
-                      </button>
-
-                      {#if g.variants && g.variants.length > 1}
-                        <button
-                          bind:this={variantDropdownTriggerEl}
-                          data-nav-item
-                          type="button"
-                          class="h-11 px-3 flex items-center justify-center border-l border-black/20 hover:brightness-110 active:scale-95 cursor-pointer transition-all rounded-r"
-                          style="background-color: var(--game-accent); color: var(--game-accent-text);"
-                          onclick={(e) => {
-                            e.stopPropagation();
-                            isVariantDropdownOpen = !isVariantDropdownOpen;
-                            if (isVariantDropdownOpen) {
-                              variantSearchQuery = '';
-                            }
-                          }}
-                          title="Выбрать версию ({g.variants.length} доступно)"
-                        >
-                          <ChevronDown class="w-4 h-4 stroke-[2.5] transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
-                        </button>
-                      {/if}
-                    </div>
-
-                    {@render steamButton()}
-                    {@render openSteamStoreButton()}
-                    {@render favoriteButton()}
-                    {@render gearButton()}
-                  {/if}
-                </div>
-
-                <!-- Minimalist Sleek Metadata Line: Folder Path • Source • Seeders • Release Name -->
-                <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[#8e95a2] pt-0.5">
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1.5 font-mono text-[#94a3b8] hover:text-white transition-colors cursor-pointer hover:underline"
-                    onclick={handleBrowseFolder}
-                    title="Нажмите, чтобы изменить папку для сохранения"
-                  >
-                    <Folder class="w-3.5 h-3.5 text-[#6b7280]" />
-                    <span class="truncate max-w-xs">{customDownloadPath}</span>
-                  </button>
-
-                  {#if downloadSourceInfo}
-                    <span class="text-white/20 select-none">•</span>
-                    <span class="text-[#8e95a2]">{downloadSourceInfo.shortName}</span>
-                  {/if}
-
-                  {#if currentVariantSeedInfo}
-                    <span class="text-white/20 select-none">•</span>
-                    {#if currentVariantSeedInfo.loading}
-                      <span class="inline-flex items-center gap-1 font-mono text-[11px] text-[#64748b] animate-pulse">
-                        <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span>...</span>
-                      </span>
-                    {:else}
-                      <span class="inline-flex items-center gap-1 font-mono text-[11px] {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
-                        <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
-                      </span>
-                    {/if}
-                  {/if}
-
-                  {#if (activeVariant?.rawName || g.rawName)}
-                    <span class="text-white/20 select-none">•</span>
-                    {#if g.variants && g.variants.length > 1}
-                      <button
-                        bind:this={secondaryVariantDropdownTriggerEl}
-                        type="button"
-                        class="font-mono text-[#8e95a2] hover:text-white transition-colors truncate max-w-md cursor-pointer hover:underline text-left inline-flex items-center gap-1"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          isVariantDropdownOpen = !isVariantDropdownOpen;
-                          if (isVariantDropdownOpen) {
-                            variantSearchQuery = '';
-                          }
-                        }}
-                        title="Нажмите, чтобы сменить версию или репак"
-                      >
-                        <span class="truncate">{activeVariant?.rawName || g.rawName}</span>
-                        <ChevronDown class="w-3 h-3 flex-shrink-0 transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
-                      </button>
-                    {:else}
-                      <span
-                        class="font-mono text-[#64748b] truncate max-w-md"
-                        title={activeVariant?.rawName || g.rawName}
-                      >
-                        {activeVariant?.rawName || g.rawName}
-                      </span>
-                    {/if}
-                  {/if}
+                  {/each}
                 </div>
               </div>
             {/if}
@@ -2219,6 +1980,401 @@
           </div>
 
         </div>
+
+        <!-- ACTION DECK: Smart Download / Play / Folder Controls (FULL WIDTH) -->
+        <div class="w-full p-4 sm:p-5 rounded-[16px] bg-white/[0.03] space-y-3.5">
+              
+              {#snippet favoriteButton()}
+                <div class="relative inline-flex items-center">
+                  <button
+                    bind:this={favoriteDropdownTriggerEl}
+                    data-nav-item
+                    type="button"
+                    class="h-11 inline-flex items-center gap-2 text-xs px-4 rounded-[14px] transition-all cursor-pointer bg-white/[0.04] hover:bg-white/[0.08] text-[#cbd5e1] hover:text-white"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
+                    }}
+                    title="Добавить в избранное / статус прохождения"
+                  >
+                    {#if effectiveFavoriteStatus === 'playing'}
+                      <Gamepad2 class="w-3.5 h-3.5 text-amber-400" />
+                      <span class="font-medium text-[#ededed]">Прохожу</span>
+                    {:else if effectiveFavoriteStatus === 'completed'}
+                      <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400" />
+                      <span class="font-medium text-[#ededed]">Прошел</span>
+                    {:else if effectiveFavoriteStatus === 'planned'}
+                      <BookmarkCheck class="w-3.5 h-3.5 text-sky-400" />
+                      <span class="font-medium text-[#ededed]">В планах</span>
+                    {:else}
+                      <Bookmark class="w-3.5 h-3.5 text-[#8e95a2]" />
+                      <span class="text-[#8e95a2]">В избранное</span>
+                    {/if}
+                    <ChevronDown class="w-3.5 h-3.5 text-[#8e95a2] transition-transform duration-200 {isFavoriteDropdownOpen ? 'rotate-180' : ''}" />
+                  </button>
+
+                  {#if isFavoriteDropdownOpen}
+                    <div
+                      bind:this={favoriteDropdownContainerEl}
+                      class="absolute left-0 top-full mt-2 z-50 min-w-[200px] rounded-[16px] bg-[#0d1117] p-2 space-y-1 text-xs"
+                    >
+                      <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
+                        Статус в избранном
+                      </div>
+                      <button
+                        type="button"
+                        class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-[10px] transition-all cursor-pointer {effectiveFavoriteStatus === 'planned' ? 'bg-sky-500/20 text-sky-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                        onclick={() => handleToggleFavoriteStatus('planned')}
+                      >
+                        <Clock class="w-3.5 h-3.5 text-sky-400" />
+                        <span>В планах</span>
+                        {#if effectiveFavoriteStatus === 'planned'}
+                          <Check class="w-3.5 h-3.5 ml-auto text-sky-400" />
+                        {/if}
+                      </button>
+                      <button
+                        type="button"
+                        class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-[10px] transition-all cursor-pointer {effectiveFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                        onclick={() => handleToggleFavoriteStatus('playing')}
+                      >
+                        <Gamepad2 class="w-3.5 h-3.5 text-amber-400" />
+                        <span>Прохожу</span>
+                        {#if effectiveFavoriteStatus === 'playing'}
+                          <Check class="w-3.5 h-3.5 ml-auto text-amber-400" />
+                        {/if}
+                      </button>
+                      <button
+                        type="button"
+                        class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-[10px] transition-all cursor-pointer {effectiveFavoriteStatus === 'completed' ? 'bg-emerald-500/20 text-emerald-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                        onclick={() => handleToggleFavoriteStatus('completed')}
+                      >
+                        <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Прошел</span>
+                        {#if effectiveFavoriteStatus === 'completed'}
+                          <Check class="w-3.5 h-3.5 ml-auto text-emerald-400" />
+                        {/if}
+                      </button>
+
+                      {#if effectiveFavoriteStatus}
+                        <div class="h-px bg-white/[0.06] my-1"></div>
+                        <button
+                          type="button"
+                          class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-[10px] text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
+                          onclick={handleRemoveFavorite}
+                        >
+                          <Trash2 class="w-3.5 h-3.5" />
+                          <span>Удалить из избранного</span>
+                        </button>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              {/snippet}
+
+              {#snippet gearButton()}
+                {#if isGameInFavorites}
+                  <button
+                    data-nav-item
+                    type="button"
+                    title={hasCustomExe ? "Настройки запуска (настроено)" : "Настройки запуска (укажите .exe файл)"}
+                    class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-[14px] transition-all cursor-pointer bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
+                    onclick={openLaunchConfigModal}
+                  >
+                    <Settings class="w-4 h-4" />
+                  </button>
+                {/if}
+              {/snippet}
+
+              {#snippet folderButton()}
+                {#if pageDetails?.localPath || pageDetails?.isInstalled}
+                  <button
+                    data-nav-item
+                    type="button"
+                    title="Открыть папку с игрой"
+                    class="h-11 w-11 flex-shrink-0 flex items-center justify-center rounded-[14px] transition-all cursor-pointer bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white"
+                    onclick={handleOpenFolder}
+                  >
+                    <FolderOpen class="w-4 h-4" />
+                  </button>
+                {/if}
+              {/snippet}
+
+              {#snippet steamButton()}
+                {#if isGameInFavorites}
+                  <button
+                    data-nav-item
+                    type="button"
+                    title={isGameInSteam ? "Игра добавлена в Steam (нажмите для повторной синхронизации)" : "Добавить игру со всеми обложками в библиотеку Steam"}
+                    class="h-11 px-4 flex items-center justify-center gap-2 rounded-[14px] transition-all cursor-pointer text-xs font-medium {isGameInSteam ? 'bg-sky-500/15 text-sky-300 hover:bg-sky-500/25' : 'bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white'}"
+                    onclick={handleAddToSteam}
+                    disabled={isAddingToSteam}
+                  >
+                    {#if isAddingToSteam}
+                      <RefreshCw class="w-3.5 h-3.5 animate-spin text-sky-400 flex-shrink-0" />
+                      <span>В Steam...</span>
+                    {:else if isGameInSteam}
+                      <Check class="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+                      <span>В Steam</span>
+                    {:else}
+                      <SteamLogo size={16} weight="bold" class="flex-shrink-0" />
+                      <span>В Steam</span>
+                    {/if}
+                  </button>
+                {/if}
+              {/snippet}
+
+              {#if isDownloadCompleted || pageDetails?.isInstalled}
+
+                <!-- ALREADY INSTALLED / DOWNLOAD COMPLETED STATE: PLAY + GEAR + FOLDER + FAVORITE -->
+                <div class="space-y-3">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex flex-wrap items-center gap-2.5">
+                      <button
+                        data-nav-item
+                        class="h-11 px-8 text-sm font-black rounded-[14px] flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 transition-all hover:brightness-110 uppercase tracking-wider"
+                        style="background-color: var(--game-accent); color: var(--game-accent-text);"
+                        onclick={handlePlayButtonClick}
+                      >
+                        <Play class="w-4 h-4 fill-current stroke-[2]" />
+                        <span>ИГРАТЬ</span>
+                      </button>
+
+                      {@render gearButton()}
+                      {@render folderButton()}
+                      {@render steamButton()}
+                      {@render favoriteButton()}
+                    </div>
+
+                    <div class="flex items-center gap-2 text-xs font-mono">
+                      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-emerald-500/15 text-emerald-400 font-semibold">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        <span>Установлено</span>
+                      </span>
+                      {#if formatSizeDisplay(g)}
+                        <span class="text-[#8e95a2]">{formatSizeDisplay(g)}</span>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <!-- Metadata & Folder Path Row -->
+                  <div class="pt-3 border-t border-white/[0.04] flex flex-wrap items-center justify-between gap-3 text-xs text-[#8e95a2]">
+                    {#if pageDetails?.localPath}
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="text-[#64748b] text-[11px] uppercase tracking-wider font-semibold flex-shrink-0">Папка:</span>
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-white/[0.03] hover:bg-white/[0.07] font-mono text-xs text-[#cbd5e1] hover:text-white transition-colors cursor-pointer truncate max-w-xs sm:max-w-md group"
+                          onclick={handleOpenFolder}
+                          title="Нажмите, чтобы открыть папку в проводнике"
+                        >
+                          <Folder class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0 group-hover:text-white transition-colors" />
+                          <span class="truncate">{pageDetails.localPath}</span>
+                          <span class="text-[10px] text-[#64748b] group-hover:text-sky-400 transition-colors ml-1 flex-shrink-0">Открыть</span>
+                        </button>
+                      </div>
+                    {/if}
+
+                    {#if (activeVariant?.rawName || g.rawName)}
+                      <div class="inline-flex items-center gap-1.5 font-mono text-xs text-[#64748b] ml-auto">
+                        <Disc class="w-3.5 h-3.5 text-[#64748b] flex-shrink-0" />
+                        <span class="truncate max-w-[240px] sm:max-w-md" title={activeVariant?.rawName || g.rawName}>
+                          {activeVariant?.rawName || g.rawName}
+                        </span>
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+
+              {:else if isDownloading}
+                <!-- ACTIVE DOWNLOADING / QUEUED STATE -->
+                {@const prog = activeGameDownload || pageDetails?.downloadProgress}
+                {@const dlStatus = activeGameDownload?.status || pageDetails?.downloadStatus}
+                <div class="space-y-3">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-2 text-sm font-bold text-white">
+                      <Download class="w-4 h-4 text-[var(--game-accent)] animate-bounce" />
+                      <span>{dlStatus === 'paused' ? 'Приостановлено' : (dlStatus === 'queued' ? 'В очереди загрузки...' : (dlStatus === 'scanning' ? 'Получение метаданных торрента...' : 'Скачивается...'))}</span>
+                      <span class="font-mono text-base text-[var(--game-accent)] ml-1">{Math.round(prog?.progressPercent || 0)}%</span>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                      {#if prog?.speedDisplay}
+                        <div class="text-xs font-mono text-[#8e95a2]">
+                          <span class="text-white font-semibold">{prog.speedDisplay}</span>
+                          {#if prog.etaDisplay}
+                            <span class="text-[#64748b] ml-1.5">({prog.etaDisplay})</span>
+                          {/if}
+                        </div>
+                      {/if}
+                      {@render favoriteButton()}
+                    </div>
+                  </div>
+
+                  <!-- Progress Bar -->
+                  <div class="w-full h-2 rounded-none bg-black/60 overflow-hidden">
+                    <div
+                      class="h-full rounded-none transition-all duration-300"
+                      style="width: {Math.max(2, prog?.progressPercent || 0)}%; background-color: var(--game-accent);"
+                    ></div>
+                  </div>
+
+                  <!-- Bottom Row: Path & Release Name -->
+                  <div class="pt-3 border-t border-white/[0.04] flex flex-wrap items-center justify-between gap-3 text-xs text-[#8e95a2]">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="text-[#64748b] text-[11px] uppercase tracking-wider font-semibold flex-shrink-0">Папка:</span>
+                      <span class="font-mono text-xs text-[#cbd5e1] truncate max-w-xs sm:max-w-md">{customDownloadPath}</span>
+                    </div>
+
+                    {#if (activeVariant?.rawName || g.rawName)}
+                      <div class="inline-flex items-center gap-1.5 font-mono text-xs text-[#64748b] ml-auto">
+                        <Disc class="w-3.5 h-3.5 text-[#64748b] flex-shrink-0" />
+                        <span class="truncate max-w-[240px] sm:max-w-md" title={activeVariant?.rawName || g.rawName}>
+                          {activeVariant?.rawName || g.rawName}
+                        </span>
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+
+              {:else}
+                <!-- NOT INSTALLED / READY TO DOWNLOAD STATE -->
+                <div class="space-y-3">
+                  <!-- Top Row: Actions on Left, Source & Seeds on Right -->
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex flex-wrap items-center gap-2.5">
+                      {#if hasCustomExe}
+                        <!-- ИГРАТЬ via custom exe -->
+                        <button
+                          data-nav-item
+                          class="h-11 px-8 text-xs sm:text-sm font-black rounded-[14px] flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider"
+                          style="background-color: var(--game-accent); color: var(--game-accent-text);"
+                          onclick={handleLaunchWithCustom}
+                        >
+                          <Play class="w-4 h-4 fill-current stroke-[2]" />
+                          <span>ИГРАТЬ</span>
+                        </button>
+                        {@render gearButton()}
+                        {@render folderButton()}
+                        {@render steamButton()}
+                        {@render favoriteButton()}
+                      {:else}
+                        <!-- Unified Split Download Button (Squircle 14px) -->
+                        <div class="relative inline-flex items-stretch rounded-[14px] overflow-visible {isVariantDropdownOpen ? 'z-30' : ''}">
+                          <button
+                            data-nav-item
+                            class="h-11 px-6 sm:px-7 text-xs sm:text-sm font-black flex items-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] uppercase tracking-wider {g.variants && g.variants.length > 1 ? 'rounded-l-[14px]' : 'rounded-[14px]'}"
+                            style="background-color: var(--game-accent); color: var(--game-accent-text);"
+                            onclick={() => onStartDownload(selectedVariantId || g.id, customDownloadPath)}
+                          >
+                            <Download class="w-4 h-4 stroke-[2.5]" />
+                            <span>СКАЧАТЬ</span>
+                            <span class="opacity-35 font-normal">|</span>
+                            <span class="font-mono text-xs font-bold tracking-normal">{activeVariant?.sizeDisplay || formatSizeDisplay(g)}</span>
+                          </button>
+
+                          {#if g.variants && g.variants.length > 1}
+                            <button
+                              bind:this={variantDropdownTriggerEl}
+                              data-nav-item
+                              type="button"
+                              class="h-11 px-3 flex items-center justify-center border-l border-black/20 hover:brightness-110 active:scale-95 cursor-pointer transition-all rounded-r-[14px]"
+                              style="background-color: var(--game-accent); color: var(--game-accent-text);"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                isVariantDropdownOpen = !isVariantDropdownOpen;
+                                if (isVariantDropdownOpen) {
+                                  variantSearchQuery = '';
+                                }
+                              }}
+                              title="Выбрать версию ({g.variants.length} доступно)"
+                            >
+                              <ChevronDown class="w-4 h-4 stroke-[2.5] transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
+                            </button>
+                          {/if}
+                        </div>
+
+                        {@render steamButton()}
+                        {@render favoriteButton()}
+                        {@render gearButton()}
+                      {/if}
+                    </div>
+
+                    <!-- Right Side: Source & Seeds Badge -->
+                    <div class="flex items-center gap-2.5 text-xs font-mono text-[#8e95a2]">
+                      {#if downloadSourceInfo}
+                        <span class="text-[#8e95a2]">{downloadSourceInfo.shortName}</span>
+                      {/if}
+                      {#if currentVariantSeedInfo}
+                        {#if downloadSourceInfo}
+                          <span class="text-white/20 select-none">•</span>
+                        {/if}
+                        {#if currentVariantSeedInfo.loading}
+                          <span class="inline-flex items-center gap-1 text-[11px] text-[#64748b] animate-pulse">
+                            <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>...</span>
+                          </span>
+                        {:else}
+                          <span class="inline-flex items-center gap-1 text-[11px] {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#64748b]'}">
+                            <UploadSimple class="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
+                          </span>
+                        {/if}
+                      {/if}
+                    </div>
+                  </div>
+
+                  <!-- Bottom Row: Save Path (interactive) + Release Version (interactive) -->
+                  <div class="pt-3 border-t border-white/[0.04] flex flex-wrap items-center justify-between gap-3 text-xs text-[#8e95a2]">
+                    <!-- Save Folder Button -->
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="text-[#64748b] text-[11px] uppercase tracking-wider font-semibold flex-shrink-0">Папка:</span>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-white/[0.03] hover:bg-white/[0.07] font-mono text-xs text-[#cbd5e1] hover:text-white transition-colors cursor-pointer truncate max-w-xs sm:max-w-md group"
+                        onclick={handleBrowseFolder}
+                        title="Нажмите, чтобы изменить папку для сохранения"
+                      >
+                        <Folder class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0 group-hover:text-white transition-colors" />
+                        <span class="truncate">{customDownloadPath}</span>
+                        <span class="text-[10px] text-[#64748b] group-hover:text-sky-400 transition-colors ml-1 flex-shrink-0">Изменить</span>
+                      </button>
+                    </div>
+
+                    <!-- Release Variant Badge / Dropdown -->
+                    {#if (activeVariant?.rawName || g.rawName)}
+                      <div class="flex items-center gap-2 min-w-0 flex-shrink-0">
+                        {#if g.variants && g.variants.length > 1}
+                          <span class="text-[#64748b] text-[11px] uppercase tracking-wider font-semibold">Версия:</span>
+                          <button
+                            bind:this={secondaryVariantDropdownTriggerEl}
+                            type="button"
+                            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-white/[0.03] hover:bg-white/[0.07] font-mono text-xs text-[#cbd5e1] hover:text-white transition-colors cursor-pointer truncate max-w-[200px] sm:max-w-xs group"
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              isVariantDropdownOpen = !isVariantDropdownOpen;
+                              if (isVariantDropdownOpen) {
+                                variantSearchQuery = '';
+                              }
+                            }}
+                            title="Нажмите, чтобы сменить версию или репак"
+                          >
+                            <Disc class="w-3.5 h-3.5 text-[#8e95a2] flex-shrink-0 group-hover:text-white transition-colors" />
+                            <span class="truncate">{activeVariant?.rawName || g.rawName}</span>
+                            <ChevronDown class="w-3 h-3 text-[#8e95a2] flex-shrink-0 transition-transform duration-200 {isVariantDropdownOpen ? 'rotate-180' : ''}" />
+                          </button>
+                        {:else}
+                          <div class="inline-flex items-center gap-1.5 font-mono text-xs text-[#64748b]" title={activeVariant?.rawName || g.rawName}>
+                            <Disc class="w-3.5 h-3.5 text-[#64748b] flex-shrink-0" />
+                            <span class="truncate max-w-[200px] sm:max-w-xs">{activeVariant?.rawName || g.rawName}</span>
+                          </div>
+                        {/if}
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+
+            </div>
       </div>
 
       <!-- FULL-WIDTH REPACK & VERSION SELECTOR WITH MICROANIMATION -->
@@ -2226,14 +2382,14 @@
         <div
           bind:this={variantDropdownContainerEl}
           transition:slide={{ duration: 250 }}
-          class="w-full p-5 rounded bg-[#07080a] border border-white/[0.08] space-y-4 shadow-xl"
+          class="w-full p-5 rounded-[18px] bg-white/[0.025] space-y-4"
         >
           <!-- Header: Title, Count Badge & Collapse Button -->
           <div class="flex items-center justify-between gap-3 pb-3 border-b border-white/[0.06]">
             <div class="flex items-center gap-2">
               <Disc class="w-4 h-4 text-[#8e95a2]" />
               <span class="text-xs font-bold uppercase tracking-wider text-white">Доступные издания и репаки</span>
-              <span class="text-[10px] font-mono font-semibold text-[#8e95a2] bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
+              <span class="text-[10px] font-mono font-semibold text-[#8e95a2] bg-white/[0.04] px-2 py-0.5 rounded">
                 {displayedVariants.length}{#if variantSearchQuery} / {g.variants.length}{/if}
               </span>
             </div>
@@ -2257,7 +2413,7 @@
                 type="text"
                 bind:value={variantSearchQuery}
                 placeholder="Поиск по названию или трекеру..."
-                class="w-full bg-[#0d1117] text-[#ededed] placeholder-[#5a6170] text-xs font-medium rounded pl-9 pr-7 py-1.5 border border-white/[0.08] focus:border-white/20 focus:outline-none transition-colors"
+                class="w-full bg-[#0d1117] text-[#ededed] placeholder-[#5a6170] text-xs font-medium rounded pl-9 pr-7 py-1.5 focus:outline-none transition-colors"
               />
               {#if variantSearchQuery}
                 <button
@@ -2273,13 +2429,21 @@
             <!-- Sort Segment Switch -->
             <div class="flex items-center gap-2 text-xs flex-shrink-0">
               <span class="text-[10px] font-bold uppercase tracking-wider text-[#64748b] hidden sm:inline">Сортировка:</span>
-              <div class="flex items-center bg-[#0d1117] border border-white/[0.08] rounded p-0.5">
+              <div class="flex items-center bg-[#0d1117] rounded p-0.5">
                 <button
                   type="button"
                   class="px-2.5 py-1 rounded-sm text-xs transition-colors cursor-pointer {variantSortBy === 'default' ? 'bg-white/10 text-white font-semibold' : 'text-[#8e95a2] hover:text-white'}"
                   onclick={() => (variantSortBy = 'default')}
                 >
                   По умолчанию
+                </button>
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-sm text-xs transition-colors cursor-pointer {variantSortBy === 'date' ? 'bg-white/10 text-white font-semibold' : 'text-[#8e95a2] hover:text-white'}"
+                  onclick={() => (variantSortBy = 'date')}
+                  title="Сортировать по дате добавления"
+                >
+                  По дате
                 </button>
                 <button
                   type="button"
@@ -2324,7 +2488,7 @@
                 <div
                   role="button"
                   tabindex="0"
-                  class="group relative p-3 rounded cursor-pointer transition-all border {isSelected ? 'bg-white/[0.06] border-white/20 before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-r before:bg-white shadow-sm' : 'bg-[#0d1117] hover:bg-[#11141c] border-white/[0.04] hover:border-white/10'}"
+                  class="group relative p-3 rounded cursor-pointer transition-all {isSelected ? 'bg-white/[0.08] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-r before:bg-white' : 'bg-[#0d1117] hover:bg-[#11141c]'}"
                   onclick={() => {
                     selectedVariantId = variant.id;
                   }}
@@ -2338,7 +2502,7 @@
                   <div class="flex items-center justify-between gap-4">
                     <!-- Left: Disc icon + Title on top, metadata below -->
                     <div class="flex items-start gap-3 min-w-0 flex-1">
-                      <div class="w-8 h-8 rounded bg-white/[0.04] border border-white/[0.06] flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:border-white/15 transition-colors">
+                      <div class="w-8 h-8 rounded bg-white/[0.04] flex items-center justify-center flex-shrink-0 mt-0.5 transition-colors">
                         <Disc class="w-4 h-4 {isSelected ? 'text-white' : 'text-[#8e95a2] group-hover:text-white'} transition-colors" />
                       </div>
 
@@ -2373,18 +2537,18 @@
                       {/if}
 
                       <!-- Size -->
-                      <span class="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-black/40 border border-white/[0.06] {isSelected ? 'text-white' : 'text-[#cbd5e1]'} text-right">
+                      <span class="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-black/40 {isSelected ? 'text-white' : 'text-[#cbd5e1]'} text-right">
                         {variant.sizeDisplay}
                       </span>
 
                       <!-- Select button / badge -->
                       {#if isSelected}
-                        <span class="px-2.5 py-1 rounded bg-white/15 border border-white/20 text-xs font-bold text-white flex items-center gap-1.5 shadow-sm">
+                        <span class="px-2.5 py-1 rounded bg-white/15 text-xs font-bold text-white flex items-center gap-1.5">
                           <Check class="w-3.5 h-3.5 stroke-[3] text-emerald-400" />
                           <span>Выбрано</span>
                         </span>
                       {:else}
-                        <span class="px-2.5 py-1 rounded bg-white/[0.04] group-hover:bg-white/10 border border-white/[0.06] text-xs font-medium text-[#8e95a2] group-hover:text-white transition-colors">
+                        <span class="px-2.5 py-1 rounded bg-white/[0.04] group-hover:bg-white/10 text-xs font-medium text-[#8e95a2] group-hover:text-white transition-colors">
                           Выбрать
                         </span>
                       {/if}
@@ -2409,7 +2573,7 @@
 
         <!-- Modal Panel -->
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-          <div class="pointer-events-auto w-full max-w-md bg-[#0d1117] border border-white/10 rounded-md shadow-2xl flex flex-col overflow-hidden">
+          <div class="pointer-events-auto w-full max-w-md bg-[#0d1117] rounded-[16px] flex flex-col overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
               <div class="flex items-center gap-2.5 min-w-0">
@@ -2447,7 +2611,7 @@
                       {@const isSelected = lcExePath === cand}
                       <button
                         type="button"
-                        class="text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs font-mono transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold border border-white/20' : 'bg-white/[0.03] hover:bg-white/[0.07] text-[#cbd5e1] border border-white/[0.05]'}"
+                        class="text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs font-mono transition-colors cursor-pointer {isSelected ? 'bg-white/10 text-white font-bold' : 'bg-white/[0.03] hover:bg-white/[0.07] text-[#cbd5e1]'}"
                         onclick={() => { lcExePath = cand; }}
                       >
                         <span class="truncate">{fileName}</span>
@@ -2472,12 +2636,12 @@
                     bind:value={lcExePath}
                     placeholder="C:\Games\game.exe"
                     spellcheck="false"
-                    class="flex-1 min-w-0 bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded px-3 py-2.5 border border-white/[0.08] focus:border-white/25 focus:outline-none transition-colors"
+                    class="flex-1 min-w-0 bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded px-3 py-2.5 focus:outline-none transition-colors"
                   />
                   <button
                     type="button"
                     title="Выбрать файл на диске"
-                    class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded bg-white/[0.05] hover:bg-white/10 border border-white/[0.08] text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
+                    class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded bg-white/[0.05] hover:bg-white/10 text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
                     onclick={handleBrowseExe}
                   >
                     <Folder class="w-4 h-4" />
@@ -2500,7 +2664,7 @@
                   bind:value={lcLaunchArgs}
                   placeholder="-dx12 -fullscreen -windowed"
                   spellcheck="false"
-                  class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded px-3 py-2.5 border border-white/[0.08] focus:border-white/25 focus:outline-none transition-colors"
+                  class="w-full bg-[#07080a] text-[#ededed] placeholder-[#5a6170] text-xs font-mono rounded px-3 py-2.5 focus:outline-none transition-colors"
                 />
               </div>
 
@@ -2518,7 +2682,7 @@
                 <button
                   type="button"
                   disabled={lcSaving}
-                  class="h-9 px-4 flex items-center justify-center gap-2 rounded text-xs font-bold transition-all cursor-pointer shadow-md hover:brightness-110 active:scale-95"
+                  class="h-9 px-4 flex items-center justify-center gap-2 rounded text-xs font-bold transition-all cursor-pointer hover:brightness-110 active:scale-95"
                   style="background-color: var(--game-accent); color: var(--game-accent-text);"
                   onclick={() => handleSaveLaunchConfig(true)}
                 >
@@ -2532,7 +2696,7 @@
                 disabled={lcSaving}
                 class="flex-1 h-9 flex items-center justify-center gap-2 rounded text-xs font-bold transition-colors cursor-pointer
                   {lcSaveSuccess
-                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                    ? 'bg-emerald-500/15 text-emerald-300'
                     : 'bg-white text-slate-950 hover:bg-white/90 active:scale-[0.98]'}"
                 onclick={() => handleSaveLaunchConfig(false)}
               >
@@ -2546,7 +2710,7 @@
 
               <button
                 type="button"
-                class="h-9 px-3.5 rounded text-xs font-medium text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] transition-colors cursor-pointer"
+                class="h-9 px-3.5 rounded text-xs font-medium text-[#8e95a2] hover:text-white bg-white/[0.04] hover:bg-white/[0.08] transition-colors cursor-pointer"
                 onclick={() => (isLaunchConfigOpen = false)}
               >
                 Отмена
@@ -2558,200 +2722,56 @@
 
       <!-- SNIPPETS FOR CONTENT SECTIONS -->
       {#snippet mediaAndDescription()}
-        <div class="space-y-6">
-          <!-- UNIFIED MEDIA SHOWCASE -->
-          {#if mediaList.length > 0 && activeMedia}
-            <div class="space-y-3">
-              <!-- Main Viewport (16:9) -->
-              <div
-                bind:this={screenshotViewport}
-                class="relative w-full aspect-video rounded overflow-hidden bg-black border border-white/10 group/viewer flex items-center justify-center"
-              >
-                {#if activeMedia.type === 'video'}
-                  <VideoPlayer
-                    hls={activeMedia.hls}
-                    mp4={activeMedia.mp4}
-                    webm={activeMedia.webm}
-                    poster={activeMedia.thumbnail}
-                    title={activeMedia.name}
-                    autoplay={false}
-                    controls={true}
-                  />
-                {:else}
-                  <img
-                    src={activeMedia.url}
-                    alt={activeMedia.name}
-                    class="w-full h-full object-contain cursor-pointer select-none"
-                    ondblclick={toggleScreenshotFullscreen}
-                  />
+        <div class="space-y-3">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-2">
+            <FileText class="w-3.5 h-3.5 text-[#8e95a2]" />
+            <span>Об этой игре</span>
+          </h3>
 
-                  <!-- Previous / Next Media Navigation -->
-                  {#if mediaList.length > 1}
-                    <button
-                      type="button"
-                      data-nav-item
-                      class="absolute left-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/60 hover:bg-black/90 text-white border border-white/10 opacity-0 group-hover/viewer:opacity-100 transition-opacity cursor-pointer active:scale-95 z-20"
-                      onclick={prevMedia}
-                      title="Предыдущее медиа [←]"
-                    >
-                      <ChevronLeft class="w-5 h-5 stroke-[2.5]" />
-                    </button>
-
-                    <button
-                      type="button"
-                      data-nav-item
-                      class="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/60 hover:bg-black/90 text-white border border-white/10 opacity-0 group-hover/viewer:opacity-100 transition-opacity cursor-pointer active:scale-95 z-20"
-                      onclick={nextMedia}
-                      title="Следующее медиа [→]"
-                    >
-                      <ChevronRight class="w-5 h-5 stroke-[2.5]" />
-                    </button>
-                  {/if}
-
-                  <!-- Fullscreen Button -->
-                  <div class="absolute top-3 right-3 flex items-center gap-2 opacity-0 group-hover/viewer:opacity-100 transition-opacity z-20">
-                    <button
-                      type="button"
-                      data-nav-item
-                      class="p-2 rounded-sm bg-black/70 hover:bg-black/90 text-white border border-white/15 cursor-pointer transition-colors"
-                      onclick={toggleScreenshotFullscreen}
-                      title={isScreenshotFullscreen ? "Выйти из полноэкранного режима" : "Во весь экран"}
-                    >
-                      {#if isScreenshotFullscreen}
-                        <Minimize2 class="w-4 h-4" />
-                      {:else}
-                        <Maximize2 class="w-4 h-4" />
-                      {/if}
-                    </button>
-                  </div>
-
-                  <!-- Bottom-Left Label -->
-                  <div class="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-[#07080a]/90 border border-white/10 text-[11px] font-semibold text-white/90 pointer-events-none flex items-center gap-2">
-                    <ImageIcon class="w-3.5 h-3.5 text-[#9ca3af]" />
-                    <span>{activeMedia.name}</span>
-                    <span class="text-[#6b7280] font-mono">({activeMediaIndex + 1} / {mediaList.length})</span>
-                  </div>
-                {/if}
-              </div>
-
-              <!-- Unified Thumbnails Strip -->
-              {#if mediaList.length > 1}
-                <div class="flex items-center gap-2.5 overflow-x-auto pb-1 no-scrollbar">
-                  {#each mediaList as item, idx}
-                    <button
-                      data-nav-item
-                      type="button"
-                      class="relative flex-shrink-0 w-32 sm:w-36 aspect-video rounded overflow-hidden border transition-all cursor-pointer group/thumb text-left {activeMediaIndex === idx ? 'border-white ring-2 ring-white/25 opacity-100' : 'border-white/10 opacity-60 hover:opacity-100 hover:border-white/40'}"
-                      onclick={() => (activeMediaIndex = idx)}
-                      title={item.name}
-                    >
-                      <img
-                        src={item.type === 'video' ? item.thumbnail : item.url}
-                        alt={item.name}
-                        class="w-full h-full object-cover"
-                      />
-
-                      {#if item.type === 'video'}
-                        <div class="absolute inset-0 bg-black/35 flex items-center justify-center group-hover/thumb:bg-black/15 transition-colors">
-                          <div class="w-6 h-6 rounded-full bg-black/80 flex items-center justify-center text-white border border-white/20 shadow-md">
-                            <Play class="w-3 h-3 ml-0.5 fill-white" />
-                          </div>
-                        </div>
-                        <span class="absolute bottom-1 inset-x-1 text-[9px] font-bold text-white truncate px-1 bg-black/75 rounded flex items-center gap-1">
-                          <Film class="w-2.5 h-2.5 text-amber-400" />
-                          <span class="truncate">{item.name}</span>
-                        </span>
-                      {:else}
-                        <span class="absolute bottom-1 right-1 text-[9px] font-mono font-bold text-white/90 px-1 py-0.5 bg-black/75 rounded border border-white/10">
-                          {idx + 1}
-                        </span>
-                      {/if}
-                    </button>
-                  {/each}
-                </div>
-              {/if}
+          {#if g.detailedDescription}
+            <div class="steam-html-content space-y-3 text-sm text-[#cbd5e1] leading-relaxed [&_img]:w-full [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-none [&_img]:my-3 [&_img]:block [&_img]:border-none [&_img]:shadow-none">
+              {@html g.detailedDescription}
             </div>
+          {:else}
+            <p class="text-xs text-[#6b7280]">
+              Подробные сведения о релизе и файлах доступны в разделе «Спецификации релиза».
+            </p>
           {/if}
-
-          <!-- Detailed Overview Text -->
-          <div class="space-y-4">
-            {#if g.detailedDescription}
-              <div class="steam-html-content space-y-3">
-                {@html g.detailedDescription}
-              </div>
-            {:else}
-              <p class="text-xs text-[#6b7280]">
-                Подробные сведения о релизе и файлах доступны в разделе «Спецификации релиза».
-              </p>
-            {/if}
-          </div>
         </div>
       {/snippet}
 
-      {#snippet genresAndTagsCard()}
-        {@const hasGenres = g.genres && g.genres.length > 0}
-        {@const hasTags = g.tags && g.tags.length > 0}
-        {#if hasGenres || hasTags}
-          <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-4 text-xs">
-            {#if hasGenres}
-              <div class="space-y-2">
-                <div class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5">
-                  <Tag class="w-3.5 h-3.5 text-[#8e95a2]" />
-                  <span>Жанры</span>
-                </div>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  {#each g.genres as genre}
-                    <button
-                      data-nav-item
-                      type="button"
-                      class="inline-flex items-center px-2.5 py-1 rounded-sm bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] border border-white/[0.06] hover:border-white/15 text-xs font-medium text-[#cbd5e1] hover:text-white transition-colors cursor-pointer"
-                      onclick={() => onSelectGenre(genre)}
-                      title="Фильтровать по жанру {genre}"
-                    >
-                      <span>{genre}</span>
-                    </button>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-
-            {#if hasGenres && hasTags}
-              <div class="h-px bg-white/[0.04]"></div>
-            {/if}
-
-            {#if hasTags}
-              <div class="space-y-2">
-                <div class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5">
-                  <Tags class="w-3.5 h-3.5 text-[#8e95a2]" />
-                  <span>Популярные метки</span>
-                </div>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  {#each g.tags as tag}
-                    <button
-                      data-nav-item
-                      type="button"
-                      class="inline-flex items-center px-2 py-0.5 rounded-md bg-white/[0.02] hover:bg-white/[0.06] active:bg-white/[0.1] border border-white/[0.04] hover:border-white/10 text-[11px] font-normal text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
-                      onclick={() => onSelectTag(tag)}
-                      title="Искать игры с меткой {tag}"
-                    >
-                      <span>{tag}</span>
-                    </button>
-                  {/each}
-                </div>
-              </div>
-            {/if}
+      {#snippet genresCard()}
+        {#if g.genres && g.genres.length > 0}
+          <div class="space-y-2 text-xs">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-[#8e95a2] flex items-center gap-1.5">
+              <Tag class="w-3.5 h-3.5 text-[#8e95a2]" />
+              <span>Жанры</span>
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              {#each g.genres as genre}
+                <button
+                  data-nav-item
+                  type="button"
+                  class="inline-flex items-center px-3 py-1 rounded-[10px] bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] text-xs font-medium text-[#cbd5e1] hover:text-white transition-all cursor-pointer"
+                  onclick={() => onSelectGenre(genre)}
+                  title="Фильтровать по жанру {genre}"
+                >
+                  <span>{genre}</span>
+                </button>
+              {/each}
+            </div>
           </div>
         {/if}
       {/snippet}
 
-      {#snippet gameInfoCard()}
-        <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
+      {#snippet gameSpecsCard()}
+        <div class="space-y-3 text-xs">
           <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
             <Monitor class="w-3.5 h-3.5 text-[#8e95a2]" />
-            <span>Сведения об игре</span>
+            <span>Спецификации и сведения</span>
           </h4>
           <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
-            <div class="flex items-center justify-between py-2">
+            <div class="flex items-center justify-between py-2.5">
               <span class="text-[#8e95a2]">Платформа</span>
               <span class="text-white font-medium flex items-center gap-1.5">
                 <Gamepad2 class="w-3.5 h-3.5 text-[#8e95a2]" />
@@ -2759,47 +2779,7 @@
               </span>
             </div>
 
-            {#if g.releaseDate}
-              <div class="flex items-center justify-between py-2">
-                <span class="text-[#8e95a2]">Дата выхода</span>
-                <span class="text-white font-medium flex items-center gap-1.5">
-                  <Calendar class="w-3.5 h-3.5 text-[#8e95a2]" />
-                  <span>{g.releaseDate}</span>
-                </span>
-              </div>
-            {/if}
-
-            {#if g.developers && g.developers.length > 0}
-              <div class="flex items-center justify-between py-2 gap-3">
-                <span class="text-[#8e95a2] flex-shrink-0">Разработчик</span>
-                <span class="text-white font-medium truncate max-w-[220px] text-right" title={g.developers.join(', ')}>
-                  {g.developers.join(', ')}
-                </span>
-              </div>
-            {/if}
-
-            {#if g.publishers && g.publishers.length > 0}
-              <div class="flex items-center justify-between py-2 gap-3">
-                <span class="text-[#8e95a2] flex-shrink-0">Издатель</span>
-                <span class="text-white font-medium truncate max-w-[220px] text-right" title={g.publishers.join(', ')}>
-                  {g.publishers.join(', ')}
-                </span>
-              </div>
-            {/if}
-
-            {#if downloadSourceInfo}
-              <div class="flex items-center justify-between py-2 gap-3">
-                <span class="text-[#8e95a2] flex-shrink-0">Источник</span>
-                <span
-                  class="font-medium text-right truncate max-w-[230px] {downloadSourceInfo.type === 'torrent' ? 'text-sky-400' : 'text-emerald-400'}"
-                  title={downloadSourceInfo.name}
-                >
-                  {downloadSourceInfo.name}
-                </span>
-              </div>
-            {/if}
-
-            <div class="flex items-center justify-between py-2 gap-3">
+            <div class="flex items-center justify-between py-2.5 gap-3">
               <span class="text-[#8e95a2] flex-shrink-0">Управление</span>
               <span class="text-white font-medium flex items-center gap-1.5 whitespace-nowrap">
                 {#if g.controllerSupport === 'full'}
@@ -2812,102 +2792,53 @@
               </span>
             </div>
 
-            <div class="flex items-center justify-between py-2 gap-2">
-              <span class="text-[#8e95a2] flex-shrink-0 whitespace-nowrap">Steam AppID</span>
-              <div class="flex items-center gap-1.5 flex-shrink-0">
-                {#if g.steamAppId > 0}
+            <div class="flex items-center justify-between py-2.5">
+              <span class="text-[#8e95a2]">Формат релиза</span>
+              <span class="text-white">{g.isDirectory ? 'Папка с файлами' : 'Архив'}</span>
+            </div>
+
+            {#if g.remotePath}
+              <div class="flex items-center justify-between py-2.5 gap-3">
+                <span class="text-[#8e95a2] flex-shrink-0">Путь на сервере</span>
+                <div class="flex items-center gap-1.5 min-w-0 justify-end">
+                  <span class="font-mono text-white text-xs truncate max-w-[200px] select-all text-right" title={g.remotePath}>{g.remotePath}</span>
                   <button
-                    data-nav-item
                     type="button"
-                    class="h-7 px-2.5 rounded-sm bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 transition-colors cursor-pointer text-xs whitespace-nowrap inline-flex items-center gap-1.5"
-                    onclick={handleOpenSteamStore}
-                    title="Открыть страницу игры в магазине Steam"
+                    class="p-1 rounded hover:bg-white/10 text-[#8e95a2] hover:text-white transition-colors flex-shrink-0 cursor-pointer"
+                    onclick={() => copyText(g.remotePath, 'Путь скопирован')}
+                    title="Скопировать путь"
                   >
-                    <SteamLogo size={13} weight="bold" class="flex-shrink-0" />
-                    <span>В Steam</span>
-                    <ExternalLink class="w-3 h-3 text-sky-400/80 flex-shrink-0" />
+                    <Copy class="w-3.5 h-3.5" />
                   </button>
-                {/if}
-                <button
-                  data-nav-item
-                  type="button"
-                  class="h-7 px-2.5 rounded-sm bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/15 text-[#cbd5e1] hover:text-white transition-colors cursor-pointer text-xs whitespace-nowrap inline-flex items-center gap-1.5"
-                  onclick={() => openSteamModal(g)}
-                  title="Найти в Steam / Изменить метаданные"
-                >
-                  <span class="font-mono">{g.steamAppId > 0 ? g.steamAppId : (g.steamAppId < 0 ? `SGDB: ${-g.steamAppId}` : 'Привязать')}</span>
-                  <Edit3 class="w-3 h-3 text-[#8e95a2] flex-shrink-0" />
-                </button>
+                </div>
               </div>
+            {/if}
+
+            <div class="flex items-center justify-between py-2.5 gap-2">
+              <span class="text-[#8e95a2] flex-shrink-0 whitespace-nowrap">Steam AppID</span>
+              <button
+                data-nav-item
+                type="button"
+                class="h-7 px-2.5 rounded-[8px] bg-white/[0.04] hover:bg-white/[0.08] text-[#cbd5e1] hover:text-white transition-colors cursor-pointer text-xs whitespace-nowrap inline-flex items-center gap-1.5"
+                onclick={() => openSteamModal(g)}
+                title="Найти в Steam / Изменить метаданные"
+              >
+                <span class="font-mono">{g.steamAppId > 0 ? g.steamAppId : (g.steamAppId < 0 ? `SGDB: ${-g.steamAppId}` : 'Привязать')}</span>
+                <Edit3 class="w-3 h-3 text-[#8e95a2] flex-shrink-0" />
+              </button>
             </div>
           </div>
         </div>
       {/snippet}
 
       {#snippet requirementsCard()}
-        <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-3.5 text-xs">
+        <div class="space-y-2.5 text-xs">
           <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
             <Cpu class="w-3.5 h-3.5 text-[#8e95a2]" />
             <span>Системные требования</span>
           </h4>
-          <div class="steam-html-content text-xs text-[#9ca3af] leading-relaxed">
+          <div class="steam-html-content text-xs text-[#9ca3af] leading-relaxed [&_ul]:my-2 [&_ul]:pl-4 [&_li]:mb-1 [&_strong]:text-white/90 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:text-white/90">
             {@html g.pcRequirements}
-          </div>
-        </div>
-      {/snippet}
-
-      {#snippet specsCard()}
-        <div class="space-y-5">
-          <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
-            <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
-              <Server class="w-3.5 h-3.5 text-[#8e95a2]" />
-              <span>Хранилище репозитория</span>
-            </h4>
-            <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
-              {#if (activeVariant?.rawName || g.rawName)}
-                <div class="flex items-center justify-between py-2 gap-3">
-                  <span class="text-[#8e95a2] flex-shrink-0">Оригинальный релиз</span>
-                  <span class="font-mono text-white truncate max-w-[240px] select-all text-right" title={activeVariant?.rawName || g.rawName}>
-                    {activeVariant?.rawName || g.rawName}
-                  </span>
-                </div>
-              {/if}
-              <div class="flex items-center justify-between py-2 gap-3">
-                <span class="text-[#8e95a2] flex-shrink-0">Путь на сервере</span>
-                <span class="font-mono text-white truncate max-w-[240px] select-all text-right" title={g.remotePath}>{g.remotePath}</span>
-              </div>
-              <div class="flex items-center justify-between py-2">
-                <span class="text-[#8e95a2]">Общий размер данных</span>
-                <span class="font-bold text-white font-mono">{g.sizeDisplay || '—'}</span>
-              </div>
-              <div class="flex items-center justify-between py-2">
-                <span class="text-[#8e95a2]">Формат релиза</span>
-                <span class="text-white">{g.isDirectory ? 'Папка с файлами' : 'Архив'}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-3 text-xs">
-            <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
-              <Folder class="w-3.5 h-3.5 text-[#8e95a2]" />
-              <span>Локальная конфигурация</span>
-            </h4>
-            <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
-              <div class="flex items-center justify-between py-2 gap-3">
-                <span class="text-[#8e95a2] flex-shrink-0">Директория сохранения</span>
-                <span class="font-mono text-white truncate max-w-[240px] text-right" title={customDownloadPath}>{customDownloadPath}</span>
-              </div>
-              <div class="flex items-center justify-between py-2">
-                <span class="text-[#8e95a2]">Статус установки</span>
-                <span class="font-semibold {pageDetails?.isInstalled ? 'text-emerald-400' : 'text-[#8e95a2]'}">
-                  {pageDetails?.isInstalled ? 'Установлено' : 'Не установлено'}
-                </span>
-              </div>
-              <div class="flex items-center justify-between py-2">
-                <span class="text-[#8e95a2]">Поддержка контроллера</span>
-                <span class="font-medium text-[#cbd5e1]">{g.controllerSupport === 'full' ? 'Полная (XInput/DirectInput)' : 'Клавиатура / Мышь'}</span>
-              </div>
-            </div>
           </div>
         </div>
       {/snippet}
@@ -2916,28 +2847,28 @@
         {#if g.steamAppId && g.steamAppId > 0}
           <div class="space-y-4 pt-2">
             <!-- Section Header -->
-            <div class="flex items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
-              <div class="flex items-center gap-2.5">
-                <ChatText class="w-4 h-4 text-[#66c0f4]" />
-                <h3 class="text-sm font-bold text-white uppercase tracking-wider">Отзывы сообщества Steam</h3>
+            <div class="flex items-center justify-between gap-3 pb-1">
+              <div class="flex items-center gap-2">
+                <ChatText class="w-4 h-4 text-sky-400" />
+                <h3 class="text-xs font-bold text-white uppercase tracking-wider">Отзывы сообщества Steam</h3>
                 {#if steamReviewsTotal > 0}
-                  <span class="text-xs text-[#8e95a2] font-mono">({formatReviewsCount(steamReviewsTotal)})</span>
+                  <span class="text-xs text-white/40 font-mono">({formatReviewsCount(steamReviewsTotal)})</span>
                 {/if}
               </div>
 
               <div class="flex items-center gap-2">
                 <!-- Language Selector -->
-                <div class="inline-flex rounded bg-[#0d1117] border border-white/10 p-0.5 text-[11px]">
+                <div class="inline-flex rounded-[12px] bg-white/[0.03] p-0.5 text-[11px]">
                   <button
                     type="button"
-                    class="px-2.5 py-1 rounded transition-colors cursor-pointer font-medium {reviewLanguage === 'russian' ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:text-white'}"
+                    class="px-2.5 py-1 rounded-[10px] transition-colors cursor-pointer text-xs {reviewLanguage === 'russian' ? 'bg-white/[0.08] text-white font-medium' : 'text-white/50 hover:text-white'}"
                     onclick={() => handleLanguageChange('russian')}
                   >
                     Русские
                   </button>
                   <button
                     type="button"
-                    class="px-2.5 py-1 rounded transition-colors cursor-pointer font-medium {reviewLanguage === 'all' ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:text-white'}"
+                    class="px-2.5 py-1 rounded-[10px] transition-colors cursor-pointer text-xs {reviewLanguage === 'all' ? 'bg-white/[0.08] text-white font-medium' : 'text-white/50 hover:text-white'}"
                     onclick={() => handleLanguageChange('all')}
                   >
                     Все языки
@@ -2948,7 +2879,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="hidden sm:inline-flex items-center gap-1.5 text-xs text-[#8e95a2] hover:text-[#66c0f4] px-2.5 py-1 rounded bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] transition-colors cursor-pointer"
+                  class="hidden sm:inline-flex items-center gap-1.5 text-xs text-white/70 hover:text-white px-3 py-1.5 rounded-[12px] bg-white/[0.03] hover:bg-white/[0.07] transition-all cursor-pointer"
                   onclick={handleOpenSteamStore}
                   title="Открыть страницу игры в магазине Steam"
                 >
@@ -2964,21 +2895,21 @@
               <!-- Loading skeletons -->
               <div class="space-y-3">
                 {#each [1, 2, 3] as _}
-                  <div class="p-4 rounded bg-[#0d1117]/80 border border-white/[0.06] space-y-3 animate-pulse">
+                  <div class="py-3.5 space-y-2 border-b border-white/[0.04] animate-pulse">
                     <div class="flex items-center justify-between">
-                      <div class="h-5 w-28 bg-white/10 rounded"></div>
-                      <div class="h-4 w-20 bg-white/10 rounded"></div>
+                      <div class="h-4 w-28 bg-white/10 rounded-[6px]"></div>
+                      <div class="h-3.5 w-20 bg-white/10 rounded-[6px]"></div>
                     </div>
                     <div class="space-y-1.5">
-                      <div class="h-3.5 w-full bg-white/5 rounded"></div>
-                      <div class="h-3.5 w-4/5 bg-white/5 rounded"></div>
-                      <div class="h-3.5 w-2/3 bg-white/5 rounded"></div>
+                      <div class="h-3 w-full bg-white/5 rounded-[4px]"></div>
+                      <div class="h-3 w-4/5 bg-white/5 rounded-[4px]"></div>
+                      <div class="h-3 w-2/3 bg-white/5 rounded-[4px]"></div>
                     </div>
                   </div>
                 {/each}
               </div>
             {:else if steamReviews.length === 0}
-              <div class="p-6 rounded bg-[#0d1117]/60 border border-white/[0.06] text-center text-xs text-[#8e95a2] space-y-1.5">
+              <div class="py-6 text-center text-xs text-[#8e95a2] space-y-1.5">
                 <p>Отзывов не найдено{reviewLanguage === 'russian' ? ' на русском языке' : ''}.</p>
                 {#if reviewLanguage === 'russian'}
                   <button
@@ -2991,39 +2922,39 @@
                 {/if}
               </div>
             {:else}
-              <div class="space-y-3">
+              <div class="divide-y divide-white/[0.04]">
                 {#each steamReviews as rev (rev.id)}
                   {@const isExpanded = !!expandedReviewIds[rev.id]}
                   {@const isLong = rev.review.length > 340 || rev.review.split('\n').length > 5}
                   
-                  <div class="p-4 rounded bg-[#0d1117] border border-white/[0.07] hover:border-white/15 transition-colors space-y-3">
+                  <div class="py-3.5 space-y-2.5">
                     <!-- Top Row: Recommendation + Playtime + Date -->
                     <div class="flex flex-wrap items-center justify-between gap-2">
                       <div class="flex flex-wrap items-center gap-2">
                         {#if rev.votedUp}
-                          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#66c0f4]/10 border border-[#66c0f4]/30 text-[#66c0f4] text-xs font-bold">
+                          <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[8px] bg-sky-500/15 text-sky-400 text-xs font-medium">
                             <ThumbsUp class="w-3.5 h-3.5" weight="fill" />
                             <span>Рекомендую</span>
                           </div>
                         {:else}
-                          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-bold">
+                          <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[8px] bg-rose-500/15 text-rose-400 text-xs font-medium">
                             <ThumbsDown class="w-3.5 h-3.5" weight="fill" />
                             <span>Не рекомендую</span>
                           </div>
                         {/if}
 
-                        <span class="text-xs text-[#cbd5e1] font-medium font-mono">
+                        <span class="text-xs text-white/70 font-medium font-mono">
                           {rev.playtimeHours} в игре
                         </span>
 
                         {#if rev.playtimeAtReview}
-                          <span class="text-[11px] text-[#64748b] hidden sm:inline">
+                          <span class="text-[11px] text-white/40 hidden sm:inline">
                             ({rev.playtimeAtReview} на момент отзыва)
                           </span>
                         {/if}
                       </div>
 
-                      <div class="text-[11px] text-[#64748b]">
+                      <div class="text-[11px] text-white/40">
                         {formatReviewDate(rev.timestampCreated)}
                       </div>
                     </div>
@@ -3031,22 +2962,22 @@
                     <!-- Review Text (anonymized, formatted BBCode) -->
                     <div class="relative">
                       <div
-                        class="text-xs text-[#cbd5e1] leading-relaxed break-words {isLong && !isExpanded ? 'max-h-28 overflow-hidden' : ''}"
+                        class="text-xs text-white/[0.88] leading-relaxed break-words font-light {isLong && !isExpanded ? 'max-h-28 overflow-hidden' : ''}"
                       >
                         {@html formatSteamReviewBBCode(rev.review)}
                       </div>
 
                       {#if isLong && !isExpanded}
-                        <div class="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#0d1117] to-transparent pointer-events-none"></div>
+                        <div class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[#07080a] to-transparent pointer-events-none"></div>
                       {/if}
                     </div>
 
                     <!-- Bottom Row: Helpful votes count & Expand button -->
-                    <div class="flex items-center justify-between gap-2 pt-1 border-t border-white/[0.04] text-[11px] text-[#8e95a2]">
+                    <div class="flex items-center justify-between gap-2 pt-1 text-[11px] text-white/50">
                       <div class="flex items-center gap-3">
                         {#if rev.votesUp > 0}
                           <span class="inline-flex items-center gap-1">
-                            <ThumbsUp class="w-3 h-3 text-[#8e95a2]" />
+                            <ThumbsUp class="w-3 h-3 text-white/40" />
                             <span>{rev.votesUp} посчитали полезным</span>
                           </span>
                         {/if}
@@ -3058,7 +2989,7 @@
                       {#if isLong}
                         <button
                           type="button"
-                          class="text-xs font-semibold text-[#8e95a2] hover:text-white transition-colors cursor-pointer hover:underline"
+                          class="text-xs font-normal text-white/60 hover:text-white transition-colors cursor-pointer"
                           onclick={() => toggleReviewExpand(rev.id)}
                         >
                           {isExpanded ? 'Свернуть' : 'Читать полностью'}
@@ -3076,11 +3007,11 @@
                     data-nav-item
                     type="button"
                     disabled={isLoadingMoreReviews}
-                    class="px-5 py-2.5 rounded bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 text-xs font-bold text-[#cbd5e1] hover:text-white transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
+                    class="px-5 py-2.5 rounded-[14px] bg-white/[0.03] hover:bg-white/[0.07] text-xs font-medium text-white/80 hover:text-white transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
                     onclick={() => loadSteamReviews(false)}
                   >
                     {#if isLoadingMoreReviews}
-                      <RefreshCw class="w-3.5 h-3.5 animate-spin text-[#66c0f4]" />
+                      <RefreshCw class="w-3.5 h-3.5 animate-spin text-sky-400" />
                       <span>Загрузка отзывов...</span>
                     {:else}
                       <ChevronDown class="w-3.5 h-3.5" />
@@ -3094,121 +3025,26 @@
         {/if}
       {/snippet}
 
-      <!-- BOTTOM SECTION: Content Area (Tabs on small screens, 2-column on wide screens) -->
-      <div class="space-y-6 pt-4">
+      <!-- BOTTOM SECTION: Content Area: 2-Column Responsive Side-by-Side Layout on all screens -->
+      <div class="space-y-4 pt-1">
         
         {#if hasSteamMetadata}
-          <!-- Navigation Tabs: Visible only on smaller screens (<xl) -->
-          <div class="xl:hidden w-full border-b border-white/[0.08] flex items-center gap-2 sm:gap-6 overflow-x-auto no-scrollbar">
-            <button
-              data-nav-item
-              class="relative py-3.5 px-1 text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer flex-shrink-0 {activeTab === 'description' ? 'text-white' : 'text-[#8e95a2] hover:text-[#d1d5db]'}"
-              onclick={() => (activeTab = 'description')}
-            >
-              <span>Описание</span>
-              {#if activeTab === 'description'}
-                <span
-                  class="absolute bottom-0 left-0 right-0 h-[2px] rounded-full transition-all duration-300"
-                  style="background-color: var(--game-accent);"
-                ></span>
-              {/if}
-            </button>
-
-            <button
-              data-nav-item
-              class="relative py-3.5 px-1 text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer flex-shrink-0 {activeTab === 'info' ? 'text-white' : 'text-[#8e95a2] hover:text-[#d1d5db]'}"
-              onclick={() => (activeTab = 'info')}
-            >
-              <span>Об игре</span>
-              {#if activeTab === 'info'}
-                <span
-                  class="absolute bottom-0 left-0 right-0 h-[2px] rounded-full transition-all duration-300"
-                  style="background-color: var(--game-accent);"
-                ></span>
-              {/if}
-            </button>
-
-            {#if g.pcRequirements}
-              <button
-                data-nav-item
-                class="relative py-3.5 px-1 text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer flex-shrink-0 {activeTab === 'requirements' ? 'text-white' : 'text-[#8e95a2] hover:text-[#d1d5db]'}"
-                onclick={() => (activeTab = 'requirements')}
-              >
-                <span>Системные требования</span>
-                {#if activeTab === 'requirements'}
-                  <span
-                    class="absolute bottom-0 left-0 right-0 h-[2px] rounded-full transition-all duration-300"
-                    style="background-color: var(--game-accent);"
-                  ></span>
-                {/if}
-              </button>
-            {/if}
-
-            <button
-              data-nav-item
-              class="relative py-3.5 px-1 text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer flex-shrink-0 {activeTab === 'specs' ? 'text-white' : 'text-[#8e95a2] hover:text-[#d1d5db]'}"
-              onclick={() => (activeTab = 'specs')}
-            >
-              <span>Спецификации релиза</span>
-              {#if activeTab === 'specs'}
-                <span
-                  class="absolute bottom-0 left-0 right-0 h-[2px] rounded-full transition-all duration-300"
-                  style="background-color: var(--game-accent);"
-                ></span>
-              {/if}
-            </button>
-
-            {#if g.steamAppId && g.steamAppId > 0}
-              <button
-                data-nav-item
-                class="relative py-3.5 px-1 text-xs font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer flex-shrink-0 {activeTab === 'reviews' ? 'text-white' : 'text-[#8e95a2] hover:text-[#d1d5db]'}"
-                onclick={() => (activeTab = 'reviews')}
-              >
-                <span>Отзывы</span>
-                {#if steamReviewsTotal > 0}
-                  <span class="text-[10px] text-[#8e95a2] font-mono ml-1">({steamReviewsTotal})</span>
-                {/if}
-                {#if activeTab === 'reviews'}
-                  <span
-                    class="absolute bottom-0 left-0 right-0 h-[2px] rounded-full transition-all duration-300"
-                    style="background-color: var(--game-accent);"
-                  ></span>
-                {/if}
-              </button>
-            {/if}
-          </div>
-
-          <!-- Small screens view (<xl): Tab-switched -->
-          <div class="xl:hidden space-y-5">
-            {#if activeTab === 'description'}
-              {@render mediaAndDescription()}
-            {:else if activeTab === 'info'}
-              <div class="space-y-5">
-                {@render genresAndTagsCard()}
-                {@render gameInfoCard()}
-              </div>
-            {:else if activeTab === 'requirements' && g.pcRequirements}
-              {@render requirementsCard()}
-            {:else if activeTab === 'specs'}
-              {@render specsCard()}
-            {:else if activeTab === 'reviews'}
-              {@render steamReviewsSection()}
-            {/if}
-          </div>
-
-          <!-- Large screens view (>=xl): 2-Column Responsive Side-by-Side Layout -->
-          <div class="hidden xl:grid xl:grid-cols-12 xl:gap-8 xl:items-start">
-            <div class="xl:col-span-7 2xl:col-span-8 space-y-6 min-w-0">
+          <!-- 2-Column Responsive Side-by-Side Layout -->
+          <div class="grid grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-start">
+            <div class="col-span-8 2xl:col-span-8 space-y-4 min-w-0">
               {@render mediaAndDescription()}
               {@render steamReviewsSection()}
             </div>
-            <div class="xl:col-span-5 2xl:col-span-4 space-y-5 min-w-0">
-              {@render genresAndTagsCard()}
-              {@render gameInfoCard()}
+            <div class="col-span-4 2xl:col-span-4 p-4 sm:p-5 rounded-[16px] bg-white/[0.03] space-y-4 min-w-0">
+              {#if g.genres && g.genres.length > 0}
+                {@render genresCard()}
+                <div class="h-px bg-white/[0.04]"></div>
+              {/if}
+              {@render gameSpecsCard()}
               {#if g.pcRequirements}
+                <div class="h-px bg-white/[0.04]"></div>
                 {@render requirementsCard()}
               {/if}
-              {@render specsCard()}
             </div>
           </div>
 
@@ -3217,10 +3053,10 @@
           {@const btih = extractBtih(activeVariant?.magnetUri || g.magnetUri || g.remotePath)}
           {@const isTorrent = (activeVariant?.sourceType || g.sourceType) === 'torrent' || !!(activeVariant?.magnetUri || g.magnetUri || btih)}
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="grid grid-cols-2 gap-4 sm:gap-5">
             
             <!-- CARD 1: Release Specifications -->
-            <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-4 text-xs">
+            <div class="space-y-3 text-xs">
               <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
                 <Server class="w-3.5 h-3.5 text-[#8e95a2]" />
                 <span>Сведения о релизе</span>
@@ -3229,7 +3065,7 @@
               <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
                 
                 <!-- Source -->
-                <div class="flex items-center justify-between py-2.5">
+                <div class="flex items-center justify-between py-2">
                   <span class="text-[#8e95a2]">Источник</span>
                   <span class="font-medium text-white flex items-center gap-1.5">
                     <HardDrive class="w-3.5 h-3.5 text-[#8e95a2]" />
@@ -3238,7 +3074,7 @@
                 </div>
 
                 <!-- Raw Release Name -->
-                <div class="py-2.5 space-y-1.5">
+                <div class="py-2 space-y-1.5">
                   <div class="flex items-center justify-between">
                     <span class="text-[#8e95a2]">Оригинальный релиз</span>
                     <button
@@ -3251,26 +3087,26 @@
                       <span>Копировать</span>
                     </button>
                   </div>
-                  <div class="font-mono text-white text-[11px] bg-black/40 border border-white/5 rounded p-2.5 break-words select-all leading-relaxed">
+                  <div class="font-mono text-white text-[11px] bg-black/40 rounded-[12px] p-3 break-words select-all leading-relaxed">
                     {activeVariant?.rawName || g.rawName || getDisplayTitle(g)}
                   </div>
                 </div>
 
                 <!-- Size -->
-                <div class="flex items-center justify-between py-2.5">
+                <div class="flex items-center justify-between py-2">
                   <span class="text-[#8e95a2]">Размер данных</span>
                   <span class="font-bold text-white font-mono">{activeVariant?.sizeDisplay || formatSizeDisplay(g) || '—'}</span>
                 </div>
 
                 <!-- Protocol / Hash / Path -->
                 {#if isTorrent}
-                  <div class="flex items-center justify-between py-2.5">
+                  <div class="flex items-center justify-between py-2">
                     <span class="text-[#8e95a2]">Тип передачи</span>
                     <span class="text-[#cbd5e1] font-mono">BitTorrent (P2P)</span>
                   </div>
 
                   {#if btih}
-                    <div class="flex items-center justify-between py-2.5 gap-3">
+                    <div class="flex items-center justify-between py-2 gap-3">
                       <span class="text-[#8e95a2] flex-shrink-0">Хэш (BTIH)</span>
                       <div class="flex items-center gap-2 min-w-0">
                         <span class="font-mono text-white text-[11px] truncate select-all" title={btih}>
@@ -3278,7 +3114,7 @@
                         </span>
                         <button
                           type="button"
-                          class="p-1 rounded hover:bg-white/10 text-[#8e95a2] hover:text-white transition-colors flex-shrink-0 cursor-pointer"
+                          class="p-1.5 rounded-[8px] hover:bg-white/10 text-[#8e95a2] hover:text-white transition-colors flex-shrink-0 cursor-pointer"
                           onclick={() => copyText(activeVariant?.magnetUri || g.magnetUri || `magnet:?xt=urn:btih:${btih}`, 'Magnet-ссылка скопирована')}
                           title="Скопировать magnet-ссылку"
                         >
@@ -3288,11 +3124,11 @@
                     </div>
                   {/if}
                 {:else}
-                  <div class="flex items-center justify-between py-2.5 gap-3">
+                  <div class="flex items-center justify-between py-2 gap-3">
                     <span class="text-[#8e95a2] flex-shrink-0">Путь на сервере</span>
                     <span class="font-mono text-white truncate max-w-[240px] select-all text-right" title={g.remotePath}>{g.remotePath || '—'}</span>
                   </div>
-                  <div class="flex items-center justify-between py-2.5">
+                  <div class="flex items-center justify-between py-2">
                     <span class="text-[#8e95a2]">Формат</span>
                     <span class="text-white">{g.isDirectory ? 'Папка с файлами' : 'Архив'}</span>
                   </div>
@@ -3302,8 +3138,8 @@
             </div>
 
             <!-- CARD 2: Save Settings & Steam Binding -->
-            <div class="p-5 rounded bg-[#07080a] border border-white/[0.06] space-y-4 text-xs flex flex-col justify-between">
-              <div class="space-y-4">
+            <div class="space-y-3 text-xs flex flex-col justify-between">
+              <div class="space-y-3">
                 <h4 class="font-bold uppercase text-[#8e95a2] flex items-center gap-2 text-[11px] tracking-wider">
                   <Folder class="w-3.5 h-3.5 text-[#8e95a2]" />
                   <span>Параметры сохранения и интеграции</span>
@@ -3312,7 +3148,7 @@
                 <div class="divide-y divide-white/[0.04] text-[#9ca3af]">
                   
                   <!-- Download Destination -->
-                  <div class="flex items-center justify-between py-2.5 gap-3">
+                  <div class="flex items-center justify-between py-2 gap-3">
                     <span class="text-[#8e95a2] flex-shrink-0">Папка сохранения</span>
                     <div class="flex items-center gap-2 min-w-0 justify-end">
                       <span class="font-mono text-white truncate max-w-[200px]" title={customDownloadPath}>{customDownloadPath}</span>
@@ -3327,7 +3163,7 @@
                   </div>
 
                   <!-- Install / Ready Status -->
-                  <div class="flex items-center justify-between py-2.5">
+                  <div class="flex items-center justify-between py-2">
                     <span class="text-[#8e95a2]">Статус</span>
                     <span class="font-semibold {pageDetails?.isInstalled ? 'text-emerald-400' : 'text-white'}">
                       {pageDetails?.isInstalled ? 'Установлено' : (isDownloading ? 'Скачивается' : 'Готово к скачиванию')}
@@ -3335,7 +3171,7 @@
                   </div>
 
                   <!-- Steam Metadata Binding -->
-                  <div class="flex items-center justify-between py-2.5 gap-3">
+                  <div class="flex items-center justify-between py-2 gap-3">
                     <span class="text-[#8e95a2]">Метаданные Steam</span>
                     {#if isEnrichingCurrentGame}
                       <span class="inline-flex items-center gap-1.5 text-[#8e95a2] text-xs font-mono">
@@ -3346,7 +3182,7 @@
                       <button
                         data-nav-item
                         type="button"
-                        class="px-3 py-1.5 rounded bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-white border border-white/10 transition-colors flex items-center gap-1.5 cursor-pointer"
+                        class="px-3.5 py-2 rounded-[12px] bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-white transition-colors flex items-center gap-1.5 cursor-pointer"
                         onclick={() => openSteamModal(g)}
                         title="Найти игру в Steam и привязать обложку, скриншоты и описание"
                       >
@@ -3360,7 +3196,7 @@
               </div>
 
               <!-- Subtle Info Note -->
-              <div class="p-3.5 rounded bg-white/[0.02] border border-white/[0.04] text-[11px] text-[#8e95a2] leading-relaxed">
+              <div class="py-2.5 text-[11px] text-[#8e95a2] leading-relaxed">
                 <span class="font-medium text-white/80">Интеграция:</span>
                 Привязка к Steam автоматически добавит официальное описание, постер, скриншоты, жанры, дату релиза и системные требования.
               </div>
@@ -3371,7 +3207,7 @@
 
           <!-- Toast Copy Feedback -->
           {#if copiedTextFeedback}
-            <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded bg-[#11141c] border border-white/15 text-white text-xs font-medium shadow-2xl flex items-center gap-2">
+            <div class="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-[14px] bg-[#11141c] text-white text-xs font-medium flex items-center gap-2">
               <Check class="w-3.5 h-3.5 text-emerald-400" />
               <span>{copiedTextFeedback}</span>
             </div>
@@ -3379,7 +3215,7 @@
 
           <!-- Toast Launch Error Feedback -->
           {#if launchErrorFeedback}
-            <div class="fixed bottom-6 right-6 z-50 px-4 py-2 rounded bg-[#1c1114] border border-rose-500/30 text-rose-200 text-xs font-medium shadow-2xl flex items-center gap-2">
+            <div class="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-[14px] bg-[#1c1114] text-rose-200 text-xs font-medium flex items-center gap-2">
               <X class="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
               <span>{launchErrorFeedback}</span>
             </div>
@@ -3393,9 +3229,9 @@
     <!-- STEAM METADATA MATCHER & APPID EDITOR MODAL -->
     {#if isSteamModalOpen}
       <div data-nav-zone="modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
-        <div class="bg-[#10131a] border border-white/10 rounded-md w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+        <div class="bg-[#10131a] rounded-[20px] w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
           <!-- Modal Header -->
-          <div class="p-5 border-b border-white/[0.08] flex items-center justify-between bg-black/40">
+          <div class="p-5 border-b border-white/[0.06] flex items-center justify-between bg-black/40">
             <div class="space-y-0.5">
               <div class="flex items-center gap-2">
                 <Link2 class="w-4 h-4 text-[var(--game-accent)]" />
@@ -3406,7 +3242,7 @@
 
             <button
               data-nav-item
-              class="text-[#8e95a2] hover:text-white p-1.5 rounded-sm hover:bg-white/5 transition-colors cursor-pointer"
+              class="text-[#8e95a2] hover:text-white p-2 rounded-[10px] hover:bg-white/5 transition-colors cursor-pointer"
               onclick={() => (isSteamModalOpen = false)}
             >
               <X class="w-5 h-5" />
@@ -3426,13 +3262,13 @@
                 class="flex items-center gap-2"
               >
                 <div class="relative flex-1">
-                  <Search class="w-4 h-4 text-[#6b7280] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Search class="w-4 h-4 text-[#6b7280] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     data-nav-item
                     type="text"
                     bind:value={steamSearchTerm}
                     placeholder="Введите название игры..."
-                    class="w-full bg-[#090a0d] text-white text-xs rounded pl-9 pr-4 py-2.5 border border-white/[0.08] focus:border-[var(--game-accent)] focus:outline-none"
+                    class="w-full bg-white/[0.03] text-white text-xs rounded-[12px] pl-10 pr-4 py-2.5 focus:outline-none"
                   />
                 </div>
 
@@ -3440,7 +3276,7 @@
                   data-nav-item
                   type="submit"
                   disabled={isSearchingSteam}
-                  class="px-5 py-2.5 text-xs font-bold text-black rounded cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                  class="px-5 py-2.5 text-xs font-bold text-black rounded-[12px] cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                   style="background-color: var(--game-accent);"
                 >
                   {#if isSearchingSteam}
@@ -3469,7 +3305,7 @@
                   <span>Поиск подходящих игр в Steam...</span>
                 </div>
               {:else if steamCandidates.length === 0}
-                <div class="p-6 rounded bg-black/30 border border-white/[0.05] text-center text-xs text-[#6b7280] space-y-1">
+                <div class="p-6 rounded-[14px] bg-black/30 text-center text-xs text-[#6b7280] space-y-1">
                   <p>Ничего не найдено по данному запросу.</p>
                   <p class="text-[11px] text-[#4b5563]">Попробуйте сократить название или указать AppID вручную ниже.</p>
                 </div>
@@ -3479,12 +3315,12 @@
                     {@const isCurrent = g.steamAppId === candidate.appId}
                     {@const matchPercent = Math.round(candidate.score * 100)}
                     
-                    <div class="p-2.5 rounded bg-black/40 border {isCurrent ? 'border-[var(--game-accent)]' : 'border-white/[0.06] hover:border-white/15'} flex items-center justify-between gap-3 transition-colors">
+                    <div class="p-3 rounded-[14px] {isCurrent ? 'bg-white/[0.08]' : 'bg-black/40 hover:bg-black/60'} flex items-center justify-between gap-3 transition-colors">
                       <div class="flex items-center gap-3 min-w-0">
                         {#if candidate.tinyImage}
-                          <img src={candidate.tinyImage} alt="" class="w-12 h-6 object-cover rounded flex-shrink-0 bg-black" />
+                          <img src={candidate.tinyImage} alt="" class="w-12 h-6 object-cover rounded-[8px] flex-shrink-0 bg-black" />
                         {:else}
-                          <div class="w-12 h-6 rounded bg-white/5 flex items-center justify-center flex-shrink-0">
+                          <div class="w-12 h-6 rounded-[8px] bg-white/5 flex items-center justify-center flex-shrink-0">
                             <Disc class="w-3.5 h-3.5 text-[#6b7280]" />
                           </div>
                         {/if}
@@ -3493,7 +3329,7 @@
                           <div class="flex items-center gap-2">
                             <span class="text-xs font-semibold text-white truncate">{candidate.name}</span>
                             <span
-                              class="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded"
+                              class="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-[6px]"
                               style="color: var(--game-accent); background-color: color-mix(in srgb, var(--game-accent) 15%, transparent);"
                             >
                               {matchPercent}%
@@ -3506,7 +3342,7 @@
                       <button
                         data-nav-item
                         disabled={isSavingSteam || isCurrent}
-                        class="px-3.5 py-1.5 text-xs font-bold rounded cursor-pointer flex items-center gap-1 flex-shrink-0 transition-transform active:scale-95 disabled:opacity-50 {isCurrent ? 'bg-white/10 text-[#9ca3af]' : ''}"
+                        class="px-3.5 py-1.5 text-xs font-bold rounded-[10px] cursor-pointer flex items-center gap-1 flex-shrink-0 transition-transform active:scale-95 disabled:opacity-50 {isCurrent ? 'bg-white/10 text-[#9ca3af]' : ''}"
                         style={isCurrent ? '' : 'background-color: var(--game-accent); color: var(--game-accent-text);'}
                         onclick={() => handleLinkAppId(candidate.appId)}
                       >
@@ -3533,12 +3369,12 @@
                   type="text"
                   bind:value={directAppIdInput}
                   placeholder="Например, 33230 для Assassin's Creed 2"
-                  class="flex-1 bg-[#090a0d] text-white text-xs font-mono rounded px-4 py-2.5 border border-white/[0.08] focus:border-[var(--game-accent)] focus:outline-none"
+                  class="flex-1 bg-white/[0.03] text-white text-xs font-mono rounded-[12px] px-4 py-2.5 border border-white/[0.08] focus:border-[var(--game-accent)] focus:outline-none"
                 />
                 <button
                   data-nav-item
                   disabled={isSavingSteam || !directAppIdInput.trim()}
-                  class="btn-secondary px-4 py-2.5 text-xs font-bold rounded cursor-pointer disabled:opacity-50"
+                  class="btn-secondary px-4 py-2.5 text-xs font-bold rounded-[12px] cursor-pointer disabled:opacity-50"
                   onclick={handleApplyDirectAppId}
                 >
                   Применить AppID
@@ -3566,7 +3402,7 @@
 
             <button
               data-nav-item
-              class="btn-secondary px-5 py-2 rounded text-xs"
+              class="btn-secondary px-5 py-2 rounded-[12px] text-xs"
               onclick={() => (isSteamModalOpen = false)}
             >
               Закрыть

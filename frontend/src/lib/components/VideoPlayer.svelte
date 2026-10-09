@@ -430,7 +430,7 @@
       <button
         type="button"
         data-nav-item
-        class="p-1.5 rounded bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors"
+        class="w-8 h-8 rounded-[10px] flex items-center justify-center bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-all"
         onclick={togglePlay}
         title={isPlaying ? "Пауза" : "Воспроизведение"}
       >
@@ -445,7 +445,7 @@
       <button
         type="button"
         data-nav-item
-        class="p-1.5 rounded bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors"
+        class="w-8 h-8 rounded-[10px] flex items-center justify-center bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-all"
         onclick={toggleMute}
         title={isMuted ? "Включить звук" : "Выключить звук"}
       >
@@ -465,7 +465,7 @@
             max={duration}
             step="0.1"
             value={currentTime}
-            class="w-full h-1 bg-white/20 rounded appearance-none cursor-pointer accent-white"
+            class="w-full h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer accent-white"
             oninput={(e) => {
               const val = parseFloat((e.target as HTMLInputElement).value);
               if (videoElement) videoElement.currentTime = val;
@@ -480,7 +480,7 @@
       <button
         type="button"
         data-nav-item
-        class="p-1.5 rounded bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors"
+        class="w-8 h-8 rounded-[10px] flex items-center justify-center bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-all"
         onclick={handleFullscreen}
         title={isFullscreen ? "Оконный режим (Esc)" : "Во весь экран (F)"}
       >

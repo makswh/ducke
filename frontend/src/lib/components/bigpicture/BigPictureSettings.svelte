@@ -508,7 +508,7 @@
     <nav class="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto">
       <button
         data-nav-item
-        class="w-full flex items-center gap-3.5 px-4 py-3.5 rounded text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'storage' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-3.5 px-4 py-3 rounded-[12px] text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'storage' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           activeCategory = 'storage';
@@ -520,7 +520,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3.5 px-4 py-3.5 rounded text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'server' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-3.5 px-4 py-3 rounded-[12px] text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'server' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           activeCategory = 'server';
@@ -532,7 +532,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3.5 px-4 py-3.5 rounded text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'torrents' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-3.5 px-4 py-3 rounded-[12px] text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'torrents' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           activeCategory = 'torrents';
@@ -541,7 +541,7 @@
         <Magnet class="w-5 h-5 flex-shrink-0 {activeCategory === 'torrents' ? 'text-sky-400' : ''}" />
         <span>Торренты</span>
         {#if (localSettings.torrentSources || []).length > 0}
-          <span class="ml-auto text-xs px-2 py-0.5 rounded-sm bg-white/[0.08] text-[#8e95a2] font-mono">
+          <span class="ml-auto text-xs px-2 py-0.5 rounded-[6px] bg-white/[0.08] text-[#8e95a2] font-mono">
             {(localSettings.torrentSources || []).length}
           </span>
         {/if}
@@ -549,7 +549,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3.5 px-4 py-3.5 rounded text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'downloads' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-3.5 px-4 py-3 rounded-[12px] text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'downloads' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           activeCategory = 'downloads';
@@ -562,7 +562,7 @@
       {#if localSettings.enableLogs}
         <button
           data-nav-item
-          class="w-full flex items-center gap-3.5 px-4 py-3.5 rounded text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'logs' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-[12px] text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'logs' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
           onclick={() => {
             sound.playFocus();
             activeCategory = 'logs';
@@ -572,7 +572,7 @@
           <Terminal class="w-5 h-5 flex-shrink-0 {activeCategory === 'logs' ? 'text-sky-400' : ''}" />
           <span>Логи</span>
           {#if logEntries.length > 0}
-            <span class="ml-auto text-xs px-2 py-0.5 rounded-sm bg-white/[0.08] text-[#8e95a2] font-mono">
+            <span class="ml-auto text-xs px-2 py-0.5 rounded-[6px] bg-white/[0.08] text-[#8e95a2] font-mono">
               {logEntries.length}
             </span>
           {/if}
@@ -581,7 +581,7 @@
 
       <button
         data-nav-item
-        class="w-full flex items-center gap-3.5 px-4 py-3.5 rounded text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'about' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="w-full flex items-center gap-3.5 px-4 py-3 rounded-[12px] text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'about' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           activeCategory = 'about';
@@ -594,7 +594,7 @@
 
     <!-- Save Indicator -->
     {#if saveFeedbackVisible}
-      <div class="m-4 p-3 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold flex items-center justify-center gap-2">
+      <div class="m-4 p-3 rounded-[10px] bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold flex items-center justify-center gap-2">
         <Check class="w-4 h-4" />
         <span>СОХРАНЕНО</span>
       </div>
@@ -615,12 +615,12 @@
         </div>
 
         {#if isLoadingDrives}
-          <div class="p-8 rounded bg-[#0d1017] border border-white/[0.06] flex items-center justify-center gap-3 text-xs font-mono text-[#8e95a2]">
+          <div class="p-8 rounded-[18px] bg-[#0d1017] border border-white/[0.06] flex items-center justify-center gap-3 text-xs font-mono text-[#8e95a2]">
             <RefreshCw class="w-5 h-5 animate-spin text-sky-400" />
             <span>Определение накопителей и свободного места...</span>
           </div>
         {:else if storageDrives.length === 0}
-          <div class="p-6 rounded bg-[#0d1017] border border-white/[0.06] space-y-4">
+          <div class="p-6 rounded-[18px] bg-[#0d1017] border border-white/[0.06] space-y-4">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">
                 <HardDrive class="w-6 h-6 text-sky-400" />
@@ -630,7 +630,7 @@
             </div>
             <button
               data-nav-item
-              class="px-5 py-2.5 rounded bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors"
+              class="px-5 py-2.5 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors"
               onclick={handleBrowseFolder}
             >
               Выбрать другую папку
@@ -644,7 +644,7 @@
               {@const otherBytes = Math.max(0, (drive.usedBytes - drive.duckeBytes))}
               {@const otherPct = Math.min(100 - duckePct, Math.max(0, (otherBytes / total) * 100))}
 
-              <div class="p-6 rounded bg-[#0d1017] border border-white/[0.08] space-y-5">
+              <div class="p-6 rounded-[18px] bg-[#0d1017] border border-white/[0.08] space-y-5">
                 <!-- Header -->
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-3">
@@ -653,7 +653,7 @@
                       <div class="flex items-center gap-2">
                         <span class="text-base font-bold text-white font-mono">{drive.label}</span>
                         {#if drive.isDefault}
-                          <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                          <span class="px-2 py-0.5 rounded-[6px] text-[10px] font-mono font-bold bg-sky-500/20 text-sky-400 border border-sky-500/30">
                             Основной
                           </span>
                         {/if}
@@ -668,7 +668,7 @@
                 </div>
 
                 <!-- Steam Storage Bar -->
-                <div class="w-full h-3 rounded-none bg-[#1e293b] overflow-hidden flex">
+                <div class="w-full h-3 rounded-full bg-[#1e293b] overflow-hidden flex">
                   {#if duckePct > 0}
                     <div class="h-full bg-sky-400 transition-all duration-300" style="width: {duckePct}%;"></div>
                   {/if}
@@ -703,7 +703,7 @@
                   {#if !drive.isDefault}
                     <button
                       data-nav-item
-                      class="px-4 py-2 rounded bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors"
+                      class="px-4 py-2 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors"
                       onclick={() => handleSetDriveAsDefault(drive)}
                     >
                       Сделать основным
@@ -712,7 +712,7 @@
 
                   <button
                     data-nav-item
-                    class="px-4 py-2 rounded bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors"
+                    class="px-4 py-2 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors"
                     onclick={handleBrowseFolder}
                   >
                     Выбрать другую папку
@@ -720,7 +720,7 @@
 
                   <button
                     data-nav-item
-                    class="px-4 py-2 rounded bg-white/5 hover:bg-white/10 focus:ring-1 focus:ring-white focus:outline-none text-[#8e95a2] hover:text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-1.5"
+                    class="px-4 py-2 rounded-[10px] bg-white/5 hover:bg-white/10 focus:ring-1 focus:ring-white focus:outline-none text-[#8e95a2] hover:text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-1.5"
                     onclick={() => {
                       sound.playSelect();
                       onOpenFolder(drive.isDefault ? localSettings.downloadPath : drive.path);
@@ -750,7 +750,7 @@
           <div class="flex items-center gap-3">
             <button
               data-nav-item
-              class="px-4 py-2 rounded bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
+              class="px-4 py-2 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
               onclick={() => {
                 sound.playSelect();
                 onImportFile();
@@ -762,7 +762,7 @@
 
             <button
               data-nav-item
-              class="px-4 py-2 rounded bg-sky-500 hover:bg-sky-400 focus:ring-1 focus:ring-white focus:outline-none text-slate-950 text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-md"
+              class="px-4 py-2 rounded-[10px] bg-sky-500 hover:bg-sky-400 focus:ring-1 focus:ring-white focus:outline-none text-slate-950 text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-md"
               onclick={handleAddServer}
             >
               <Plus class="w-3.5 h-3.5" />
@@ -779,7 +779,7 @@
               {@const isActive = localSettings.activeServer?.id === srv.id}
               <button
                 data-nav-item
-                class="px-4 py-2.5 rounded text-xs font-mono border transition-all cursor-pointer flex items-center gap-2.5 flex-shrink-0 focus:ring-1 focus:ring-white focus:outline-none {isSelected ? 'bg-white/15 border-white/30 text-white font-bold' : 'bg-[#0d1017] border-white/[0.08] text-[#8e95a2] hover:text-white'}"
+                class="px-4 py-2.5 rounded-[12px] text-xs font-mono border transition-all cursor-pointer flex items-center gap-2.5 flex-shrink-0 focus:ring-1 focus:ring-white focus:outline-none {isSelected ? 'bg-white/15 border-white/30 text-white font-bold' : 'bg-[#0d1017] border-white/[0.08] text-[#8e95a2] hover:text-white'}"
                 onclick={() => handleSelectServer(srv.id)}
               >
                 <span>{srv.name || srv.host || 'Сервер'}</span>
@@ -792,19 +792,19 @@
         {/if}
 
         {#if selectedServer}
-          <div class="p-6 rounded bg-[#0d1017] border border-white/[0.08] space-y-5">
+          <div class="p-6 rounded-[18px] bg-[#0d1017] border border-white/[0.08] space-y-5">
             <!-- Active Toggle & Delete -->
             <div class="flex items-center justify-between pb-3 border-b border-white/[0.06]">
               <div>
                 {#if localSettings.activeServer?.id === selectedServer.id}
-                  <div class="flex items-center gap-1.5 px-3 py-1 rounded-sm bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-bold">
+                  <div class="flex items-center gap-1.5 px-3 py-1 rounded-[6px] bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-bold">
                     <CheckCircle2 class="w-3.5 h-3.5" />
                     <span>АКТИВНЫЙ СЕРВЕР</span>
                   </div>
                 {:else}
                   <button
                     data-nav-item
-                    class="px-4 py-1.5 rounded bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 border border-sky-500/30 focus:ring-1 focus:ring-white focus:outline-none text-xs font-mono font-bold cursor-pointer transition-colors"
+                    class="px-4 py-1.5 rounded-[10px] bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 border border-sky-500/30 focus:ring-1 focus:ring-white focus:outline-none text-xs font-mono font-bold cursor-pointer transition-colors"
                     onclick={() => handleMakeServerActive(selectedServer)}
                   >
                     Сделать активным
@@ -815,7 +815,7 @@
               {#if localSettings.savedServers.length > 1}
                 <button
                   data-nav-item
-                  class="px-3 py-1.5 rounded text-xs font-mono text-[#8e95a2] hover:text-rose-400 hover:bg-rose-500/10 focus:ring-1 focus:ring-rose-400 focus:outline-none transition-colors cursor-pointer flex items-center gap-1.5"
+                  class="px-3 py-1.5 rounded-[10px] text-xs font-mono text-[#8e95a2] hover:text-rose-400 hover:bg-rose-500/10 focus:ring-1 focus:ring-rose-400 focus:outline-none transition-colors cursor-pointer flex items-center gap-1.5"
                   onclick={() => handleDeleteServer(selectedServer)}
                 >
                   <Trash2 class="w-3.5 h-3.5" />
@@ -833,7 +833,7 @@
                 bind:value={selectedServer.name}
                 onchange={triggerSave}
                 placeholder="Основной SFTP"
-                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
+                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
               />
             </div>
 
@@ -844,7 +844,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="px-5 py-2 rounded text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {selectedServer.protocol === 'sftp' ? 'bg-sky-500 text-slate-950 font-bold' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
+                  class="px-5 py-2 rounded-[10px] text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {selectedServer.protocol === 'sftp' ? 'bg-sky-500 text-slate-950 font-bold' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
                   onclick={() => {
                     sound.playSelect();
                     if (selectedServer) {
@@ -860,7 +860,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="px-5 py-2 rounded text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {selectedServer.protocol === 'ftp' ? 'bg-sky-500 text-slate-950 font-bold' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
+                  class="px-5 py-2 rounded-[10px] text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {selectedServer.protocol === 'ftp' ? 'bg-sky-500 text-slate-950 font-bold' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
                   onclick={() => {
                     sound.playSelect();
                     if (selectedServer) {
@@ -884,7 +884,7 @@
                 bind:value={selectedServer.host}
                 onchange={triggerSave}
                 placeholder="192.168.1.100"
-                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
+                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
               />
             </div>
 
@@ -896,7 +896,7 @@
                 type="number"
                 bind:value={selectedServer.port}
                 onchange={triggerSave}
-                class="w-32 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
+                class="w-32 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
               />
             </div>
 
@@ -909,7 +909,7 @@
                 bind:value={selectedServer.user}
                 onchange={triggerSave}
                 placeholder="anonymous"
-                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
+                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
               />
             </div>
 
@@ -920,7 +920,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="p-2 rounded-sm text-[#8e95a2] hover:text-white cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
+                  class="p-2 rounded-[8px] text-[#8e95a2] hover:text-white cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
                   onclick={() => (showPassword = !showPassword)}
                   title={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
                 >
@@ -936,7 +936,7 @@
                   bind:value={selectedServer.password}
                   onchange={triggerSave}
                   placeholder="••••••••"
-                  class="w-64 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
+                  class="w-64 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
                 />
               </div>
             </div>
@@ -950,7 +950,7 @@
                 bind:value={selectedServer.remoteDir}
                 onchange={triggerSave}
                 placeholder="/public"
-                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
+                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
               />
             </div>
 
@@ -959,7 +959,7 @@
               <button
                 data-nav-item
                 disabled={isTestingConnection}
-                class="px-5 py-2.5 rounded bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold cursor-pointer flex items-center gap-2.5 transition-colors disabled:opacity-50 focus:ring-1 focus:ring-white focus:outline-none"
+                class="px-5 py-2.5 rounded-[10px] bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold cursor-pointer flex items-center gap-2.5 transition-colors disabled:opacity-50 focus:ring-1 focus:ring-white focus:outline-none"
                 onclick={handleTestConn}
               >
                 {#if isTestingConnection}
@@ -1004,7 +1004,7 @@
           <p class="text-xs text-[#8e95a2] mt-1 font-mono">Ограничения скорости и многопоточность</p>
         </div>
 
-        <div class="p-6 rounded bg-[#0d1017] border border-white/[0.08] space-y-6">
+        <div class="p-6 rounded-[18px] bg-[#0d1017] border border-white/[0.08] space-y-6">
           <!-- Concurrent Files Stepper -->
           <div class="flex items-center justify-between py-2 border-b border-white/[0.06]">
             <div>
@@ -1015,7 +1015,7 @@
             <div class="flex items-center gap-3">
               <button
                 data-nav-item
-                class="w-10 h-10 rounded-sm bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white flex items-center justify-center font-bold text-lg cursor-pointer transition-colors"
+                class="w-10 h-10 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white flex items-center justify-center font-bold text-lg cursor-pointer transition-colors"
                 onclick={() => adjustConcurrent(-1)}
                 title="Уменьшить"
               >
@@ -1024,7 +1024,7 @@
               <span class="w-8 text-center text-lg font-mono font-bold text-sky-400">{localSettings.maxConcurrentFiles || 4}</span>
               <button
                 data-nav-item
-                class="w-10 h-10 rounded-sm bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white flex items-center justify-center font-bold text-lg cursor-pointer transition-colors"
+                class="w-10 h-10 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white flex items-center justify-center font-bold text-lg cursor-pointer transition-colors"
                 onclick={() => adjustConcurrent(1)}
                 title="Увеличить"
               >
@@ -1043,7 +1043,7 @@
             <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
               <button
                 data-nav-item
-                class="py-3 px-3 rounded text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 0 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
+                class="py-3 px-3 rounded-[10px] text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 0 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
                 onclick={() => setSpeedLimit(0)}
               >
                 Без лимита
@@ -1051,7 +1051,7 @@
 
               <button
                 data-nav-item
-                class="py-3 px-3 rounded text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 10240 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
+                class="py-3 px-3 rounded-[10px] text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 10240 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
                 onclick={() => setSpeedLimit(10240)}
               >
                 10 МБ/с
@@ -1059,7 +1059,7 @@
 
               <button
                 data-nav-item
-                class="py-3 px-3 rounded text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 25600 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
+                class="py-3 px-3 rounded-[10px] text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 25600 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
                 onclick={() => setSpeedLimit(25600)}
               >
                 25 МБ/с
@@ -1067,7 +1067,7 @@
 
               <button
                 data-nav-item
-                class="py-3 px-3 rounded text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 51200 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
+                class="py-3 px-3 rounded-[10px] text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 51200 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
                 onclick={() => setSpeedLimit(51200)}
               >
                 50 МБ/с
@@ -1075,7 +1075,7 @@
 
               <button
                 data-nav-item
-                class="py-3 px-3 rounded text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 102400 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
+                class="py-3 px-3 rounded-[10px] text-xs font-mono font-bold cursor-pointer transition-all focus:ring-1 focus:ring-white focus:outline-none {localSettings.maxSpeedKBps === 102400 ? 'bg-sky-500 text-slate-950 shadow-md' : 'bg-white/10 text-[#8e95a2] hover:text-white'}"
                 onclick={() => setSpeedLimit(102400)}
               >
                 100 МБ/с
@@ -1095,7 +1095,7 @@
           <p class="text-xs text-[#8e95a2] mt-1 font-mono">Информация о Ducke и управление приложением</p>
         </div>
 
-        <div class="p-6 rounded bg-[#0d1017] border border-white/[0.08] space-y-4">
+        <div class="p-6 rounded-[18px] bg-[#0d1017] border border-white/[0.08] space-y-4">
           <div class="flex items-center justify-between py-2 border-b border-white/[0.06]">
             <span class="text-sm font-bold text-white font-mono">Приложение</span>
             <span class="text-sm font-mono font-bold text-sky-400">{appInfo.name}</span>
@@ -1115,7 +1115,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-4 py-2 rounded bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-1.5"
+              class="px-4 py-2 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-1.5"
               onclick={() => {
                 sound.playSelect();
                 onOpenConfigFolder();
@@ -1140,7 +1140,7 @@
                 data-nav-item
                 type="button"
                 disabled={isClearingCache}
-                class="px-4 py-2 rounded bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                class="px-4 py-2 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-1.5 disabled:opacity-50"
                 onclick={handleClearCache}
               >
                 <RefreshCw class="w-3.5 h-3.5 {isClearingCache ? 'animate-spin' : ''}" />
@@ -1178,7 +1178,7 @@
           <div class="pt-4 flex items-center gap-4">
             <button
               data-nav-item
-              class="px-5 py-3 rounded bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
+              class="px-5 py-3 rounded-[12px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
               onclick={() => {
                 sound.playSelect();
                 onSwitchToDesktop();
@@ -1190,7 +1190,7 @@
 
             <button
               data-nav-item
-              class="px-5 py-3 rounded bg-rose-500/20 hover:bg-rose-500/30 focus:ring-1 focus:ring-rose-400 focus:outline-none text-rose-300 text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
+              class="px-5 py-3 rounded-[12px] bg-rose-500/20 hover:bg-rose-500/30 focus:ring-1 focus:ring-rose-400 focus:outline-none text-rose-300 text-xs font-mono font-bold flex items-center gap-2 cursor-pointer transition-colors"
               onclick={() => {
                 sound.playBack();
                 onCloseApp();
@@ -1221,7 +1221,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-4 py-2.5 rounded bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-2"
+              class="px-4 py-2.5 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-2"
               onclick={handleClearLogs}
             >
               <X class="w-4 h-4 text-rose-400" />
@@ -1231,7 +1231,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-5 py-2.5 rounded bg-sky-600 hover:bg-sky-500 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-2 shadow-md"
+              class="px-5 py-2.5 rounded-[10px] bg-sky-600 hover:bg-sky-500 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-2 shadow-md"
               onclick={handleExportLogs}
             >
               <Download class="w-4 h-4" />
@@ -1241,7 +1241,7 @@
         </div>
 
         {#if exportMessage}
-          <div class="p-3 rounded bg-sky-500/10 border border-sky-500/30 text-xs font-mono text-sky-300 flex items-center justify-between">
+          <div class="p-3 rounded-[10px] bg-sky-500/10 border border-sky-500/30 text-xs font-mono text-sky-300 flex items-center justify-between">
             <span>{exportMessage}</span>
             <button onclick={() => (exportMessage = null)} class="text-white/40 hover:text-white p-1">
               <X class="w-4 h-4" />
@@ -1250,14 +1250,14 @@
         {/if}
 
         <!-- Filter & Search Controls (Gamepad Navigable) -->
-        <div class="p-3 rounded bg-[#0d1017] border border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
+        <div class="p-3.5 rounded-[14px] bg-[#0d1017] border border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
           <!-- Level Buttons -->
           <div class="flex items-center gap-2">
             {#each ['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG'] as lvl}
               <button
                 data-nav-item
                 type="button"
-                class="px-3.5 py-1.5 rounded-sm text-xs font-mono font-bold uppercase transition-colors cursor-pointer focus:ring-1 focus:ring-white focus:outline-none {selectedLogLevel === lvl ? 'bg-white/20 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/5'}"
+                class="px-3.5 py-1.5 rounded-[8px] text-xs font-mono font-bold uppercase transition-colors cursor-pointer focus:ring-1 focus:ring-white focus:outline-none {selectedLogLevel === lvl ? 'bg-white/20 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/5'}"
                 onclick={() => {
                   sound.playFocus();
                   selectedLogLevel = lvl;
@@ -1276,7 +1276,7 @@
                 type="text"
                 bind:value={logSearchQuery}
                 placeholder="Поиск..."
-                class="w-full bg-[#111622] border border-white/[0.08] px-3 py-1.5 text-xs font-mono text-white rounded placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                class="w-full bg-[#111622] border border-white/[0.08] px-3 py-1.5 text-xs font-mono text-white rounded-[10px] placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-sky-400"
               />
               {#if logSearchQuery}
                 <button
@@ -1292,7 +1292,7 @@
             <button
               data-nav-item
               type="button"
-              class="px-3 py-1.5 rounded border border-white/10 text-xs font-mono transition-colors cursor-pointer focus:ring-1 focus:ring-white focus:outline-none {autoScrollLogs ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-white/5 text-[#8e95a2]'}"
+              class="px-3 py-1.5 rounded-[10px] border border-white/10 text-xs font-mono transition-colors cursor-pointer focus:ring-1 focus:ring-white focus:outline-none {autoScrollLogs ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-white/5 text-[#8e95a2]'}"
               onclick={() => {
                 sound.playSelect();
                 autoScrollLogs = !autoScrollLogs;
@@ -1306,7 +1306,7 @@
         <!-- Terminal Console View -->
         <div
           bind:this={logContainerEl}
-          class="flex-1 min-h-[380px] max-h-[calc(100vh-340px)] overflow-y-auto bg-[#06080c] border border-white/[0.08] rounded p-4 font-mono text-xs select-text space-y-1"
+          class="flex-1 min-h-[380px] max-h-[calc(100vh-340px)] overflow-y-auto bg-[#06080c] border border-white/[0.08] rounded-[14px] p-4 font-mono text-xs select-text space-y-1"
         >
           {#if displayedLogs.length === 0}
             <div class="h-full min-h-[260px] flex flex-col items-center justify-center text-center text-[#64748b]">
@@ -1315,9 +1315,9 @@
             </div>
           {:else}
             {#each displayedLogs as entry (entry.id)}
-              <div class="flex items-start gap-2.5 py-1 px-1.5 rounded-sm hover:bg-white/[0.04] transition-colors leading-relaxed break-all">
+              <div class="flex items-start gap-2.5 py-1 px-1.5 rounded-[6px] hover:bg-white/[0.04] transition-colors leading-relaxed break-all">
                 <span class="text-[#64748b] text-xs flex-shrink-0 select-none">{entry.timestamp}</span>
-                <span class="px-2 py-0.5 rounded-sm text-[10px] font-bold flex-shrink-0 select-none {entry.level === 'ERROR' ? 'bg-rose-500/20 text-rose-300' : entry.level === 'WARN' ? 'bg-amber-500/20 text-amber-300' : entry.level === 'DEBUG' ? 'bg-purple-500/20 text-purple-300' : 'bg-sky-500/20 text-sky-300'}">
+                <span class="px-2 py-0.5 rounded-[6px] text-[10px] font-bold flex-shrink-0 select-none {entry.level === 'ERROR' ? 'bg-rose-500/20 text-rose-300' : entry.level === 'WARN' ? 'bg-amber-500/20 text-amber-300' : entry.level === 'DEBUG' ? 'bg-purple-500/20 text-purple-300' : 'bg-sky-500/20 text-sky-300'}">
                   {entry.level}
                 </span>
                 <span class="text-slate-400 text-xs font-bold flex-shrink-0 select-none">[{entry.source}]</span>

@@ -243,27 +243,39 @@ func (f *FTPClient) Connect(cfg config.ServerConfig) error {
 	f.config = cfg
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 
+	dialer := net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 15 * time.Second,
+	}
+
+	baseOpts := []ftp.DialOption{
+		ftp.DialWithDialer(dialer),
+		ftp.DialWithTimeout(10 * time.Second),
+		ftp.DialWithDisabledEPSV(true),
+		ftp.DialWithTrustPasvIP(false),
+		ftp.DialWithShutTimeout(5 * time.Second),
+	}
+
 	var c *ftp.ServerConn
 	var err error
 
 	// If explicit FTPS port (990) or protocol is ftps, try TLS first
 	if cfg.Port == 990 || strings.ToLower(cfg.Protocol) == "ftps" {
-		c, err = ftp.Dial(addr,
-			ftp.DialWithTimeout(6*time.Second),
-			ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true}),
-		)
+		tlsOpts := append([]ftp.DialOption{ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true})}, baseOpts...)
+		c, err = ftp.Dial(addr, tlsOpts...)
 		if err != nil {
-			c, err = ftp.Dial(addr, ftp.DialWithTimeout(6*time.Second))
+			c, err = ftp.Dial(addr, baseOpts...)
 		}
 	} else {
 		// Standard FTP (port 21 or custom plain FTP port): dial unencrypted first for instant connection
-		c, err = ftp.Dial(addr, ftp.DialWithTimeout(6*time.Second))
+		c, err = ftp.Dial(addr, baseOpts...)
 		if err != nil {
 			// Fallback with quick TLS attempt
-			c, err = ftp.Dial(addr,
-				ftp.DialWithTimeout(3*time.Second),
+			tlsOpts := append([]ftp.DialOption{
+				ftp.DialWithTimeout(4 * time.Second),
 				ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true}),
-			)
+			}, baseOpts...)
+			c, err = ftp.Dial(addr, tlsOpts...)
 		}
 	}
 
@@ -339,6 +351,12 @@ func (f *FTPClient) OpenRead(remoteFilePath string, offset int64) (io.ReadCloser
 		return nil, 0, fmt.Errorf("FTP client not connected")
 	}
 
+	// Query FileSize BEFORE RETR (RFC 959 command sequence compliance)
+	var size int64
+	if sz, err := f.ftpClient.FileSize(remoteFilePath); err == nil && sz > 0 {
+		size = sz
+	}
+
 	var reader *ftp.Response
 	var err error
 
@@ -352,7 +370,6 @@ func (f *FTPClient) OpenRead(remoteFilePath string, offset int64) (io.ReadCloser
 		return nil, 0, fmt.Errorf("FTP retr failed for %s: %w", remoteFilePath, err)
 	}
 
-	size, _ := f.ftpClient.FileSize(remoteFilePath)
 	return reader, size, nil
 }
 

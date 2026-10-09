@@ -14,7 +14,7 @@
 </script>
 
 {#if isVisible}
-  <div class="fixed bottom-4 right-6 z-40 pointer-events-none hidden md:flex items-center gap-3 px-3.5 py-1.5 rounded bg-[#0d0f14] border border-white/10 text-[11px] font-semibold text-[#9ca3af] shadow-2xl transition-all duration-300">
+  <div class="fixed bottom-4 right-6 z-40 pointer-events-none hidden md:flex items-center gap-3.5 px-4 py-2 rounded-[14px] bg-[#0d0f14]/95 backdrop-blur-md border border-white/10 text-[11px] font-semibold text-[#9ca3af] shadow-2xl transition-all duration-300">
     
     <!-- Button A -->
     <div class="flex items-center gap-1.5">
@@ -58,13 +58,13 @@
 
     <!-- Bumpers LB/RB -->
     <div class="flex items-center gap-1.5 border-l border-white/[0.08] pl-2.5">
-      <span class="px-1.5 py-0.5 rounded-sm bg-white/[0.08] border border-white/[0.1] text-white text-[9px] font-bold">LB / RB</span>
+      <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/[0.1] text-white text-[9px] font-bold">LB / RB</span>
       <span class="text-[#cbd5e1]">Вкладки</span>
     </div>
 
     <!-- Triggers LT/RT -->
     <div class="flex items-center gap-1.5 border-l border-white/[0.08] pl-2.5">
-      <span class="px-1.5 py-0.5 rounded-sm bg-white/[0.08] border border-white/[0.1] text-white text-[9px] font-bold">LT / RT</span>
+      <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/[0.1] text-white text-[9px] font-bold">LT / RT</span>
       <span class="text-[#cbd5e1]">Секции</span>
     </div>
 

@@ -326,6 +326,22 @@
   let currentDownload = $derived(downloadsStore.currentDownload);
   let queuedDownloads = $derived(downloadsStore.queuedDownloads);
   let safeDownloadHistory = $derived(downloadsStore.completedHistory);
+  type HistorySort = 'date_desc' | 'date_asc' | 'name' | 'size_desc';
+  let historySort = $state<HistorySort>('date_desc');
+
+  let sortedDownloadHistory = $derived.by(() => {
+    const list = [...safeDownloadHistory];
+    if (historySort === 'date_desc') {
+      list.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+    } else if (historySort === 'date_asc') {
+      list.sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0));
+    } else if (historySort === 'name') {
+      list.sort((a, b) => (a.gameTitle || '').localeCompare(b.gameTitle || ''));
+    } else if (historySort === 'size_desc') {
+      list.sort((a, b) => (b.totalBytes || 0) - (a.totalBytes || 0));
+    }
+    return list;
+  });
   let totalSpeedBytes = $derived(downloadsStore.totalSpeedBytes);
 
   $effect(() => {
@@ -550,7 +566,7 @@
   });
 </script>
 
-<div data-nav-zone="detail" class="flex-1 flex flex-col h-full overflow-y-auto relative select-none bg-[#07080a] text-[#ededed] font-sans">
+<div data-nav-zone="detail" class="flex-1 flex flex-col h-full overflow-y-auto relative select-none bg-gradient-to-b from-[#0F1218] to-[#0B0F1E] text-[#ededed] font-sans">
   
   <!-- Atmospheric Steam Backdrop with dark scrim for crisp typography contrast -->
   {#if activeBackgroundUrl}
@@ -567,9 +583,9 @@
           imageLoadFailed[activeBackgroundUrl] = true;
         }}
       />
-      <!-- Dark Scrim Gradients matching Ducke #07080a base -->
-      <div class="absolute inset-0 bg-gradient-to-b from-[#07080a]/40 via-[#07080a]/75 to-[#07080a]"></div>
-      <div class="absolute inset-0 bg-gradient-to-r from-[#07080a]/80 via-transparent to-[#07080a]/80"></div>
+      <!-- Dark Scrim Gradients matching Ducke sidebar base -->
+      <div class="absolute inset-0 bg-gradient-to-b from-[#0F1218]/40 via-[#0F1218]/75 to-[#0B0F1E]"></div>
+      <div class="absolute inset-0 bg-gradient-to-r from-[#0F1218]/80 via-transparent to-[#0F1218]/80"></div>
     </div>
   {/if}
 
@@ -589,7 +605,7 @@
     <div class="relative z-10 w-full rounded-none bg-[#0d1117] border-b border-white/[0.06] border-t-0 border-x-0 overflow-hidden flex flex-col md:flex-row items-stretch min-h-[160px] sm:min-h-[170px]">
       
       <!-- 1. LEFT GAME BANNER WITH HALF-LIFE STYLE LOGO / TITLE OVERLAY -->
-      <div class="relative w-full md:w-[380px] lg:w-[440px] shrink-0 h-[160px] sm:h-[170px] overflow-hidden bg-[#07080a]">
+      <div class="relative w-full md:w-[380px] lg:w-[440px] shrink-0 h-[160px] sm:h-[170px] overflow-hidden bg-white/[0.025]">
         {#if bannerUrl && !imageLoadFailed[bannerUrl]}
           <img
             src={bannerUrl}
@@ -626,7 +642,7 @@
             {/if}
           </div>
           {#if currentDownload.isTorrent}
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase tracking-wider bg-white/10 text-white border border-white/15 shrink-0">
+            <span class="px-2 py-0.5 rounded-[6px] text-[10px] font-mono font-semibold uppercase tracking-wider bg-white/10 text-white border border-white/15 shrink-0">
               TORRENT
             </span>
           {/if}
@@ -651,7 +667,7 @@
         <div class="relative">
           <button
             type="button"
-            class="w-7 h-7 flex items-center justify-center text-[#8e95a2] hover:text-white transition-colors cursor-pointer"
+            class="w-8 h-8 rounded-[10px] flex items-center justify-center text-[#8e95a2] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
             onclick={() => (isDeckMenuOpen = !isDeckMenuOpen)}
             title="Опции загрузки"
           >
@@ -659,10 +675,10 @@
           </button>
 
           {#if isDeckMenuOpen}
-            <div class="absolute left-0 top-8 z-30 w-48 rounded bg-[#0d1117] border border-white/10 shadow-xl py-1 text-xs font-sans">
+            <div class="absolute left-0 top-9 z-30 w-48 rounded-[14px] bg-[#0d1117] border border-white/10 shadow-2xl py-1.5 text-xs font-sans">
               {#if currentDownload.localPath}
                 <button
-                  class="w-full text-left px-3 py-2 flex items-center gap-2 text-xs text-[#cbd5e1] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+                  class="w-full text-left px-3.5 py-2 flex items-center gap-2 text-xs text-[#cbd5e1] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
                   onclick={() => {
                     isDeckMenuOpen = false;
                     onOpenFolder(currentDownload.localPath);
@@ -673,7 +689,7 @@
                 </button>
               {/if}
               <button
-                class="w-full text-left px-3 py-2 flex items-center gap-2 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                class="w-full text-left px-3.5 py-2 flex items-center gap-2 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                 onclick={() => {
                   isDeckMenuOpen = false;
                   onCancel(currentDownload.downloadId);
@@ -741,13 +757,13 @@
               </button>
 
               {#if isSpeedMenuOpen}
-                <div class="absolute left-0 top-5 z-30 w-48 rounded bg-[#0d1117] border border-white/10 shadow-xl py-1 text-xs font-sans normal-case">
-                  <div class="px-3 py-1 text-[10px] font-mono text-[#8e95a2] uppercase tracking-wider border-b border-white/5">
+                <div class="absolute left-0 top-6 z-30 w-48 rounded-[14px] bg-[#0d1117] border border-white/10 shadow-2xl py-1.5 text-xs font-sans normal-case">
+                  <div class="px-3.5 py-1 text-[10px] font-mono text-[#8e95a2] uppercase tracking-wider border-b border-white/5">
                     Лимит скорости
                   </div>
                   {#each speedPresets as preset}
                     <button
-                      class="w-full text-left px-3 py-1.5 flex items-center justify-between text-xs hover:bg-white/[0.08] transition-colors cursor-pointer {speedLimitKB === preset.value ? 'text-sky-400 font-bold' : 'text-[#cbd5e1]'}"
+                      class="w-full text-left px-3.5 py-1.5 flex items-center justify-between text-xs hover:bg-white/[0.08] transition-colors cursor-pointer {speedLimitKB === preset.value ? 'text-sky-400 font-bold' : 'text-[#cbd5e1]'}"
                       onclick={() => handleSelectSpeedLimit(preset.value)}
                     >
                       <span>{preset.label}</span>
@@ -764,7 +780,7 @@
           <!-- Gear Settings Button -->
           <button
             type="button"
-            class="w-7 h-7 sm:w-8 sm:h-8 rounded bg-white/5 hover:bg-white/10 text-[#8e95a2] hover:text-white border border-white/10 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            class="w-8 h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-[#8e95a2] hover:text-white border border-white/10 flex items-center justify-center transition-colors cursor-pointer shrink-0"
             title="Настройки Ducke"
             onclick={onGoToSettings}
           >
@@ -783,9 +799,9 @@
                 <Download class="w-3 h-3 text-[#8e95a2]" />
               </div>
             </div>
-            <div class="h-1.5 w-full bg-white/[0.06] rounded-none overflow-hidden">
+            <div class="h-2 w-full bg-white/[0.06] rounded-full overflow-hidden">
               <div
-                class="h-full bg-sky-400 rounded-none transition-all duration-300"
+                class="h-full bg-sky-400 rounded-full transition-all duration-300"
                 style="width: {percent}%"
               ></div>
             </div>
@@ -797,9 +813,9 @@
               <span class="text-[#cbd5e1] font-medium">Установка файлов</span>
               <span class="text-xs font-mono text-[#8e95a2]">{percent}%</span>
             </div>
-            <div class="h-1.5 w-full bg-white/[0.06] rounded-none overflow-hidden">
+            <div class="h-2 w-full bg-white/[0.06] rounded-full overflow-hidden">
               <div
-                class="h-full bg-emerald-400 rounded-none transition-all duration-300"
+                class="h-full bg-emerald-400 rounded-full transition-all duration-300"
                 style="width: {percent}%"
               ></div>
             </div>
@@ -839,7 +855,7 @@
           {#if isDownloading || isScanning}
             <button
               type="button"
-              class="w-8 h-8 sm:w-9 sm:h-9 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 flex items-center justify-center rounded transition-colors cursor-pointer shrink-0 font-bold"
+              class="w-9 h-9 sm:w-10 sm:h-10 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 flex items-center justify-center rounded-[12px] transition-colors cursor-pointer shrink-0 font-bold"
               onclick={() => onPause(currentDownload.downloadId)}
               title="Приостановить"
             >
@@ -848,7 +864,7 @@
           {:else}
             <button
               type="button"
-              class="w-8 h-8 sm:w-9 sm:h-9 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 flex items-center justify-center rounded transition-colors cursor-pointer shrink-0 font-bold"
+              class="w-9 h-9 sm:w-10 sm:h-10 bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 flex items-center justify-center rounded-[12px] transition-colors cursor-pointer shrink-0 font-bold"
               onclick={() => onResume(currentDownload.downloadId)}
               title="Возобновить"
             >
@@ -874,7 +890,7 @@
       </div>
       <button
         data-nav-item
-        class="px-3.5 py-1.5 rounded bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 cursor-pointer transition-colors"
+        class="px-4 py-2 rounded-[12px] bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 cursor-pointer transition-colors"
         onclick={onGoToCatalog}
       >
         Каталог игр →
@@ -900,7 +916,7 @@
             {#if downloadingCount > 0}
               <button
                 data-nav-item
-                class="text-xs font-medium text-[#8e95a2] hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded border border-white/10 transition-colors cursor-pointer"
+                class="text-xs font-medium text-[#8e95a2] hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-[10px] border border-white/10 transition-colors cursor-pointer"
                 onclick={onPauseAll}
               >
                 Приостановить всё
@@ -909,7 +925,7 @@
             {#if pausedCount > 0}
               <button
                 data-nav-item
-                class="text-xs font-medium text-[#8e95a2] hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded border border-white/10 transition-colors cursor-pointer"
+                class="text-xs font-medium text-[#8e95a2] hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-[10px] border border-white/10 transition-colors cursor-pointer"
                 onclick={onResumeAll}
               >
                 Возобновить всё
@@ -922,12 +938,12 @@
       {#if queuedDownloads.length === 0}
         <p class="text-xs text-[#64748b] py-1 font-mono">В очереди нет ожидающих загрузок</p>
       {:else}
-        <div class="space-y-1.5">
+        <div class="space-y-2">
           {#each queuedDownloads as qItem (qItem.downloadId)}
             {@const qCover = getGameCover(qItem)}
-            <div class="w-full p-2.5 sm:p-3 rounded bg-[#0d1117] hover:bg-[#11141c] border border-white/[0.06] hover:border-white/15 transition-colors flex items-center justify-between gap-4 group">
-              <div class="flex items-center gap-3 min-w-0 flex-1">
-                <div class="w-20 h-10 rounded-sm bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
+            <div class="w-full p-3 sm:p-3.5 rounded-[16px] bg-[#0d1117] hover:bg-[#11141c] border border-white/[0.06] hover:border-white/15 transition-colors flex items-center justify-between gap-4 group">
+              <div class="flex items-center gap-3.5 min-w-0 flex-1">
+                <div class="w-20 h-10 rounded-[8px] bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
                   {#if qCover && !imageLoadFailed[qCover]}
                     <img
                       src={qCover}
@@ -948,7 +964,7 @@
                   <div class="flex items-center gap-2">
                     <h3 class="text-xs sm:text-[13px] font-medium text-white truncate">{qItem.gameTitle}</h3>
                     {#if qItem.isTorrent}
-                      <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-white/10 text-white border border-white/15 shrink-0">
+                      <span class="px-1.5 py-0.2 rounded-[6px] text-[9px] font-mono font-semibold bg-white/10 text-white border border-white/15 shrink-0">
                         TORRENT
                       </span>
                     {/if}
@@ -962,7 +978,7 @@
               <div class="flex items-center gap-2 flex-shrink-0">
                 <button
                   data-nav-item
-                  class="h-7 px-2.5 rounded bg-white/10 hover:bg-white/15 text-white border border-white/10 flex items-center gap-1.5 text-xs font-medium cursor-pointer transition-colors"
+                  class="h-8 px-3 rounded-[10px] bg-white/10 hover:bg-white/15 text-white border border-white/10 flex items-center gap-1.5 text-xs font-medium cursor-pointer transition-colors"
                   title="Начать сейчас"
                   onclick={() => onResume(qItem.downloadId)}
                 >
@@ -971,7 +987,7 @@
                 </button>
                 <button
                   data-nav-item
-                  class="w-7 h-7 rounded bg-white/5 hover:bg-rose-500/15 text-[#8e95a2] hover:text-rose-400 border border-white/10 flex items-center justify-center cursor-pointer transition-colors"
+                  class="w-8 h-8 rounded-[10px] bg-white/5 hover:bg-rose-500/15 text-[#8e95a2] hover:text-rose-400 border border-white/10 flex items-center justify-center cursor-pointer transition-colors"
                   title="Убрать из очереди"
                   onclick={() => onCancel(qItem.downloadId)}
                 >
@@ -993,10 +1009,22 @@
           ЗАВЕРШЕНО ({safeDownloadHistory.length})
         </h2>
         <div class="flex-1 h-px bg-white/[0.06]"></div>
+        {#if safeDownloadHistory.length > 1}
+          <select
+            data-nav-item
+            bind:value={historySort}
+            class="h-7 bg-[#0F1218] text-[#9ca3af] hover:text-white text-[11px] font-medium px-2 rounded-[8px] border border-white/[0.08] focus:outline-none focus:border-white/20 cursor-pointer transition-colors"
+          >
+            <option value="date_desc">Сначала новые</option>
+            <option value="date_asc">Сначала старые</option>
+            <option value="name">По названию</option>
+            <option value="size_desc">По размеру</option>
+          </select>
+        {/if}
         {#if safeDownloadHistory.length > 0}
           <button
             data-nav-item
-            class="bg-white/5 hover:bg-white/10 text-[#8e95a2] hover:text-white text-xs font-medium px-2.5 py-1 rounded border border-white/10 transition-colors cursor-pointer"
+            class="bg-white/5 hover:bg-white/10 text-[#8e95a2] hover:text-white text-xs font-medium px-3 py-1.5 rounded-[10px] border border-white/10 transition-colors cursor-pointer"
             onclick={onClearCompleted}
           >
             Очистить историю
@@ -1007,13 +1035,13 @@
       {#if safeDownloadHistory.length === 0}
         <p class="text-xs text-[#64748b] py-1 font-mono">Нет завершенных загрузок</p>
       {:else}
-        <div class="space-y-1.5">
-          {#each safeDownloadHistory as record (record.id)}
+        <div class="space-y-2">
+          {#each sortedDownloadHistory as record (record.id)}
             {@const rCover = getRecordCover(record)}
-            <div class="w-full p-2.5 sm:p-3 rounded bg-[#0d1117] hover:bg-[#11141c] border border-white/[0.06] hover:border-white/15 transition-colors flex items-center justify-between gap-4 group">
+            <div class="w-full p-3 sm:p-3.5 rounded-[16px] bg-[#0d1117] hover:bg-[#11141c] border border-white/[0.06] hover:border-white/15 transition-colors flex items-center justify-between gap-4 group">
               
-              <div class="flex items-center gap-3 min-w-0 flex-1">
-                <div class="w-20 h-10 rounded-sm bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
+              <div class="flex items-center gap-3.5 min-w-0 flex-1">
+                <div class="w-20 h-10 rounded-[8px] bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
                   {#if rCover && !imageLoadFailed[rCover]}
                     <img
                       src={rCover}
@@ -1049,7 +1077,7 @@
                   {#if isLinux && installerMap[record.id]}
                     <button
                       data-nav-item
-                      class="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors cursor-pointer"
+                      class="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium px-3 py-1.5 rounded-[10px] flex items-center gap-1.5 transition-colors cursor-pointer"
                       onclick={() => handleLaunchInstaller(installerMap[record.id], record.id)}
                       title="Запустить установку игры (.run)"
                     >
@@ -1061,7 +1089,7 @@
                   {#if record.localPath}
                     <button
                       data-nav-item
-                      class="bg-white/10 hover:bg-white/15 text-white text-xs font-medium px-2.5 py-1 rounded border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
+                      class="bg-white/10 hover:bg-white/15 text-white text-xs font-medium px-3 py-1.5 rounded-[10px] border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
                       onclick={() => onOpenFolder(record.localPath)}
                       title="Открыть папку с файлами"
                     >
@@ -1072,7 +1100,7 @@
                 {:else}
                   <button
                     data-nav-item
-                    class="bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium px-2.5 py-1 rounded flex items-center gap-1 transition-colors cursor-pointer"
+                    class="bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium px-3 py-1.5 rounded-[10px] flex items-center gap-1 transition-colors cursor-pointer"
                     onclick={() => onResume(record.id)}
                   >
                     <RefreshCw class="w-3 h-3" />
@@ -1082,7 +1110,7 @@
 
                 <button
                   data-nav-item
-                  class="p-1.5 text-[#64748b] hover:text-rose-400 hover:bg-white/5 rounded transition-colors cursor-pointer"
+                  class="p-2 text-[#64748b] hover:text-rose-400 hover:bg-white/5 rounded-[8px] transition-colors cursor-pointer"
                   onclick={() => onDeleteRecord(record.id, false)}
                   title="Удалить из истории"
                 >

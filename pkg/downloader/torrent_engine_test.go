@@ -102,3 +102,63 @@ func TestUpdateTaskMetrics_WithWireDelta(t *testing.T) {
 		t.Fatalf("expected EMA smoothed speed %d, got %d", expectedSpeed, task.speedBytesPerSec.Load())
 	}
 }
+
+func TestSanitizeFilename(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    "[DL] Assassin's Creed Black Flag Resynced [P] [RUS + ENG + 11 / ENG + 7] (2026, Action) (1 0 6 + 10 DLC)",
+			expected: "[DL] Assassin's Creed Black Flag Resynced [P] [RUS + ENG + 11 ENG + 7] (2026, Action) (1 0 6 + 10 DLC)",
+		},
+		{
+			input:    "Cyberpunk 2077: Phantom Liberty",
+			expected: "Cyberpunk 2077 Phantom Liberty",
+		},
+		{
+			input:    "Folder With Trailing Space ",
+			expected: "Folder With Trailing Space",
+		},
+		{
+			input:    "Folder With Trailing Dot...",
+			expected: "Folder With Trailing Dot",
+		},
+		{
+			input:    "CON",
+			expected: "_CON",
+		},
+		{
+			input:    "con.txt",
+			expected: "_con.txt",
+		},
+		{
+			input:    "AUX.tar.gz",
+			expected: "_AUX.tar.gz",
+		},
+		{
+			input:    "COM1",
+			expected: "_COM1",
+		},
+		{
+			input:    "",
+			expected: "unnamed",
+		},
+		{
+			input:    "   ...   ",
+			expected: "unnamed",
+		},
+		{
+			input:    "Foo/Bar\\Baz:Qux*Quux?Corge<Grault>Garply|Waldo",
+			expected: "Foo Bar Baz Qux Quux Corge Grault Garply Waldo",
+		},
+	}
+
+	for _, tt := range tests {
+		got := SanitizeFilename(tt.input)
+		if got != tt.expected {
+			t.Errorf("SanitizeFilename(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+

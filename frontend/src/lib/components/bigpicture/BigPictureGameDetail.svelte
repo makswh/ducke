@@ -1753,7 +1753,7 @@
           <button
             data-nav-item
             type="button"
-            class="h-11 px-6 rounded-md bg-white hover:bg-slate-100 text-black font-extrabold text-sm inline-flex items-center gap-2.5 transition-all cursor-pointer shadow-lg shadow-white/5 active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
+            class="h-11 px-6 rounded-[14px] bg-white hover:bg-slate-100 text-black font-extrabold text-sm inline-flex items-center gap-2.5 transition-all cursor-pointer shadow-lg shadow-white/5 active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
             onclick={handlePrimaryAction}
           >
             {#if isCompleted}
@@ -1776,7 +1776,7 @@
           <button
             data-nav-item
             type="button"
-            class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
+            class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
             onclick={openDescriptionModal}
             title="Открыть описание игры [X]"
           >
@@ -1790,7 +1790,7 @@
             <button
               data-nav-item
               type="button"
-              class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
+              class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
               onclick={handleOpenGameFolder}
               title="Открыть папку с игрой"
             >
@@ -1801,7 +1801,7 @@
             <button
               data-nav-item
               type="button"
-              class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
+              class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
               onclick={openDownloadWizard}
               title="Выбрать версию ({activeVariantsList.length} доступно)"
             >
@@ -1815,7 +1815,7 @@
             <button
               data-nav-item
               type="button"
-              class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
+              class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
               onclick={handleOpenSteamStore}
               title="Открыть страницу игры в магазине Steam"
             >
@@ -1830,7 +1830,7 @@
             <button
               data-nav-item
               type="button"
-              class="h-11 px-4 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
+              class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
               onclick={() => enterTheaterMode(0)}
               title="Смотреть во весь экран [↑]"
             >
@@ -1851,7 +1851,7 @@
               bind:this={favoriteDropdownTriggerEl}
               data-nav-item
               type="button"
-              class="h-11 px-3.5 rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-white border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none inline-flex items-center gap-2"
+              class="h-11 px-3.5 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none inline-flex items-center gap-2"
               onclick={() => {
                 isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
               }}
@@ -1864,7 +1864,7 @@
             {#if isFavoriteDropdownOpen}
               <div
                 bind:this={favoriteDropdownContainerEl}
-                class="absolute left-0 bottom-full mb-3 z-50 w-52 rounded-md bg-[#0d1117] border border-white/15 shadow-2xl p-1.5 space-y-1"
+                class="absolute left-0 bottom-full mb-3 z-50 w-52 rounded-[16px] bg-[#0d1117] border border-white/15 shadow-2xl p-1.5 space-y-1"
               >
                 <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#64748b]">
                   Статус игры
@@ -1872,7 +1872,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'planned' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'planned' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                   onclick={() => handleToggleFavoriteStatus('planned')}
                 >
                   <span>В планах</span>
@@ -1884,7 +1884,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                   onclick={() => handleToggleFavoriteStatus('playing')}
                 >
                   <span>Прохожу</span>
@@ -1896,7 +1896,7 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'completed' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'completed' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                   onclick={() => handleToggleFavoriteStatus('completed')}
                 >
                   <span>Пройдено</span>
@@ -1909,7 +1909,7 @@
                   <button
                     data-nav-item
                     type="button"
-                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                     onclick={() => handleToggleFavoriteStatus('')}
                   >
                     <span>Убрать из избранного</span>
@@ -1936,7 +1936,7 @@
             <button
               data-nav-item
               type="button"
-              class="w-44 sm:w-52 aspect-video rounded-sm overflow-hidden border border-white/15 bg-black hover:border-sky-400 focus:border-sky-400 hover:scale-105 focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
+              class="w-44 sm:w-52 aspect-video rounded-[12px] overflow-hidden border border-white/15 bg-black hover:border-sky-400 focus:border-sky-400 hover:scale-105 focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
               onclick={() => enterTheaterMode(mIdx)}
               title={movie.name || `Трейлер ${mIdx + 1}`}
             >
@@ -1953,10 +1953,10 @@
                 </div>
               </div>
               <div class="absolute bottom-1.5 inset-x-1.5 flex items-center justify-between pointer-events-none">
-                <span class="px-2 py-0.5 rounded bg-black/80 text-[10px] font-bold text-white max-w-[120px] truncate border border-white/10">
+                <span class="px-2 py-0.5 rounded-[6px] bg-black/80 text-[10px] font-bold text-white max-w-[120px] truncate border border-white/10">
                   {movie.name || `Трейлер ${mIdx + 1}`}
                 </span>
-                <span class="px-1.5 py-0.5 rounded bg-sky-500/80 text-[9px] font-bold uppercase tracking-wider text-black">
+                <span class="px-1.5 py-0.5 rounded-[6px] bg-sky-500/80 text-[9px] font-bold uppercase tracking-wider text-black">
                   Видео
                 </span>
               </div>
@@ -1968,7 +1968,7 @@
             <button
               data-nav-item
               type="button"
-              class="w-44 sm:w-52 aspect-video rounded-sm overflow-hidden border border-white/10 bg-black/60 hover:border-white hover:scale-105 focus:border-white focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
+              class="w-44 sm:w-52 aspect-video rounded-[12px] overflow-hidden border border-white/10 bg-black/60 hover:border-white hover:scale-105 focus:border-white focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
               onclick={() => enterTheaterMode(movieList.length + idx)}
               onmouseenter={() => {
                 activeScreenshotPreview = sc;
@@ -2300,21 +2300,21 @@
           {:else if descTab === 'reviews'}
             <div class="max-w-4xl mx-auto space-y-6">
               <!-- Top Controls: Header + Language switcher + Open in Steam -->
-              <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-white/10">
+              <div class="flex flex-wrap items-center justify-between gap-4 pb-2">
                 <div class="flex items-center gap-3">
                   <ChatText class="w-5 h-5 text-sky-400" />
                   <span class="text-sm font-bold uppercase tracking-wider text-white">Отзывы сообщества Steam</span>
                   {#if steamReviewsTotal > 0}
-                    <span class="text-xs text-[#8e95a2] font-mono">({formatReviewsCount(steamReviewsTotal)})</span>
+                    <span class="text-xs text-white/40 font-mono">({formatReviewsCount(steamReviewsTotal)})</span>
                   {/if}
                 </div>
 
                 <div class="flex items-center gap-3">
-                  <div class="inline-flex rounded bg-black/40 border border-white/10 p-1 text-xs">
+                  <div class="inline-flex rounded-[12px] bg-white/[0.03] p-1 text-xs">
                     <button
                       data-nav-item
                       type="button"
-                      class="px-3 py-1.5 rounded font-medium cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none {reviewLanguage === 'russian' ? 'bg-white/20 text-white font-bold' : 'text-[#8e95a2] hover:text-white'}"
+                      class="px-3 py-1.5 rounded-[10px] font-medium cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none {reviewLanguage === 'russian' ? 'bg-white/20 text-white font-bold' : 'text-white/50 hover:text-white'}"
                       onclick={() => handleLanguageChange('russian')}
                     >
                       Русские
@@ -2322,7 +2322,7 @@
                     <button
                       data-nav-item
                       type="button"
-                      class="px-3 py-1.5 rounded font-medium cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none {reviewLanguage === 'all' ? 'bg-white/20 text-white font-bold' : 'text-[#8e95a2] hover:text-white'}"
+                      class="px-3 py-1.5 rounded-[10px] font-medium cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none {reviewLanguage === 'all' ? 'bg-white/20 text-white font-bold' : 'text-white/50 hover:text-white'}"
                       onclick={() => handleLanguageChange('all')}
                     >
                       Все языки
@@ -2332,7 +2332,7 @@
                   <button
                     data-nav-item
                     type="button"
-                    class="px-3.5 py-2 rounded bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/10 transition-colors cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
+                    class="px-3.5 py-2 rounded-[12px] bg-white/[0.04] hover:bg-white/[0.08] text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
                     onclick={handleOpenSteamStore}
                     title="Открыть страницу игры в магазине Steam"
                   >
@@ -2347,17 +2347,17 @@
               {#if isLoadingReviews}
                 <div class="space-y-4">
                   {#each [1, 2, 3] as _}
-                    <div class="p-5 rounded-md bg-[#0e1219] border border-white/10 space-y-3 animate-pulse">
-                      <div class="h-5 w-32 bg-white/10 rounded"></div>
+                    <div class="p-5 rounded-[18px] bg-white/[0.025] space-y-3 animate-pulse">
+                      <div class="h-5 w-32 bg-white/10 rounded-[8px]"></div>
                       <div class="space-y-2">
-                        <div class="h-3.5 w-full bg-white/5 rounded"></div>
-                        <div class="h-3.5 w-3/4 bg-white/5 rounded"></div>
+                        <div class="h-3.5 w-full bg-white/5 rounded-[6px]"></div>
+                        <div class="h-3.5 w-3/4 bg-white/5 rounded-[6px]"></div>
                       </div>
                     </div>
                   {/each}
                 </div>
               {:else if steamReviews.length === 0}
-                <div class="p-8 rounded-md bg-[#0e1219] border border-white/10 text-center text-sm text-[#8e95a2] space-y-2">
+                <div class="p-8 rounded-[18px] bg-white/[0.025] text-center text-sm text-[#8e95a2] space-y-2">
                   <p>Отзывов не найдено{reviewLanguage === 'russian' ? ' на русском языке' : ''}.</p>
                   {#if reviewLanguage === 'russian'}
                     <button
@@ -2373,16 +2373,16 @@
               {:else}
                 <div class="space-y-4">
                   {#each steamReviews as rev (rev.id)}
-                    <div class="p-5 rounded-md bg-[#0e1219] border border-white/10 hover:border-white/20 transition-colors space-y-3 shadow-md">
+                    <div class="p-5 rounded-[18px] bg-white/[0.025] hover:bg-white/[0.035] transition-all space-y-3">
                       <div class="flex flex-wrap items-center justify-between gap-2">
                         <div class="flex items-center gap-2.5">
                           {#if rev.votedUp}
-                            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-sky-500/15 border border-sky-500/30 text-sky-400 text-xs font-bold">
+                            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-[10px] bg-sky-500/15 text-sky-400 text-xs font-bold">
                               <ThumbsUp class="w-3.5 h-3.5" weight="fill" />
                               <span>Рекомендую</span>
                             </div>
                           {:else}
-                            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs font-bold">
+                            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-[10px] bg-rose-500/15 text-rose-400 text-xs font-bold">
                               <ThumbsDown class="w-3.5 h-3.5" weight="fill" />
                               <span>Не рекомендую</span>
                             </div>
@@ -2409,7 +2409,7 @@
                       </div>
 
                       {#if rev.votesUp > 0 || rev.votesFunny > 0}
-                        <div class="pt-2 border-t border-white/[0.06] flex items-center gap-3 text-xs text-[#8e95a2]">
+                        <div class="pt-2 flex items-center gap-3 text-xs text-[#8e95a2]">
                           {#if rev.votesUp > 0}
                             <span class="inline-flex items-center gap-1">
                               <ThumbsUp class="w-3 h-3 text-[#8e95a2]" />
@@ -2432,7 +2432,7 @@
                       data-nav-item
                       type="button"
                       disabled={isLoadingMoreReviews}
-                      class="px-6 py-3 rounded bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-bold text-white transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50 focus:ring-1 focus:ring-white focus:outline-none"
+                      class="px-6 py-3 rounded-[14px] bg-white/10 hover:bg-white/20 text-xs font-bold text-white transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50 focus:ring-1 focus:ring-white focus:outline-none"
                       onclick={() => loadSteamReviews(false)}
                     >
                       {#if isLoadingMoreReviews}

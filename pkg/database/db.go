@@ -68,6 +68,8 @@ type GameEntity struct {
 	TorrentSource string `json:"torrentSource,omitempty"`
 	MagnetURI     string `json:"magnetUri,omitempty"`
 	UploadDate    string `json:"uploadDate,omitempty"`
+	CreatedAt     string `json:"createdAt,omitempty"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
 	// Favorites Metadata
 	FavoriteStatus string `json:"favoriteStatus,omitempty"` // "planned", "playing", "completed"
 	// Release variants / duplicates
@@ -97,6 +99,8 @@ type GameVariant struct {
 	RemotePath    string `json:"remotePath,omitempty"`
 	MagnetURI     string `json:"magnetUri,omitempty"`
 	UploadDate    string `json:"uploadDate,omitempty"`
+	CreatedAt     string `json:"createdAt,omitempty"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
 	IsDirectory   bool   `json:"isDirectory"`
 	SteamAppID    int    `json:"steamAppId,omitempty"`
 }
@@ -481,6 +485,7 @@ const gameSelectFields = `
 	g.size_display, g.is_directory, g.is_collection, g.parent_path, g.steam_appid, g.steam_synced,
 	COALESCE(g.canonical_key, ''),
 	COALESCE(g.source_type, 'ftp'), COALESCE(g.torrent_source, ''), COALESCE(g.uris, '[]'), COALESCE(g.upload_date, ''),
+	COALESCE(g.created_at, ''), COALESCE(g.updated_at, ''),
 	COALESCE(s.title, ''), COALESCE(s.short_description, ''), COALESCE(s.detailed_description, ''),
 	COALESCE(s.header_image, ''), COALESCE(s.capsule_image, ''), COALESCE(s.background_image, ''),
 	COALESCE(s.icon_url, ''),
@@ -498,6 +503,7 @@ const gameSelectFieldsLite = `
 	g.size_display, g.is_directory, g.is_collection, g.parent_path, g.steam_appid, g.steam_synced,
 	COALESCE(g.canonical_key, ''),
 	COALESCE(g.source_type, 'ftp'), COALESCE(g.torrent_source, ''), COALESCE(g.uris, '[]'), COALESCE(g.upload_date, ''),
+	COALESCE(g.created_at, ''), COALESCE(g.updated_at, ''),
 	COALESCE(s.title, ''), COALESCE(s.short_description, ''),
 	COALESCE(s.header_image, ''), COALESCE(s.capsule_image, ''), COALESCE(s.background_image, ''),
 	COALESCE(s.icon_url, ''),
@@ -524,6 +530,7 @@ func (d *Database) scanGame(scanner rowScanner) (GameEntity, error) {
 		&g.SizeDisplay, &isDir, &isColl, &g.ParentPath, &g.SteamAppID, &synced,
 		&g.CanonicalKey,
 		&g.SourceType, &g.TorrentSource, &urisJSON, &g.UploadDate,
+		&g.CreatedAt, &g.UpdatedAt,
 		&g.SteamTitle, &g.ShortDescription, &g.DetailedDescription,
 		&g.HeaderImage, &g.CapsuleImage, &g.BackgroundImage,
 		&g.IconURL,
@@ -612,6 +619,7 @@ func (d *Database) scanGameLite(scanner rowScanner) (GameEntity, error) {
 		&g.SizeDisplay, &isDir, &isColl, &g.ParentPath, &g.SteamAppID, &synced,
 		&g.CanonicalKey,
 		&g.SourceType, &g.TorrentSource, &urisJSON, &g.UploadDate,
+		&g.CreatedAt, &g.UpdatedAt,
 		&g.SteamTitle, &g.ShortDescription,
 		&g.HeaderImage, &g.CapsuleImage, &g.BackgroundImage,
 		&g.IconURL,
@@ -907,6 +915,8 @@ func DeduplicateGames(games []GameEntity) []GameEntity {
 				RemotePath:    remotePath,
 				MagnetURI:     magnetURI,
 				UploadDate:    item.UploadDate,
+				CreatedAt:     item.CreatedAt,
+				UpdatedAt:     item.UpdatedAt,
 				IsDirectory:   item.IsDirectory,
 				SteamAppID:    item.SteamAppID,
 			})
@@ -1056,6 +1066,8 @@ func (d *Database) getGameByIDInternal(id int64) (*GameEntity, error) {
 						RemotePath:    item.RemotePath,
 						MagnetURI:     item.MagnetURI,
 						UploadDate:    item.UploadDate,
+						CreatedAt:     item.CreatedAt,
+						UpdatedAt:     item.UpdatedAt,
 						IsDirectory:   item.IsDirectory,
 						SteamAppID:    item.SteamAppID,
 					})

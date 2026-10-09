@@ -73,6 +73,8 @@ function toVariant(g: GameEntity): GameVariant {
     remotePath: g.remotePath || '',
     magnetUri: g.magnetUri,
     uploadDate: g.uploadDate,
+    createdAt: g.createdAt,
+    updatedAt: g.updatedAt,
     isDirectory: !!g.isDirectory,
     steamAppId: g.steamAppId,
   };
@@ -202,6 +204,15 @@ export function deduplicateGames(list: GameEntity[]): GameEntity[] {
       if (!primary.headerImage && item.headerImage) primary.headerImage = item.headerImage;
       if (!primary.capsuleImage && item.capsuleImage) primary.capsuleImage = item.capsuleImage;
       if (!primary.backgroundImage && item.backgroundImage) primary.backgroundImage = item.backgroundImage;
+      if (item.uploadDate && (!primary.uploadDate || item.uploadDate > primary.uploadDate)) {
+        primary.uploadDate = item.uploadDate;
+      }
+      if (item.createdAt && (!primary.createdAt || item.createdAt > primary.createdAt)) {
+        primary.createdAt = item.createdAt;
+      }
+      if (item.updatedAt && (!primary.updatedAt || item.updatedAt > primary.updatedAt)) {
+        primary.updatedAt = item.updatedAt;
+      }
     }
 
     if (isPlaceholderTitle(primary.steamTitle)) {

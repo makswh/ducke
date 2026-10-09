@@ -2,7 +2,7 @@ package downloader
 
 import "sync"
 
-const ChunkBufferSize = 256 * 1024 // 256KB buffer for high-throughput FTP/SFTP streaming
+const ChunkBufferSize = 512 * 1024 // 512KB buffer for high-throughput FTP/SFTP streaming
 
 var chunkBufferPool = sync.Pool{
 	New: func() any {

@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"golang.org/x/time/rate"
 )
@@ -135,9 +137,14 @@ func NewTorrentEngine(dataDir string, initialSpeedLimitKBps int) (*TorrentEngine
 
 	client, err := torrent.NewClient(cfg)
 	if err != nil {
-		log.Printf("[Torrent] Failed on default port (%v), retrying with dynamic port :0...", err)
-		cfg.SetListenAddr(":0")
-		client, err = torrent.NewClient(cfg)
+		log.Printf("[Torrent] Initial listen failed (%v), retrying with dynamic port...", err)
+		for attempt := 0; attempt < 5; attempt++ {
+			cfg.SetListenAddr(":0")
+			client, err = torrent.NewClient(cfg)
+			if err == nil {
+				break
+			}
+		}
 	}
 	if err != nil {
 		log.Printf("[Torrent] Failed to initialize anacrolix/torrent client: %v", err)
@@ -153,6 +160,47 @@ func NewTorrentEngine(dataDir string, initialSpeedLimitKBps int) (*TorrentEngine
 		dataDir:     dataDir,
 		torrents:    make(map[string]*torrent.Torrent),
 	}, nil
+}
+
+// SanitizeFilename strips or replaces characters illegal in Windows and cross-platform
+// filenames (< > : " / \ | ? * and ASCII control characters 0-31), trims trailing spaces and dots,
+// collapses multiple spaces, and guards against Windows reserved device names (CON, PRN, etc.).
+func SanitizeFilename(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if r < 32 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			b.WriteRune(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	cleaned := b.String()
+
+	// Collapse multiple spaces
+	fields := strings.Fields(cleaned)
+	cleaned = strings.Join(fields, " ")
+
+	// Trim trailing/leading spaces and periods (Windows forbids trailing spaces and dots on path components)
+	cleaned = strings.Trim(cleaned, " .")
+	if cleaned == "" || cleaned == "." || cleaned == ".." {
+		return "unnamed"
+	}
+
+	// Check Windows reserved names
+	baseUpper := strings.ToUpper(cleaned)
+	reserved := []string{
+		"CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+	}
+	for _, res := range reserved {
+		if baseUpper == res || strings.HasPrefix(baseUpper, res+".") {
+			cleaned = "_" + cleaned
+			break
+		}
+	}
+
+	return cleaned
 }
 
 // AddMagnet creates or re-attaches a magnet torrent with custom target storage directory.
@@ -218,7 +266,20 @@ func (te *TorrentEngine) AddMagnet(downloadID string, magnetURI string, destDir 
 		}
 	}
 
-	spec.Storage = storage.NewFileWithCompletion(destDir, completion)
+	spec.Storage = storage.NewFileOpts(storage.NewFileClientOpts{
+		ClientBaseDir:   destDir,
+		PieceCompletion: completion,
+		FilePathMaker: func(opts storage.FilePathMakerOpts) string {
+			var parts []string
+			if opts.Info.BestName() != metainfo.NoName {
+				parts = append(parts, SanitizeFilename(opts.Info.BestName()))
+			}
+			for _, comp := range opts.File.BestPath() {
+				parts = append(parts, SanitizeFilename(comp))
+			}
+			return filepath.Join(parts...)
+		},
+	})
 
 	t, _, err := te.client.AddTorrentSpec(spec)
 	if err != nil {
@@ -230,6 +291,7 @@ func (te *TorrentEngine) AddMagnet(downloadID string, magnetURI string, destDir 
 	// Ensure trackers and connection limits are applied to active torrent handle
 	t.AddTrackers(PublicTier1Trackers)
 	t.SetMaxEstablishedConns(120)
+	t.AllowDataDownload()
 
 	te.torrents[downloadID] = t
 	return t, nil
@@ -265,6 +327,7 @@ func (te *TorrentEngine) ResumeTorrent(downloadID string) {
 	te.mu.RUnlock()
 	if ok && t != nil {
 		t.AllowDataDownload()
+		t.DownloadAll()
 	}
 }
 

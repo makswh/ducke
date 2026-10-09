@@ -61,7 +61,7 @@
       }}
       title="На главную"
     >
-      <img src="/appicon.png" alt="Ducke" class="w-6 h-6 rounded-sm object-cover border border-white/10 shadow-sm" />
+      <img src="/appicon.png" alt="Ducke" class="w-6 h-6 rounded-[8px] object-cover border border-white/10 shadow-sm" />
       <span class="text-xs font-black tracking-widest text-white uppercase hidden md:inline">DUCKE</span>
     </button>
 
@@ -83,13 +83,13 @@
   <!-- Center: Console System Tray (Top Tray) -->
   <nav class="flex items-center gap-1 sm:gap-1.5">
     <!-- LB Badge -->
-    <span class="px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.08] text-[9px] font-bold text-[#64748b] hidden xl:inline">LB</span>
+    <span class="px-1.5 py-0.5 rounded-[6px] bg-white/[0.04] border border-white/[0.08] text-[9px] font-bold text-[#64748b] hidden xl:inline">LB</span>
 
     <!-- Tab 1: Home (Multi-tier shelves) -->
     <button
       data-nav-item
       type="button"
-      class="px-2.5 sm:px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'home' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
+      class="px-3 sm:px-3.5 py-2 rounded-[12px] text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'home' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
       onclick={() => {
         sound.playTab();
         onTabChange('home');
@@ -104,7 +104,7 @@
       <button
         data-nav-item
         type="button"
-        class="px-2.5 sm:px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'catalog' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
+        class="px-3 sm:px-3.5 py-2 rounded-[12px] text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'catalog' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
         onclick={() => {
           sound.playTab();
           onTabChange('catalog');
@@ -120,7 +120,7 @@
       <button
         data-nav-item
         type="button"
-        class="px-2.5 sm:px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'torrents' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
+        class="px-3 sm:px-3.5 py-2 rounded-[12px] text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'torrents' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
         onclick={() => {
           sound.playTab();
           onTabChange('torrents');
@@ -135,7 +135,7 @@
     <button
       data-nav-item
       type="button"
-      class="px-2.5 sm:px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'favorites' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
+      class="px-3 sm:px-3.5 py-2 rounded-[12px] text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'favorites' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
       onclick={() => {
         sound.playTab();
         onTabChange('favorites');
@@ -149,7 +149,7 @@
     <button
       data-nav-item
       type="button"
-      class="px-2.5 sm:px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'downloads' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
+      class="px-3 sm:px-3.5 py-2 rounded-[12px] text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'downloads' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
       onclick={() => {
         sound.playTab();
         onTabChange('downloads');
@@ -158,7 +158,7 @@
       <DownloadSimple size={14} class={activeTab === 'downloads' ? 'text-sky-400' : 'text-[#64748b]'} />
       <span class="hidden sm:inline">Загрузки</span>
       {#if activeDownloadsCount > 0}
-        <span class="px-1.5 py-0.2 rounded-sm text-[10px] font-mono bg-sky-500 text-black font-black">
+        <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] font-mono bg-sky-500 text-black font-black">
           {activeDownloadsCount}
         </span>
       {/if}
@@ -168,7 +168,7 @@
     <button
       data-nav-item
       type="button"
-      class="px-2.5 sm:px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'settings' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
+      class="px-3 sm:px-3.5 py-2 rounded-[12px] text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 {activeTab === 'settings' ? 'bg-white/15 text-white border border-white/20 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.05] border border-transparent'}"
       onclick={() => {
         sound.playTab();
         onTabChange('settings');
@@ -179,7 +179,7 @@
     </button>
 
     <!-- RB Badge -->
-    <span class="px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.08] text-[9px] font-bold text-[#64748b] hidden xl:inline">RB</span>
+    <span class="px-1.5 py-0.5 rounded-[6px] bg-white/[0.04] border border-white/[0.08] text-[9px] font-bold text-[#64748b] hidden xl:inline">RB</span>
   </nav>
 
   <!-- Right: Quick Search, Desktop Mode Switcher, Close -->
@@ -188,20 +188,20 @@
     <button
       data-nav-item
       type="button"
-      class="px-2.5 sm:px-3 py-1.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors border border-white/[0.06]"
+      class="px-3 sm:px-3.5 py-2 rounded-[12px] bg-white/[0.05] hover:bg-white/[0.1] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors border border-white/[0.06]"
       onclick={() => onToggleSearch()}
       title="Поиск [X]"
     >
       <MagnifyingGlass size={14} class="text-sky-400" />
       <span class="hidden sm:inline">Поиск</span>
-      <span class="px-1 py-0.2 rounded bg-sky-500 text-black text-[9px] font-black leading-none">X</span>
+      <span class="px-1 py-0.2 rounded-[4px] bg-sky-500 text-black text-[9px] font-black leading-none">X</span>
     </button>
 
     <!-- Switch to Desktop Mode -->
     <button
       data-nav-item
       type="button"
-      class="px-2.5 sm:px-3 py-1.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-[#8e95a2] hover:text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer transition-colors border border-white/[0.06]"
+      class="px-3 sm:px-3.5 py-2 rounded-[12px] bg-white/[0.05] hover:bg-white/[0.1] text-[#8e95a2] hover:text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer transition-colors border border-white/[0.06]"
       onclick={() => onSwitchToDesktop()}
       title="Переключить в режим рабочего стола"
     >
@@ -213,7 +213,7 @@
     <button
       data-nav-item
       type="button"
-      class="p-2 rounded text-[#8e95a2] hover:text-white hover:bg-[#e81123] transition-colors cursor-pointer border border-transparent hover:border-red-500/20"
+      class="p-2 rounded-[8px] text-[#8e95a2] hover:text-white hover:bg-[#e81123] transition-colors cursor-pointer border border-transparent hover:border-red-500/20"
       onclick={() => onCloseApp()}
       title="Закрыть приложение"
     >

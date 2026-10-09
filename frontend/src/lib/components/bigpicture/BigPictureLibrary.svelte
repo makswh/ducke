@@ -19,6 +19,7 @@
   import { sound } from '../../navigation/audio';
   import { gamepad } from '../../navigation/gamepad';
   import { deduplicateGames } from '../../utils/gameDeduplication';
+  import { getGameAddedTime, getGameUpdatedTime } from '../../utils/dateUtils';
 
   let {
     games = [] as any[],
@@ -35,8 +36,8 @@
   let searchInputEl = $state<HTMLInputElement | null>(null);
 
   // Sorting & Genre State
-  type SortType = 'date_desc' | 'rating_desc' | 'popular_desc' | 'name' | 'size_desc';
-  let selectedSort = $state<SortType>('date_desc');
+  type SortType = 'added_desc' | 'updated_desc' | 'date_desc' | 'rating_desc' | 'popular_desc' | 'name' | 'size_desc';
+  let selectedSort = $state<SortType>('added_desc');
   let selectedGenre = $state<string>('all');
   let isSortDropdownOpen = $state<boolean>(false);
 
@@ -153,7 +154,21 @@
     });
 
     // Sort
-    if (selectedSort === 'rating_desc') {
+    if (selectedSort === 'added_desc') {
+      result.sort((a, b) => {
+        const da = getGameAddedTime(a);
+        const db = getGameAddedTime(b);
+        if (da !== db) return db - da;
+        return (b.id || 0) - (a.id || 0);
+      });
+    } else if (selectedSort === 'updated_desc') {
+      result.sort((a, b) => {
+        const da = getGameUpdatedTime(a);
+        const db = getGameUpdatedTime(b);
+        if (da !== db) return db - da;
+        return (b.id || 0) - (a.id || 0);
+      });
+    } else if (selectedSort === 'rating_desc') {
       result.sort((a, b) => {
         const diff = (b.reviewPercent || 0) - (a.reviewPercent || 0);
         if (diff !== 0) return diff;
@@ -229,12 +244,14 @@
 
   function getSortLabel(sort: SortType): string {
     switch (sort) {
-      case 'date_desc': return 'По дате';
+      case 'added_desc': return 'По дате добавления';
+      case 'updated_desc': return 'По дате обновления';
+      case 'date_desc': return 'По дате выхода';
       case 'rating_desc': return 'Оценка Steam';
       case 'popular_desc': return 'Популярность';
       case 'name': return 'По названию';
       case 'size_desc': return 'По размеру';
-      default: return 'По дате';
+      default: return 'По дате добавления';
     }
   }
 
@@ -429,7 +446,7 @@
     <div class="flex items-center gap-2">
       <button
         data-nav-item
-        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer {activeFilter === 'all' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer {activeFilter === 'all' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           activeFilter = 'all';
@@ -440,7 +457,7 @@
 
       <button
         data-nav-item
-        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer {activeFilter === 'has_steam' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer {activeFilter === 'has_steam' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           activeFilter = 'has_steam';
@@ -451,7 +468,7 @@
 
       <button
         data-nav-item
-        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {activeFilter === 'downloading' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {activeFilter === 'downloading' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           activeFilter = 'downloading';
@@ -459,7 +476,7 @@
       >
         <span>В загрузках</span>
         {#if (activeDownloads || []).length > 0}
-          <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-sky-500 text-black font-black">
+          <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-sky-500 text-black font-black">
             {(activeDownloads || []).length}
           </span>
         {/if}
@@ -469,7 +486,7 @@
     <!-- Right Controls: Sort Dropdown & Search Query Badge -->
     <div class="flex items-center gap-3 relative">
       {#if searchQuery}
-        <div class="flex items-center gap-2 px-3 py-1.5 rounded bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-[8px] bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
           <span>Поиск: "{searchQuery}"</span>
           <button
             class="hover:text-white cursor-pointer"
@@ -486,7 +503,7 @@
       <div class="relative">
         <button
           data-nav-item
-          class="px-3.5 py-2 rounded bg-white/[0.05] hover:bg-white/10 text-xs font-semibold text-[#8e95a2] hover:text-white flex items-center gap-2 transition-colors cursor-pointer border border-white/5"
+          class="px-3.5 py-2 rounded-[12px] bg-white/[0.05] hover:bg-white/10 text-xs font-semibold text-[#8e95a2] hover:text-white flex items-center gap-2 transition-colors cursor-pointer border border-white/5"
           onclick={() => {
             sound.playFocus();
             isSortDropdownOpen = !isSortDropdownOpen;
@@ -499,10 +516,12 @@
 
         {#if isSortDropdownOpen}
           <div
-            class="absolute right-0 top-full mt-2 z-50 w-48 rounded bg-[#0d1117] border border-white/10 shadow-2xl p-1 space-y-0.5"
+            class="absolute right-0 top-full mt-2 z-50 w-48 rounded-[14px] bg-[#0d1117] border border-white/10 shadow-2xl p-1 space-y-0.5"
           >
             {#each [
-              { id: 'date_desc', label: 'По дате' },
+              { id: 'added_desc', label: 'По дате добавления' },
+              { id: 'updated_desc', label: 'По дате обновления' },
+              { id: 'date_desc', label: 'По дате выхода' },
               { id: 'rating_desc', label: 'Оценка Steam' },
               { id: 'popular_desc', label: 'Популярность' },
               { id: 'name', label: 'По названию' },
@@ -510,7 +529,7 @@
             ] as opt}
               <button
                 data-nav-item
-                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm text-xs transition-colors cursor-pointer {selectedSort === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[8px] text-xs transition-colors cursor-pointer {selectedSort === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
                 onclick={() => {
                   sound.playSelect();
                   selectedSort = opt.id as SortType;
@@ -538,7 +557,7 @@
       </span>
       <button
         data-nav-item
-        class="px-3 py-1 rounded text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre === 'all' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        class="px-3 py-1.5 rounded-[8px] text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre === 'all' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           selectedGenre = 'all';
@@ -549,7 +568,7 @@
       {#each availableGenres as item}
         <button
           data-nav-item
-          class="px-3 py-1 rounded text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre.toLowerCase() === item.name.toLowerCase() ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          class="px-3 py-1.5 rounded-[8px] text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre.toLowerCase() === item.name.toLowerCase() ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
           onclick={() => {
             sound.playFocus();
             selectedGenre = item.name;
@@ -581,7 +600,7 @@
         />
         <button
           data-nav-item
-          class="px-4 py-2 rounded text-xs font-bold bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+          class="px-4 py-2 rounded-[12px] text-xs font-bold bg-white/10 text-white hover:bg-white/20 cursor-pointer"
           onclick={() => onCloseSearch()}
         >
           Готово
@@ -626,7 +645,7 @@
             <button
               data-nav-item
               use:measureCard
-              class="group relative flex flex-col rounded overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-1 focus:ring-white focus:outline-none focus:z-20 hover:scale-102 bg-[#0d1017] border border-white/[0.04] focus:border-white"
+              class="group relative flex flex-col rounded-[16px] overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-1 focus:ring-white focus:outline-none focus:z-20 hover:scale-102 bg-[#0d1017] border border-white/[0.04] focus:border-white"
               onclick={() => {
                 sound.playSelect();
                 onSelectGame(game);
@@ -651,7 +670,7 @@
                     </div>
 
                     <div class="my-auto flex flex-col items-center space-y-2">
-                      <div class="w-12 h-12 rounded-sm bg-white/[0.06] border border-white/10 flex items-center justify-center text-base font-black text-white/80 shadow-inner">
+                      <div class="w-12 h-12 rounded-[10px] bg-white/[0.06] border border-white/10 flex items-center justify-center text-base font-black text-white/80 shadow-inner">
                         {getInitials(game.cleanTitle || game.rawName)}
                       </div>
                       <span class="text-xs font-bold text-[#e2e8f0] line-clamp-3 leading-snug px-1">
@@ -667,7 +686,7 @@
 
                 <!-- Downloading / Queued Badge Overlay -->
                 {#if isDownloading}
-                  <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-sm bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
+                  <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-[6px] bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
                     <Download class="w-3 h-3" />
                     <span>СКАЧИВАЕТСЯ</span>
                   </div>
@@ -675,14 +694,14 @@
 
                 <!-- Steam rating badge bottom left -->
                 {#if game.reviewPercent && game.reviewPercent > 0}
-                  <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-sm bg-[#07080a]/95 text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
+                  <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-[6px] bg-[#07080a]/95 text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
                     <span>★ {game.reviewPercent}%</span>
                   </div>
                 {/if}
 
                 <!-- Size badge bottom right -->
                 {#if game.sizeDisplay}
-                  <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-sm bg-[#07080a]/95 text-[10px] font-mono text-white/90 border border-white/10 z-20">
+                  <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-[6px] bg-[#07080a]/95 text-[10px] font-mono text-white/90 border border-white/10 z-20">
                     {game.sizeDisplay}
                   </div>
                 {/if}

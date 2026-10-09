@@ -1,12 +1,14 @@
 package downloader
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -93,7 +95,7 @@ func downloadDirectory(
 		localFilePath := filepath.Join(task.LocalPath, f.RelativePath)
 		if fi, err := os.Stat(localFilePath); err == nil {
 			localSize := fi.Size()
-			if f.SizeBytes > 0 && localSize >= f.SizeBytes {
+			if f.SizeBytes > 0 && localSize == f.SizeBytes {
 				// Fully downloaded already
 				initialDownloaded += f.SizeBytes
 				continue
@@ -102,10 +104,19 @@ func downloadDirectory(
 				initialDownloaded += localSize
 				queue = append(queue, fileWorkItem{remote: f, offset: localSize})
 				continue
+			} else if localSize > f.SizeBytes {
+				// File is larger than remote entry (corrupted / outdated) -> truncate to restart cleanly
+				_ = os.Truncate(localFilePath, 0)
 			}
 		}
 		queue = append(queue, fileWorkItem{remote: f, offset: 0})
 	}
+
+	// LPT (Longest Processing Time First) scheduling: sort queue largest files first.
+	// Keeps all worker threads uniformly utilized, eliminating tail-latency bottlenecks.
+	sort.Slice(queue, func(i, j int) bool {
+		return queue[i].remote.SizeBytes > queue[j].remote.SizeBytes
+	})
 
 	log.Printf("[Downloader] [%s] Directory analysis: %d files (%s total). %d files to download (%s), %s already on disk",
 		task.GameTitle, len(files), FormatBytes(totalBytes), len(queue), FormatBytes(totalBytes-initialDownloaded), FormatBytes(initialDownloaded))
@@ -191,6 +202,13 @@ func downloadDirectory(
 					})
 					return
 				}
+
+				// Preserve remote modification timestamp
+				if item.remote.ModTime > 0 {
+					mtime := time.Unix(item.remote.ModTime, 0)
+					_ = os.Chtimes(localFilePath, mtime, mtime)
+				}
+
 				idx := task.fileIndex.Add(1)
 				// Log file completion selectively to avoid flooding if thousands of files
 				if task.totalFiles <= 30 || item.remote.SizeBytes >= 5*1024*1024 || idx%25 == 0 || int(idx) == task.totalFiles {
@@ -210,6 +228,7 @@ func downloadSingleFile(
 	ctx context.Context,
 	task *DownloadTask,
 	srvCfg config.ServerConfig,
+	maxConcurrentStreams int,
 	limiter *RateLimiter,
 ) error {
 	// 0. Ensure target directory exists and is not blocked by a regular file
@@ -217,7 +236,47 @@ func downloadSingleFile(
 		return err
 	}
 
-	log.Printf("[Downloader] [%s] Connecting to %s server for monolithic file transfer...",
+	localFilePath := task.LocalPath
+
+	// Pre-check if monolithic file is already fully downloaded on disk
+	if fi, err := os.Stat(localFilePath); err == nil {
+		localSize := fi.Size()
+		if task.TotalBytes > 0 && localSize == task.TotalBytes {
+			log.Printf("[Downloader] [%s] Single file already complete on disk (%s). Done.", task.GameTitle, FormatBytes(localSize))
+			task.DownloadedBytes.Store(task.TotalBytes)
+			task.mu.Lock()
+			task.Status = StatusCompleted
+			task.speedBytesPerSec.Store(0)
+			task.smoothedSpeed = 0
+			task.currentFile = ""
+			task.mu.Unlock()
+			removeSegmentState(localFilePath)
+			return nil
+		}
+	}
+
+	// 1. If monolithic file is large (>= 32MB), execute accelerated multi-segment transfer
+	if task.TotalBytes >= MinSegmentedFileSize {
+		log.Printf("[Downloader] [%s] Large monolithic file detected (%s >= 32MB). Attempting accelerated multi-segment transfer...",
+			task.GameTitle, FormatBytes(task.TotalBytes))
+
+		segErr := downloadSegmentedFile(ctx, task, srvCfg, maxConcurrentStreams, limiter)
+		if segErr == nil {
+			log.Printf("[Downloader] [%s] Multi-segment transfer completed successfully (%s)",
+				task.GameTitle, FormatBytes(task.TotalBytes))
+			return nil
+		}
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		log.Printf("[Downloader] WARN: [%s] Multi-segment transfer unavailable (%v). Falling back to resilient single-stream transfer...",
+			task.GameTitle, segErr)
+	}
+
+	// 2. Single-stream transfer (for files < 32MB or servers without REST support)
+	log.Printf("[Downloader] [%s] Connecting to %s server for single-stream transfer...",
 		task.GameTitle, strings.ToUpper(srvCfg.Protocol))
 
 	client := remote.NewRemoteClient(srvCfg.Protocol)
@@ -233,35 +292,32 @@ func downloadSingleFile(
 	task.Status = StatusDownloading
 	task.mu.Unlock()
 
-	localFilePath := task.LocalPath
 	var offset int64 = 0
 	if fi, err := os.Stat(localFilePath); err == nil {
 		localSize := fi.Size()
-		if task.TotalBytes > 0 && localSize >= task.TotalBytes {
-			log.Printf("[Downloader] [%s] Single file already complete on disk (%s). Done.", task.GameTitle, FormatBytes(localSize))
-			task.DownloadedBytes.Store(task.TotalBytes)
-			task.mu.Lock()
-			task.Status = StatusCompleted
-			task.speedBytesPerSec.Store(0)
-			task.smoothedSpeed = 0
-			task.currentFile = ""
-			task.mu.Unlock()
-			return nil
+		if task.TotalBytes > 0 && localSize > 0 && localSize < task.TotalBytes {
+			offset = localSize
+			log.Printf("[Downloader] [%s] Found partial file on disk (%s / %s). Resuming from offset...",
+				task.GameTitle, FormatBytes(offset), FormatBytes(task.TotalBytes))
+			task.DownloadedBytes.Store(offset)
+			task.lastBytes = offset
+		} else if localSize > task.TotalBytes {
+			_ = os.Truncate(localFilePath, 0)
+			offset = 0
 		}
-		offset = localSize
-		log.Printf("[Downloader] [%s] Found partial file on disk (%s / %s). Resuming from offset...",
-			task.GameTitle, FormatBytes(offset), FormatBytes(task.TotalBytes))
-		task.DownloadedBytes.Store(offset)
-		task.lastBytes = offset
 	} else {
-		log.Printf("[Downloader] [%s] Starting download: %s (%s)",
+		log.Printf("[Downloader] [%s] Starting single-stream download: %s (%s)",
 			task.GameTitle, filepath.Base(task.RemotePath), FormatBytes(task.TotalBytes))
 	}
 
-	return downloadFileWithRetry(ctx, task, client, srvCfg, task.RemotePath, localFilePath, task.TotalBytes, offset, limiter)
+	err := downloadFileWithRetry(ctx, task, client, srvCfg, task.RemotePath, localFilePath, task.TotalBytes, offset, limiter)
+	if err == nil {
+		removeSegmentState(localFilePath)
+	}
+	return err
 }
 
-// downloadFileWithRetry performs file transfer with automatic reconnect and retries upon transient network drops
+// downloadFileWithRetry performs file transfer with automatic reconnect, exponential backoff, and dead-connection recovery
 func downloadFileWithRetry(
 	ctx context.Context,
 	task *DownloadTask,
@@ -273,7 +329,7 @@ func downloadFileWithRetry(
 	startOffset int64,
 	limiter *RateLimiter,
 ) error {
-	const maxRetries = 4
+	const maxRetries = 5
 	var currentOffset = startOffset
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -298,18 +354,28 @@ func downloadFileWithRetry(
 
 		// Calculate updated offset from partial file on disk
 		if fi, sErr := os.Stat(localPath); sErr == nil {
-			currentOffset = fi.Size()
-			if expectedSize > 0 && currentOffset >= expectedSize {
+			localSize := fi.Size()
+			if expectedSize > 0 && localSize == expectedSize {
 				return nil
 			}
+			if expectedSize > 0 && localSize > expectedSize {
+				_ = os.Truncate(localPath, 0)
+				currentOffset = 0
+			} else {
+				currentOffset = localSize
+			}
 			log.Printf("[Downloader] [%s] Saved chunk up to %s. Reconnecting socket in %v...",
-				task.GameTitle, FormatBytes(currentOffset), time.Duration(attempt*500)*time.Millisecond)
+				task.GameTitle, FormatBytes(currentOffset), time.Duration(attempt)*time.Second)
 		}
 
-		// Reconnect client for fresh socket on next retry attempt
+		// Reconnect client for fresh socket on next retry attempt with exponential backoff
 		_ = client.Close()
-		time.Sleep(time.Duration(attempt*500) * time.Millisecond)
-		_ = client.Connect(srvCfg)
+		time.Sleep(time.Duration(attempt) * time.Second)
+		if cErr := client.Connect(srvCfg); cErr != nil {
+			log.Printf("[Downloader] WARN: [%s] Reconnect failed (attempt %d/%d): %v", task.GameTitle, attempt, maxRetries, cErr)
+			time.Sleep(1 * time.Second)
+			_ = client.Connect(srvCfg)
+		}
 	}
 
 	log.Printf("[Downloader] ERROR: [%s] Transfer failed after %d retries for \"%s\"",
@@ -317,7 +383,8 @@ func downloadFileWithRetry(
 	return fmt.Errorf("transfer failed after %d retries for %s", maxRetries, filepath.Base(localPath))
 }
 
-// streamFileChunk reads from remote client and writes to local disk with zero-allocation buffer pooling
+// streamFileChunk reads from remote client and writes to local disk with zero-allocation buffer pooling,
+// responsive context abort, and network deadlock watchdog
 func streamFileChunk(
 	ctx context.Context,
 	task *DownloadTask,
@@ -338,6 +405,19 @@ func streamFileChunk(
 	}
 	defer reader.Close()
 
+	// Instant context cancellation watch: tear down network socket immediately when paused/cancelled
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = reader.Close()
+		case <-stopWatch:
+		}
+	}()
+
+	deadliner, hasDeadline := reader.(interface{ SetDeadline(time.Time) error })
+
 	var flags int
 	if offset > 0 {
 		flags = os.O_CREATE | os.O_WRONLY
@@ -357,6 +437,10 @@ func streamFileChunk(
 		}
 	}
 
+	// 512KB buffered disk writer to batch filesystem writes and optimize I/O throughput
+	bufWriter := bufio.NewWriterSize(outFile, 512*1024)
+	defer bufWriter.Flush()
+
 	var src io.Reader = reader
 	if expectedSize > 0 && expectedSize > offset {
 		src = io.LimitReader(reader, expectedSize-offset)
@@ -373,13 +457,17 @@ func streamFileChunk(
 		default:
 		}
 
+		if hasDeadline {
+			_ = deadliner.SetDeadline(time.Now().Add(25 * time.Second))
+		}
+
 		n, rErr := src.Read(buf)
 		if n > 0 {
 			if limiter != nil {
 				_ = limiter.Wait(ctx, int64(n))
 			}
 
-			if _, wErr := outFile.Write(buf[:n]); wErr != nil {
+			if _, wErr := bufWriter.Write(buf[:n]); wErr != nil {
 				return fmt.Errorf("failed to write local chunk: %w", wErr)
 			}
 			task.DownloadedBytes.Add(int64(n))

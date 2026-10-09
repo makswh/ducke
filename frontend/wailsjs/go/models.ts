@@ -319,6 +319,8 @@ export namespace database {
 	    remotePath?: string;
 	    magnetUri?: string;
 	    uploadDate?: string;
+	    createdAt?: string;
+	    updatedAt?: string;
 	    isDirectory: boolean;
 	    steamAppId?: number;
 	
@@ -338,6 +340,8 @@ export namespace database {
 	        this.remotePath = source["remotePath"];
 	        this.magnetUri = source["magnetUri"];
 	        this.uploadDate = source["uploadDate"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	        this.isDirectory = source["isDirectory"];
 	        this.steamAppId = source["steamAppId"];
 	    }
@@ -402,6 +406,8 @@ export namespace database {
 	    torrentSource?: string;
 	    magnetUri?: string;
 	    uploadDate?: string;
+	    createdAt?: string;
+	    updatedAt?: string;
 	    favoriteStatus?: string;
 	    variants?: GameVariant[];
 	
@@ -448,6 +454,8 @@ export namespace database {
 	        this.torrentSource = source["torrentSource"];
 	        this.magnetUri = source["magnetUri"];
 	        this.uploadDate = source["uploadDate"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	        this.favoriteStatus = source["favoriteStatus"];
 	        this.variants = this.convertValues(source["variants"], GameVariant);
 	    }

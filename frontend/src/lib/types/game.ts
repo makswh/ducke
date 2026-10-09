@@ -45,6 +45,8 @@ export interface GameEntity {
   torrentSource?: string;
   magnetUri?: string;
   uploadDate?: string;
+  createdAt?: string;
+  updatedAt?: string;
   favoriteStatus?: string;
   variants?: GameVariant[];
 }
@@ -60,6 +62,8 @@ export interface GameVariant {
   remotePath: string;
   magnetUri?: string;
   uploadDate?: string;
+  createdAt?: string;
+  updatedAt?: string;
   isDirectory: boolean;
   steamAppId?: number;
 }

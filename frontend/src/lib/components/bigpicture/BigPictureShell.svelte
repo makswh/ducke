@@ -292,7 +292,7 @@
           <span>Звук</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
           <span>Трейлеры</span>
         </div>
       {:else if selectedGame}
@@ -313,7 +313,7 @@
           <span>В избранное</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
           <span>Разделы</span>
         </div>
       {:else if activeTab === 'home'}
@@ -334,7 +334,7 @@
           <span>Избранное</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
           <span>Вкладки</span>
         </div>
       {:else if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
@@ -355,7 +355,7 @@
           <span>Сортировка</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
           <span>Вкладки</span>
         </div>
       {:else if activeTab === 'favorites'}
@@ -372,7 +372,7 @@
           <span>Сменить статус</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
           <span>Вкладки</span>
         </div>
       {:else if activeTab === 'downloads'}
@@ -385,7 +385,7 @@
           <span>Главная</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
           <span>Вкладки</span>
         </div>
       {:else if activeTab === 'settings'}
@@ -398,11 +398,11 @@
           <span>Главная</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">← →</span>
+          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">← →</span>
           <span>Сайдбар / Настройки</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
+          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
           <span>Вкладки</span>
         </div>
       {/if}

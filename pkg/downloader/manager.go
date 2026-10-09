@@ -236,7 +236,8 @@ func (dm *DownloadManager) StartDownload(gameID int64, destinationPath string) (
 	}
 
 	downloadID := uuid.New().String()
-	targetLocalPath := filepath.Join(destinationPath, game.CleanTitle)
+	sanitizedTitle := SanitizeFilename(game.CleanTitle)
+	targetLocalPath := filepath.Join(destinationPath, sanitizedTitle)
 
 	log.Printf("[Downloader] Download requested: \"%s\" (Size: %s, Directory: %v) -> Target: %s",
 		game.CleanTitle, FormatBytes(game.SizeBytes), game.IsDirectory, targetLocalPath)
@@ -311,7 +312,8 @@ func (dm *DownloadManager) StartTorrentDownload(game database.GameEntity, destin
 	}
 
 	downloadID := uuid.New().String()
-	targetLocalPath := filepath.Join(destinationPath, game.CleanTitle)
+	sanitizedTitle := SanitizeFilename(game.CleanTitle)
+	targetLocalPath := filepath.Join(destinationPath, sanitizedTitle)
 
 	bg := game.BackgroundImage
 	if bg == "" {
@@ -441,7 +443,42 @@ func (dm *DownloadManager) executeTorrentDownload(task *DownloadTask) {
 		return
 	}
 
-	destDir := filepath.Dir(task.LocalPath)
+	// If task had an error, drop previous in-memory handle so storage is reconfigured cleanly
+	task.mu.RLock()
+	hadPrevError := task.ErrorMessage != ""
+	task.mu.RUnlock()
+	if hadPrevError {
+		dm.torrentEngine.DropTorrent(task.ID)
+	}
+
+	settings := dm.cfgManager.GetSettings()
+	destDir := settings.DownloadPath
+	if destDir == "" {
+		destDir = config.GetDefaultDownloadPath()
+	}
+
+	// Resolve destination directory cleanly (avoiding trailing slashes or subfolder splits)
+	if task.LocalPath != "" {
+		cleanTaskPath := filepath.Clean(task.LocalPath)
+		cleanSettingsPath := filepath.Clean(destDir)
+		rel, err := filepath.Rel(cleanSettingsPath, cleanTaskPath)
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			// task.LocalPath is under settings.DownloadPath
+			destDir = cleanSettingsPath
+		} else {
+			// Download was placed in a custom folder or drive; find existing parent
+			candidate := filepath.Dir(cleanTaskPath)
+			for candidate != "." && candidate != "/" && filepath.Dir(candidate) != candidate {
+				if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
+					destDir = candidate
+					break
+				}
+				candidate = filepath.Dir(candidate)
+			}
+		}
+	}
+	_ = os.MkdirAll(destDir, 0755)
+
 	t, err := dm.torrentEngine.AddMagnet(task.ID, task.MagnetURI, destDir)
 	if err != nil {
 		task.mu.Lock()
@@ -479,7 +516,8 @@ scanLoop:
 		}
 	}
 
-	actualTorrentPath := filepath.Join(destDir, t.Name())
+	cleanTorrentName := SanitizeFilename(t.Name())
+	actualTorrentPath := filepath.Join(destDir, cleanTorrentName)
 	task.mu.Lock()
 	if task.Status != StatusScanning && task.Status != StatusQueued {
 		task.mu.Unlock()
@@ -487,6 +525,7 @@ scanLoop:
 	}
 	task.Status = StatusDownloading
 	task.LocalPath = actualTorrentPath
+	task.ErrorMessage = ""
 	if t.Length() > 0 {
 		task.TotalBytes = t.Length()
 	}
@@ -508,27 +547,33 @@ scanLoop:
 	dm.emitTaskEvent(task)
 	dm.notifyListChanged()
 
-	// 2. Verify existing on-disk pieces against piece-completion DB.
-	//    This re-hashes data already downloaded in a prior session and marks those
-	//    pieces complete so DownloadAll() only fetches what is genuinely missing.
-	log.Printf("[Downloader] [%s] Verifying existing data before download...", task.GameTitle)
-	if err := t.VerifyDataContext(ctx); err != nil {
-		// Non-fatal: verification cancelled (e.g. user paused) or not supported.
-		// Just proceed – the library will re-download any unconfirmed pieces.
-		if ctx.Err() != nil {
-			return
-		}
-		log.Printf("[Downloader] [%s] Piece verification warning: %v (continuing)", task.GameTitle, err)
+	if len(t.Files()) > 1 {
+		_ = os.MkdirAll(actualTorrentPath, 0755)
+	} else if len(t.Files()) == 1 {
+		_ = os.MkdirAll(filepath.Dir(actualTorrentPath), 0755)
 	}
-	// Update UI with bytes already confirmed complete after verification
+
+	// 2. Register chunk write error callback to detect and report filesystem/permission issues
+	t.SetOnWriteChunkError(func(err error) {
+		log.Printf("[Downloader] ERROR: [%s] Torrent disk chunk write error: %v", task.GameTitle, err)
+		task.mu.Lock()
+		task.ErrorMessage = fmt.Sprintf("Ошибка записи на диск: %v", err)
+		task.mu.Unlock()
+		dm.emitTaskEvent(task)
+	})
+
+	// 3. Ensure data download is allowed and start piece downloads immediately
+	t.AllowDataDownload()
+	t.DownloadAll()
+
+	// 4. Update UI with bytes already confirmed complete in the persistent PieceCompletion store
 	if verified := t.BytesCompleted(); verified > 0 {
 		task.DownloadedBytes.Store(verified)
 		dm.emitTaskEvent(task)
-		log.Printf("[Downloader] [%s] Verification complete: %s already on disk", task.GameTitle, FormatBytes(verified))
+		log.Printf("[Downloader] [%s] Resume state: %s already completed on disk", task.GameTitle, FormatBytes(verified))
+	} else {
+		log.Printf("[Downloader] [%s] Starting piece downloads (Total: %s)...", task.GameTitle, FormatBytes(task.TotalBytes))
 	}
-
-	// 3. Start piece downloads (only missing pieces will be fetched)
-	t.DownloadAll()
 
 	// 4. Monitor progress & completion
 	completeFlag := t.Complete()
@@ -617,7 +662,7 @@ func (dm *DownloadManager) executeDownload(task *DownloadTask, srvCfg config.Ser
 	if task.IsDirectory {
 		err = downloadDirectory(ctx, task, srvCfg, settings.MaxConcurrentFiles, limiter)
 	} else {
-		err = downloadSingleFile(ctx, task, srvCfg, limiter)
+		err = downloadSingleFile(ctx, task, srvCfg, settings.MaxConcurrentFiles, limiter)
 	}
 
 	task.mu.Lock()
@@ -801,6 +846,7 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 
 	// 3. Mark the requested task as queued and immediately execute it
 	task.mu.Lock()
+	hadError := task.ErrorMessage != "" || task.Status == StatusFailed
 	task.Status = StatusQueued
 	task.ErrorMessage = ""
 	task.mu.Unlock()
@@ -810,7 +856,11 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 
 	if task.IsTorrent {
 		if dm.torrentEngine != nil {
-			dm.torrentEngine.ResumeTorrent(task.ID)
+			if hadError {
+				dm.torrentEngine.DropTorrent(task.ID)
+			} else {
+				dm.torrentEngine.ResumeTorrent(task.ID)
+			}
 		}
 		go dm.executeTorrentDownload(task)
 	} else {

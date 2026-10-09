@@ -1,6 +1,14 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { BookmarkSimple, X, GameController, DownloadSimple as Download } from 'phosphor-svelte';
+  import {
+    BookmarkSimple,
+    X,
+    GameController,
+    DownloadSimple as Download,
+    ArrowsDownUp,
+    CaretDown as ChevronDown,
+    Check
+  } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
   import {
     GetFavorites,
@@ -10,6 +18,7 @@
   import { EventsOn } from '../../../../wailsjs/runtime/runtime';
   import type { GameEntity } from '../../types/game';
   import { getDisplayTitle } from '../../utils/titleUtils';
+  import { parseDateToMs } from '../../utils/dateUtils';
 
   let {
     games = [] as any[],
@@ -20,10 +29,24 @@
   } = $props();
 
   type FavoriteTab = 'all' | 'planned' | 'playing' | 'completed';
+  type FavSortType = 'updated_desc' | 'added_desc' | 'rating_desc' | 'name' | 'size_desc';
   let selectedTab = $state<FavoriteTab>('all');
+  let selectedSort = $state<FavSortType>('updated_desc');
+  let isSortDropdownOpen = $state<boolean>(false);
   let searchQuery = $state<string>('');
   let favorites = $state<any[]>([]);
   let isLoading = $state<boolean>(true);
+
+  function getSortLabel(sort: FavSortType): string {
+    switch (sort) {
+      case 'updated_desc': return 'По дате обновления';
+      case 'added_desc': return 'По дате добавления';
+      case 'rating_desc': return 'Оценка Steam';
+      case 'name': return 'По названию';
+      case 'size_desc': return 'По размеру';
+      default: return 'По дате обновления';
+    }
+  }
   let isMounted = true;
   let unsubFavorites: any = null;
   let unsubEnriched: any = null;
@@ -206,7 +229,21 @@
         return title.includes(q) || steamTitle.includes(q);
       });
     }
-    return list;
+
+    const res = [...list];
+    if (selectedSort === 'updated_desc') {
+      res.sort((a, b) => parseDateToMs(b.updatedAt || b.addedAt) - parseDateToMs(a.updatedAt || a.addedAt));
+    } else if (selectedSort === 'added_desc') {
+      res.sort((a, b) => parseDateToMs(b.addedAt || b.updatedAt) - parseDateToMs(a.addedAt || a.updatedAt));
+    } else if (selectedSort === 'rating_desc') {
+      res.sort((a, b) => (resolveFavoriteGame(b).reviewPercent || 0) - (resolveFavoriteGame(a).reviewPercent || 0));
+    } else if (selectedSort === 'name') {
+      res.sort((a, b) => (resolveFavoriteGame(a).cleanTitle || '').localeCompare(resolveFavoriteGame(b).cleanTitle || ''));
+    } else if (selectedSort === 'size_desc') {
+      res.sort((a, b) => (resolveFavoriteGame(b).sizeBytes || 0) - (resolveFavoriteGame(a).sizeBytes || 0));
+    }
+
+    return res;
   });
 
   function getStatusLabel(status: string): string {
@@ -320,14 +357,14 @@
       <!-- Tab: All -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'all' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'all' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'all';
         }}
       >
         <span>Все</span>
-        <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-white/10 font-mono">
+        <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-white/10 font-mono">
           {counts.all}
         </span>
       </button>
@@ -335,7 +372,7 @@
       <!-- Tab: Planned -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'planned' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'planned' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'planned';
@@ -343,7 +380,7 @@
       >
         <span>В планах</span>
         {#if counts.planned > 0}
-          <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-amber-400 text-black font-black font-mono">
+          <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-amber-400 text-black font-black font-mono">
             {counts.planned}
           </span>
         {/if}
@@ -352,7 +389,7 @@
       <!-- Tab: Playing -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'playing' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'playing' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'playing';
@@ -360,7 +397,7 @@
       >
         <span>Прохожу</span>
         {#if counts.playing > 0}
-          <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-sky-500 text-black font-black font-mono">
+          <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-sky-500 text-black font-black font-mono">
             {counts.playing}
           </span>
         {/if}
@@ -369,7 +406,7 @@
       <!-- Tab: Completed -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'completed' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'completed' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'completed';
@@ -377,27 +414,75 @@
       >
         <span>Пройдено</span>
         {#if counts.completed > 0}
-          <span class="px-1.5 py-0.2 rounded-sm text-[10px] bg-emerald-500 text-black font-black font-mono">
+          <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-emerald-500 text-black font-black font-mono">
             {counts.completed}
           </span>
         {/if}
       </button>
     </div>
 
-    <!-- Active Search Filter Indicator -->
-    {#if searchQuery}
-      <div class="flex items-center gap-2 px-3 py-1.5 rounded-sm bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
-        <span>Поиск: "{searchQuery}"</span>
+    <div class="flex items-center gap-3">
+      <!-- Active Search Filter Indicator -->
+      {#if searchQuery}
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-[8px] bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
+          <span>Поиск: "{searchQuery}"</span>
+          <button
+            class="hover:text-white cursor-pointer"
+            onclick={() => {
+              searchQuery = '';
+            }}
+          >
+            <X size={14} weight="bold" />
+          </button>
+        </div>
+      {/if}
+
+      <!-- Console Sort Selector -->
+      <div class="relative">
         <button
-          class="hover:text-white cursor-pointer"
+          data-nav-item
+          type="button"
+          class="h-9 px-3.5 rounded-[12px] bg-[#0c1017] hover:bg-[#161d28] border border-white/10 hover:border-white/20 flex items-center gap-2 text-xs font-medium text-slate-200 cursor-pointer transition-colors"
           onclick={() => {
-            searchQuery = '';
+            sound.playSelect();
+            isSortDropdownOpen = !isSortDropdownOpen;
           }}
         >
-          <X size={14} weight="bold" />
+          <ArrowsDownUp size={14} class="text-sky-400" />
+          <span>{getSortLabel(selectedSort)}</span>
+          <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isSortDropdownOpen ? 'rotate-180' : ''}" />
         </button>
+
+        {#if isSortDropdownOpen}
+          <div
+            class="absolute right-0 top-full mt-2 z-50 w-52 rounded-[14px] bg-[#0d1117] border border-white/10 shadow-2xl p-1 space-y-0.5"
+          >
+            {#each [
+              { id: 'updated_desc', label: 'По дате обновления' },
+              { id: 'added_desc', label: 'По дате добавления' },
+              { id: 'rating_desc', label: 'Оценка Steam' },
+              { id: 'name', label: 'По названию' },
+              { id: 'size_desc', label: 'По размеру' }
+            ] as opt}
+              <button
+                data-nav-item
+                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[8px] text-xs transition-colors cursor-pointer {selectedSort === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                onclick={() => {
+                  sound.playSelect();
+                  selectedSort = opt.id as FavSortType;
+                  isSortDropdownOpen = false;
+                }}
+              >
+                <span>{opt.label}</span>
+                {#if selectedSort === opt.id}
+                  <Check class="w-3.5 h-3.5 text-sky-400" />
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
-    {/if}
+    </div>
   </div>
 
   <!-- Main 10-foot Console Posters Grid -->
@@ -409,7 +494,7 @@
       </div>
     {:else if filteredFavorites.length === 0}
       <div class="h-80 flex flex-col items-center justify-center text-center space-y-4 text-[#8e95a2]">
-        <div class="w-16 h-16 rounded bg-white/[0.04] border border-white/10 flex items-center justify-center text-white/30 shadow-inner">
+        <div class="w-16 h-16 rounded-[16px] bg-white/[0.04] border border-white/10 flex items-center justify-center text-white/30 shadow-inner">
           <BookmarkSimple size={32} weight="duotone" class="text-white/30" />
         </div>
         <div class="space-y-1">
@@ -430,7 +515,7 @@
         </div>
         <button
           data-nav-item
-          class="px-6 py-2.5 rounded bg-white/10 text-white hover:bg-white/20 text-xs font-bold transition-all cursor-pointer shadow-md active:scale-95"
+          class="px-6 py-2.5 rounded-[14px] bg-white/10 text-white hover:bg-white/20 text-xs font-bold transition-all cursor-pointer shadow-md active:scale-95"
           onclick={() => {
             sound.playSelect();
             onGoToCatalog();
@@ -449,7 +534,7 @@
           <button
             data-nav-item
             data-game-id={item.gameId || item.id || (game?.id)}
-            class="group relative flex flex-col rounded overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-1 focus:ring-white focus:outline-none focus:z-20 hover:scale-102 bg-[#0d1017] border border-white/[0.05]"
+            class="group relative flex flex-col rounded-[16px] overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-1 focus:ring-white focus:outline-none focus:z-20 hover:scale-102 bg-[#0d1017] border border-white/[0.05]"
             onclick={() => {
               if (game) {
                 sound.playSelect();
@@ -475,7 +560,7 @@
                     <GameController size={16} weight="regular" class="text-white/20" />
                   </div>
                   <div class="my-auto flex flex-col items-center space-y-2">
-                    <div class="w-12 h-12 rounded-sm bg-white/[0.06] border border-white/10 flex items-center justify-center text-base font-black text-white/80 shadow-inner">
+                    <div class="w-12 h-12 rounded-[10px] bg-white/[0.06] border border-white/10 flex items-center justify-center text-base font-black text-white/80 shadow-inner">
                       {getInitials(getCleanTitle(game))}
                     </div>
                     <span class="text-xs font-bold text-[#e2e8f0] line-clamp-3 leading-snug px-1">
@@ -487,14 +572,14 @@
 
               <!-- Status Badge Overlay Top Left -->
               {#if selectedTab === 'all'}
-                <div class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-sm text-[9px] uppercase tracking-wider z-20 shadow-md {getStatusBadgeStyle(item.status)}">
+                <div class="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-[6px] text-[9px] uppercase tracking-wider z-20 shadow-md {getStatusBadgeStyle(item.status)}">
                   {getStatusLabel(item.status)}
                 </div>
               {/if}
 
               <!-- Downloading Badge Overlay Top Right -->
               {#if isDownloading}
-                <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-sm bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
+                <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-[6px] bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
                   <Download class="w-3 h-3" />
                   <span>СКАЧИВАЕТСЯ</span>
                 </div>
@@ -502,14 +587,14 @@
 
               <!-- Review score bottom left -->
               {#if game?.reviewPercent && game.reviewPercent > 0}
-                <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-sm bg-[#07080a]/95 text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
+                <div class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-[6px] bg-[#07080a]/95 text-[10px] font-mono font-bold flex items-center gap-1 border border-white/10 z-20 {game.reviewPercent >= 70 ? 'text-sky-400' : 'text-[#94a3b8]'}">
                   <span>★ {game.reviewPercent}%</span>
                 </div>
               {/if}
 
               <!-- Size badge bottom right -->
               {#if game?.sizeDisplay}
-                <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-sm bg-[#07080a]/95 text-[10px] font-mono text-white/90 border border-white/10 z-20">
+                <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-[6px] bg-[#07080a]/95 text-[10px] font-mono text-white/90 border border-white/10 z-20">
                   {game.sizeDisplay}
                 </div>
               {/if}
