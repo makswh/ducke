@@ -29,6 +29,7 @@ import (
 	"gamevault/pkg/metadata"
 	"gamevault/pkg/remote"
 	"gamevault/pkg/steam"
+	"gamevault/pkg/updater"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -42,6 +43,7 @@ type App struct {
 	steamManager       *steam.Manager
 	downloader         *downloader.DownloadManager
 	collectionsService *collections.StopGameService
+	updater            *updater.Updater
 	catalogMu           sync.Mutex
 	catalogCache        []database.GameEntity
 	catalogCacheValid   bool
@@ -105,7 +107,7 @@ func (a *App) startup(ctx context.Context) {
 
 	appLogger.SetEnabled(cfgMgr.GetSettings().EnableLogs)
 	log.Printf("[System] ===========================================")
-	log.Printf("[System] Ducke v1.2.0 starting up")
+	log.Printf("[System] Ducke v1.2.1 starting up")
 	log.Printf("[System] AppData: %s", appDataDir)
 	log.Printf("[System] LogFile: %s", logFile)
 	log.Printf("[System] Runtime: %s %s (%d CPUs)", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
@@ -126,6 +128,7 @@ func (a *App) startup(ctx context.Context) {
 	a.steamService = metadata.NewSteamService(db)
 	a.collectionsService = collections.NewStopGameService(db)
 	a.steamManager = steam.NewManager()
+	a.updater = updater.NewUpdater("makswh/ducke", "1.2.0", appDataDir)
 
 	// Initialize downloader and stream progress via Wails Events
 	a.downloader = downloader.NewDownloadManager(db, cfgMgr, func(event downloader.DownloadProgressEvent) {
@@ -137,6 +140,22 @@ func (a *App) startup(ctx context.Context) {
 			wailsRuntime.EventsEmit(a.ctx, "downloads:updated", nil)
 		}
 	})
+
+	// Background check for updates after interface finishes initial load
+	go func() {
+		time.Sleep(5 * time.Second)
+		if a.updater != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer cancel()
+			info, err := a.updater.CheckForUpdates(ctx)
+			if err == nil && info != nil && info.HasUpdate {
+				log.Printf("[Updater] New version available: %s (current: %s)", info.LatestVersion, info.CurrentVersion)
+				if a.ctx != nil {
+					wailsRuntime.EventsEmit(a.ctx, "update:available", info)
+				}
+			}
+		}
+	}()
 
 	// Pre-warm torrent catalog cache into memory in background immediately
 	go func() {
@@ -311,6 +330,54 @@ func (a *App) GetGameDetails(gameID int64) (*database.GameEntity, error) {
 	return a.db.GetGameByID(gameID)
 }
 
+// hasValidGameExecutable checks if a folder or file is/contains a playable executable (.exe, .bat, .cmd)
+func hasValidGameExecutable(folderPath string) bool {
+	if folderPath == "" {
+		return false
+	}
+	fi, err := os.Stat(folderPath)
+	if err != nil {
+		return false
+	}
+	if !fi.IsDir() {
+		ext := strings.ToLower(filepath.Ext(folderPath))
+		return ext == ".exe" || ext == ".bat" || ext == ".cmd"
+	}
+	// If companion .duckestate exists or folder contains .duckestate, download is incomplete
+	if _, err := os.Stat(folderPath + ".duckestate"); err == nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(folderPath, ".duckestate")); err == nil {
+		return false
+	}
+
+	found := false
+	baseDepth := strings.Count(filepath.Clean(folderPath), string(os.PathSeparator))
+	_ = filepath.WalkDir(folderPath, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || found {
+			return nil
+		}
+		if d.IsDir() {
+			currentDepth := strings.Count(filepath.Clean(path), string(os.PathSeparator))
+			if currentDepth-baseDepth > 3 {
+				return filepath.SkipDir
+			}
+			lowerDir := strings.ToLower(d.Name())
+			if lowerDir == "$recycle.bin" || lowerDir == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if ext == ".exe" || ext == ".bat" || ext == ".cmd" {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
 // GetGamePageDetails returns complete unified game page details including live download/installation state and resolved artwork
 func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 	game, err := a.db.GetGameByID(gameID)
@@ -357,33 +424,65 @@ func (a *App) GetGamePageDetails(gameID int64) (*GamePageDetails, error) {
 	}
 
 	// 3. Check installation state on disk
-	if details.LocalPath != "" {
-		if fi, err := os.Stat(details.LocalPath); err == nil {
-			details.IsInstalled = true
-			if fi.IsDir() {
-				if entries, err := os.ReadDir(details.LocalPath); err == nil && len(entries) > 0 {
+	switch details.DownloadStatus {
+	case "downloading", "queued", "scanning", "paused", "cancelled", "failed":
+		// An active or incomplete download is NEVER considered installed
+		details.IsInstalled = false
+	case "completed":
+		// Completed download: verify files actually exist on disk
+		if details.LocalPath != "" {
+			if fi, err := os.Stat(details.LocalPath); err == nil {
+				if fi.IsDir() {
+					if entries, err := os.ReadDir(details.LocalPath); err == nil && len(entries) > 0 {
+						details.IsInstalled = true
+					}
+				} else {
 					details.IsInstalled = true
 				}
 			}
 		}
-	} else {
-		settings := a.cfgManager.GetSettings()
-		candidates := []string{
-			filepath.Join(settings.DownloadPath, game.CleanTitle),
-			filepath.Join(settings.DownloadPath, game.RawName),
+		// If files were deleted from disk by user or clean up, reset state so user can re-download
+		if !details.IsInstalled {
+			details.DownloadStatus = "none"
 		}
-		for _, c := range candidates {
-			if fi, err := os.Stat(c); err == nil {
-				if fi.IsDir() {
-					if entries, err := os.ReadDir(c); err == nil && len(entries) > 0 {
-						details.LocalPath = c
-						details.IsInstalled = true
-						break
+	default: // "none" (not in active tasks and no download record in DB)
+		// Check if user set a custom launch config that actually exists
+		if customExe, _, err := a.db.GetFavoriteLaunchConfig(gameID); err == nil && customExe != "" {
+			if _, err := os.Stat(customExe); err == nil {
+				details.LocalPath = filepath.Dir(customExe)
+				details.IsInstalled = true
+			}
+		}
+
+		if !details.IsInstalled {
+			settings := a.cfgManager.GetSettings()
+			candidates := []string{
+				filepath.Join(settings.DownloadPath, game.CleanTitle),
+				filepath.Join(settings.DownloadPath, game.RawName),
+			}
+			for _, c := range candidates {
+				if fi, err := os.Stat(c); err == nil {
+					// Check companion .duckestate - if present, this was an incomplete download
+					if _, err := os.Stat(c + ".duckestate"); err == nil {
+						continue
 					}
-				} else {
-					details.LocalPath = c
-					details.IsInstalled = true
-					break
+					if fi.IsDir() {
+						if _, err := os.Stat(filepath.Join(c, ".duckestate")); err == nil {
+							continue
+						}
+						if hasValidGameExecutable(c) {
+							details.LocalPath = c
+							details.IsInstalled = true
+							break
+						}
+					} else {
+						ext := strings.ToLower(filepath.Ext(c))
+						if ext == ".exe" || ext == ".bat" || ext == ".cmd" {
+							details.LocalPath = c
+							details.IsInstalled = true
+							break
+						}
+					}
 				}
 			}
 		}
@@ -2127,8 +2226,57 @@ type AppInfo struct {
 func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
 		Name:    "Ducke",
-		Version: "1.2.0",
+		Version: "1.2.1",
 	}
+}
+
+// ==========================================
+// Auto-Updater Methods
+// ==========================================
+
+// CheckForUpdates initiates manual check for updates from GitHub releases
+func (a *App) CheckForUpdates() (*updater.UpdateInfo, error) {
+	if a.updater == nil {
+		return nil, fmt.Errorf("updater service not initialized")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	return a.updater.CheckForUpdates(ctx)
+}
+
+// StartUpdateDownload begins downloading the new release asset
+func (a *App) StartUpdateDownload() error {
+	if a.updater == nil {
+		return fmt.Errorf("updater service not initialized")
+	}
+	go func() {
+		ctx := context.Background()
+		_, err := a.updater.DownloadUpdate(ctx, func(p updater.UpdateProgress) {
+			if a.ctx != nil {
+				wailsRuntime.EventsEmit(a.ctx, "update:progress", p)
+			}
+		})
+		if err != nil && a.ctx != nil {
+			wailsRuntime.EventsEmit(a.ctx, "update:error", err.Error())
+		}
+	}()
+	return nil
+}
+
+// ApplyUpdateAndRestart extracts the downloaded update and relaunches the application
+func (a *App) ApplyUpdateAndRestart() error {
+	if a.updater == nil {
+		return fmt.Errorf("updater service not initialized")
+	}
+	return a.updater.ApplyUpdateAndRestart()
+}
+
+// GetUpdateStatus returns current updater status
+func (a *App) GetUpdateStatus() updater.UpdateStatus {
+	if a.updater == nil {
+		return updater.UpdateStatus{State: "idle"}
+	}
+	return a.updater.GetStatus()
 }
 
 // ==========================================

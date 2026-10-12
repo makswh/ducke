@@ -31,6 +31,7 @@
     X
   } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
+  import { gamepad } from '../../navigation/gamepad';
   import * as AppAPI from '../../../../wailsjs/go/main/App';
   import { EventsOn, EventsOff } from '../../../../wailsjs/runtime/runtime';
   import TorrentSourcesManager from '../TorrentSourcesManager.svelte';
@@ -116,7 +117,7 @@
   });
 
   let selectedServerId = $state<string>('');
-  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.1.5' });
+  let appInfo = $state<{ name: string; version: string }>({ name: 'Ducke', version: '1.2.0' });
   let storageDrives = $state<StorageDrive[]>([]);
   let isLoadingDrives = $state<boolean>(true);
   let isTestingConnection = $state<boolean>(false);
@@ -125,6 +126,103 @@
   let showPassword = $state<boolean>(false);
   let isClearingCache = $state<boolean>(false);
   let cacheClearMessage = $state<string | null>(null);
+
+  // Updater state
+  interface UpdateInfo {
+    currentVersion: string;
+    latestVersion: string;
+    hasUpdate: boolean;
+    releaseNotes: string;
+    releaseName: string;
+    releaseDate?: string;
+    releaseUrl?: string;
+    downloadUrl?: string;
+    assetName?: string;
+    assetSize?: number;
+  }
+
+  interface UpdateProgress {
+    downloadedBytes: number;
+    totalBytes: number;
+    percent: number;
+    speedBytesPerSec: number;
+    done: boolean;
+    error?: string;
+  }
+
+  let isCheckingUpdate = $state<boolean>(false);
+  let updateCheckResult = $state<UpdateInfo | null>(null);
+  let updateCheckMessage = $state<string | null>(null);
+  let updateProgress = $state<UpdateProgress | null>(null);
+  let isDownloadingUpdate = $state<boolean>(false);
+  let isUpdateReadyToInstall = $state<boolean>(false);
+  let updateErrorMessage = $state<string | null>(null);
+
+  async function handleCheckUpdates() {
+    sound.playSelect();
+    isCheckingUpdate = true;
+    updateCheckMessage = null;
+    updateErrorMessage = null;
+    try {
+      let res: any = null;
+      if (typeof (AppAPI as any)?.CheckForUpdates === 'function') {
+        res = await (AppAPI as any).CheckForUpdates();
+      } else if (typeof (window as any)?.go?.main?.App?.CheckForUpdates === 'function') {
+        res = await (window as any).go.main.App.CheckForUpdates();
+      }
+
+      if (res) {
+        updateCheckResult = res;
+        if (!res.hasUpdate) {
+          updateCheckMessage = `Установлена последняя версия (v${res.currentVersion || appInfo.version})`;
+        }
+      } else {
+        updateCheckMessage = 'Нет доступных обновлений';
+      }
+    } catch (e: any) {
+      console.warn('Check updates error:', e);
+      updateErrorMessage = e?.message || 'Не удалось связаться с сервером обновлений';
+    } finally {
+      isCheckingUpdate = false;
+    }
+  }
+
+  async function handleStartDownloadUpdate() {
+    sound.playSelect();
+    isDownloadingUpdate = true;
+    updateErrorMessage = null;
+    updateProgress = {
+      downloadedBytes: 0,
+      totalBytes: updateCheckResult?.assetSize || 0,
+      percent: 0,
+      speedBytesPerSec: 0,
+      done: false
+    };
+
+    try {
+      if (typeof (AppAPI as any)?.StartUpdateDownload === 'function') {
+        await (AppAPI as any).StartUpdateDownload();
+      } else if (typeof (window as any)?.go?.main?.App?.StartUpdateDownload === 'function') {
+        await (window as any).go.main.App.StartUpdateDownload();
+      }
+    } catch (e: any) {
+      isDownloadingUpdate = false;
+      updateErrorMessage = e?.message || 'Ошибка запуска загрузки';
+    }
+  }
+
+  async function handleApplyUpdate() {
+    sound.playSelect();
+    try {
+      if (typeof (AppAPI as any)?.ApplyUpdateAndRestart === 'function') {
+        await (AppAPI as any).ApplyUpdateAndRestart();
+      } else if (typeof (window as any)?.go?.main?.App?.ApplyUpdateAndRestart === 'function') {
+        await (window as any).go.main.App.ApplyUpdateAndRestart();
+      }
+    } catch (e: any) {
+      updateErrorMessage = e?.message || 'Ошибка применения обновления';
+    }
+  }
 
   // Logging state
   interface LogEntry {
@@ -316,8 +414,47 @@
       }
     });
 
+    const unsubUpdateAvail = EventsOn('update:available', (info: any) => {
+      if (info) {
+        updateCheckResult = info;
+      }
+    });
+
+    const unsubUpdateProg = EventsOn('update:progress', (prog: any) => {
+      if (prog) {
+        updateProgress = prog;
+        if (prog.done) {
+          isDownloadingUpdate = false;
+          isUpdateReadyToInstall = true;
+          sound.playTab();
+        }
+      }
+    });
+
+    const unsubUpdateErr = EventsOn('update:error', (err: any) => {
+      isDownloadingUpdate = false;
+      updateErrorMessage = typeof err === 'string' ? err : 'Ошибка загрузки обновления';
+    });
+
+    const handleGoBack = (e: CustomEvent) => {
+      const focusedEl = document.querySelector('.gamepad-focused');
+      const inDetail = focusedEl?.closest('[data-nav-zone="detail"]');
+      if (inDetail) {
+        sound.playBack();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        gamepad.focusFirstInZone('list');
+      }
+    };
+
+    window.addEventListener('app:go-back', handleGoBack as EventListener, true);
+
     return () => {
       EventsOff('log:entry');
+      if (typeof unsubUpdateAvail === 'function') unsubUpdateAvail();
+      if (typeof unsubUpdateProg === 'function') unsubUpdateProg();
+      if (typeof unsubUpdateErr === 'function') unsubUpdateErr();
+      window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
     };
   });
 
@@ -1096,14 +1233,113 @@
         </div>
 
         <div class="p-6 rounded-[18px] bg-[#0d1017] border border-white/[0.08] space-y-4">
+          <!-- App Name -->
           <div class="flex items-center justify-between py-2 border-b border-white/[0.06]">
             <span class="text-sm font-bold text-white font-mono">Приложение</span>
             <span class="text-sm font-mono font-bold text-sky-400">{appInfo.name}</span>
           </div>
 
-          <div class="flex items-center justify-between py-2 border-b border-white/[0.06]">
-            <span class="text-sm font-bold text-white font-mono">Версия</span>
-            <span class="text-sm font-mono text-[#8e95a2]">v{appInfo.version}</span>
+          <!-- Version & Update Checking -->
+          <div class="py-2 border-b border-white/[0.06] space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-sm font-bold text-white font-mono block">Версия</span>
+                <span class="text-xs font-mono text-[#8e95a2]">v{appInfo.version}</span>
+              </div>
+              <button
+                data-nav-item
+                type="button"
+                disabled={isCheckingUpdate || isDownloadingUpdate}
+                class="px-4 py-2 rounded-[10px] bg-white/10 hover:bg-white/20 focus:ring-1 focus:ring-white focus:outline-none text-white text-xs font-mono font-bold cursor-pointer transition-colors flex items-center gap-2 disabled:opacity-50"
+                onclick={handleCheckUpdates}
+              >
+                <RefreshCw class="w-3.5 h-3.5 {isCheckingUpdate ? 'animate-spin' : ''}" />
+                <span>{isCheckingUpdate ? 'Проверка...' : 'Проверить обновления'}</span>
+              </button>
+            </div>
+
+            {#if updateCheckMessage}
+              <div class="p-3 rounded-[10px] bg-white/[0.04] border border-white/10 text-xs font-mono text-[#cbd5e1] flex items-center justify-between">
+                <span>{updateCheckMessage}</span>
+                <button onclick={() => (updateCheckMessage = null)} class="text-white/40 hover:text-white p-1">
+                  <X class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            {/if}
+
+            {#if updateErrorMessage}
+              <div class="p-3 rounded-[10px] bg-rose-500/10 border border-rose-500/30 text-xs font-mono text-rose-300 flex items-center justify-between">
+                <span>{updateErrorMessage}</span>
+                <button onclick={() => (updateErrorMessage = null)} class="text-rose-400 hover:text-white p-1">
+                  <X class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            {/if}
+
+            <!-- Update Available Card -->
+            {#if updateCheckResult?.hasUpdate}
+              <div class="p-4 rounded-[14px] bg-[#0c1017] border border-sky-500/30 space-y-3 shadow-lg">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded-[6px] bg-sky-500/20 text-sky-400 text-xs font-mono font-bold">
+                      Доступна новая версия: {updateCheckResult.latestVersion}
+                    </span>
+                    {#if updateCheckResult.assetSize}
+                      <span class="text-xs font-mono text-[#8e95a2]">
+                        ({(updateCheckResult.assetSize / (1024 * 1024)).toFixed(1)} МБ)
+                      </span>
+                    {/if}
+                  </div>
+
+                  {#if !isDownloadingUpdate && !isUpdateReadyToInstall}
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="px-4 py-2 rounded-[10px] bg-sky-500 hover:bg-sky-400 text-black text-xs font-mono font-black cursor-pointer transition-colors flex items-center gap-2 shadow-md"
+                      onclick={handleStartDownloadUpdate}
+                    >
+                      <Download class="w-4 h-4 stroke-[2.5]" />
+                      <span>Скачать обновление</span>
+                      <span class="w-4 h-4 rounded-full bg-black/20 text-black text-[9px] font-black flex items-center justify-center font-mono">A</span>
+                    </button>
+                  {:else if isUpdateReadyToInstall}
+                    <button
+                      data-nav-item
+                      type="button"
+                      class="px-5 py-2.5 rounded-[10px] bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-mono font-black cursor-pointer transition-colors flex items-center gap-2 shadow-lg"
+                      onclick={handleApplyUpdate}
+                    >
+                      <Check class="w-4 h-4 stroke-[3]" />
+                      <span>Перезапустить и обновить</span>
+                      <span class="w-4 h-4 rounded-full bg-black/20 text-black text-[9px] font-black flex items-center justify-center font-mono">A</span>
+                    </button>
+                  {/if}
+                </div>
+
+                <!-- Download Progress Bar -->
+                {#if isDownloadingUpdate && updateProgress}
+                  <div class="space-y-1.5 pt-1">
+                    <div class="flex items-center justify-between text-xs font-mono text-[#cbd5e1]">
+                      <span>Загрузка файла обновления...</span>
+                      <span>{updateProgress.percent.toFixed(0)}% ({((updateProgress.speedBytesPerSec || 0) / (1024 * 1024)).toFixed(1)} МБ/с)</span>
+                    </div>
+                    <div class="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                      <div class="h-full bg-sky-400 transition-all duration-200" style="width: {updateProgress.percent}%"></div>
+                    </div>
+                  </div>
+                {/if}
+
+                <!-- Release Notes Preview -->
+                {#if updateCheckResult.releaseNotes}
+                  <div class="pt-2 border-t border-white/[0.06]">
+                    <div class="text-[11px] font-mono text-[#8e95a2] uppercase tracking-wider mb-1">Что нового:</div>
+                    <div class="max-h-36 overflow-y-auto text-xs font-mono text-[#94a3b8] whitespace-pre-wrap leading-relaxed p-2.5 rounded bg-black/40 border border-white/[0.04]">
+                      {updateCheckResult.releaseNotes}
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
 
           <!-- Open Config Folder -->
