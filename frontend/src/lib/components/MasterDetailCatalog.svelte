@@ -27,6 +27,11 @@
   import { downloadsStore } from '../stores/downloads.svelte';
   import GameDetailView from './GameDetailView.svelte';
   import GameListSidebar from './GameListSidebar.svelte';
+  import {
+    matchesSourceFilter,
+    SOURCE_FILTER_OPTIONS,
+    type SourceFilterType
+  } from '../utils/sourceUtils';
 
   let {
     games = [] as GameEntity[],
@@ -45,6 +50,7 @@
   const SAVED_RATING_KEY = 'ducke_catalog_selected_rating';
   const SAVED_SIZE_KEY = 'ducke_catalog_selected_size';
   const SAVED_YEAR_KEY = 'ducke_catalog_selected_year';
+  const SAVED_SOURCE_KEY = 'ducke_catalog_selected_source';
 
   function getStoredFilter(key: string, fallback: string): string {
     try {
@@ -59,6 +65,9 @@
   type CatalogSortType = 'added_desc' | 'updated_desc' | 'date_desc' | 'name' | 'size_desc' | 'size_asc' | 'rating_desc' | 'popular_desc';
   let selectedSort = $state<CatalogSortType>(
     getStoredFilter(SAVED_SORT_KEY, 'added_desc') as any
+  );
+  let selectedSource = $state<SourceFilterType>(
+    getStoredFilter(SAVED_SOURCE_KEY, 'all') as SourceFilterType
   );
   let selectedGenre = $state<string>(getStoredFilter(SAVED_GENRE_KEY, 'all'));
   let selectedTags = $state<string[]>(() => {
@@ -119,6 +128,7 @@
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(SAVED_SORT_KEY, selectedSort);
+        localStorage.setItem(SAVED_SOURCE_KEY, selectedSource);
         localStorage.setItem(SAVED_GENRE_KEY, selectedGenre);
         localStorage.setItem(SAVED_TAGS_KEY, JSON.stringify(selectedTags));
         localStorage.setItem(SAVED_RATING_KEY, selectedRating);
@@ -130,6 +140,7 @@
 
   let activeFilterCount = $derived.by(() => {
     let count = 0;
+    if (selectedSource !== 'all') count++;
     if (selectedGenre !== 'all') count++;
     if (Array.isArray(selectedTags) && selectedTags.length > 0) count += selectedTags.length;
     if (selectedRating !== 'all') count++;
@@ -141,6 +152,7 @@
   });
 
   function resetAllFilters() {
+    selectedSource = 'all';
     selectedGenre = 'all';
     selectedTags = [];
     selectedRating = 'all';
@@ -159,6 +171,11 @@
     } else {
       selectedTags = [...list, tag];
     }
+  }
+
+  function getSourceLabel(val: string): string {
+    const opt = SOURCE_FILTER_OPTIONS.find((o) => o.id === val);
+    return opt ? opt.label : val;
   }
 
   function getRatingLabel(val: string): string {
@@ -289,6 +306,7 @@
   // Single-pass filter over deduplicated list
   let filteredGames = $derived.by(() => {
     const q = debouncedSearchQuery.trim().toLowerCase();
+    const selSource = selectedSource;
     const selGenre = selectedGenre && selectedGenre !== 'all' ? selectedGenre.toLowerCase() : null;
     const rawTags = Array.isArray(selectedTags) ? selectedTags : [];
     const selTags = rawTags.map((t) => (typeof t === 'string' ? t.toLowerCase() : '')).filter(Boolean);
@@ -299,6 +317,11 @@
     const reqCollections = filterCollections;
 
     let result = deduplicatedList.filter((g) => {
+      // 0. Source filter match
+      if (!matchesSourceFilter(g, selSource)) {
+        return false;
+      }
+
       // 1. Fast search match using precomputed corpus
       if (q && !g._searchCorpus.includes(q)) {
         return false;
@@ -513,7 +536,7 @@
       {#if activeFilterCount > 0}
         <div class="flex flex-wrap items-center gap-[6px] pt-0.5">
           {#if selectedGenre !== 'all'}
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border-t border-t-white/[0.05] text-[11px] font-light text-white/70">
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border border-white/10 text-[11px] font-light text-white/70">
               <span class="truncate max-w-[120px]">{selectedGenre}</span>
               <button
                 type="button"
@@ -527,7 +550,7 @@
           {/if}
 
           {#each (Array.isArray(selectedTags) ? selectedTags : []) as tag}
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border-t border-t-white/[0.05] text-[11px] font-light text-white/70">
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border border-white/10 text-[11px] font-light text-white/70">
               <span class="truncate max-w-[120px]">{tag}</span>
               <button
                 type="button"
@@ -540,8 +563,22 @@
             </span>
           {/each}
 
+          {#if selectedSource !== 'all'}
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border border-white/10 text-[11px] font-light text-white/70">
+              <span>{getSourceLabel(selectedSource)}</span>
+              <button
+                type="button"
+                class="hover:text-white cursor-pointer ml-0.5"
+                onclick={() => (selectedSource = 'all')}
+                title="Сбросить источник"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </span>
+          {/if}
+
           {#if selectedRating !== 'all'}
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border-t border-t-white/[0.05] text-[11px] font-light text-white/70">
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border border-white/10 text-[11px] font-light text-white/70">
               <span>{getRatingLabel(selectedRating)}</span>
               <button
                 type="button"
@@ -555,7 +592,7 @@
           {/if}
 
           {#if selectedSize !== 'all'}
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border-t border-t-white/[0.05] text-[11px] font-light text-white/70">
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border border-white/10 text-[11px] font-light text-white/70">
               <span>{getSizeLabel(selectedSize)}</span>
               <button
                 type="button"
@@ -569,7 +606,7 @@
           {/if}
 
           {#if selectedYear !== 'all'}
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border-t border-t-white/[0.05] text-[11px] font-light text-white/70">
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border border-white/10 text-[11px] font-light text-white/70">
               <span>{getYearLabel(selectedYear)}</span>
               <button
                 type="button"
@@ -583,7 +620,7 @@
           {/if}
 
           {#if filterController}
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border-t border-t-white/[0.05] text-[11px] font-light text-white/70">
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border border-white/10 text-[11px] font-light text-white/70">
               <span>Геймпад</span>
               <button
                 type="button"
@@ -597,7 +634,7 @@
           {/if}
 
           {#if filterCollections}
-            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border-t border-t-white/[0.05] text-[11px] font-light text-white/70">
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[12px] bg-white/[0.05] border border-white/10 text-[11px] font-light text-white/70">
               <span>Сборники</span>
               <button
                 type="button"
@@ -641,7 +678,7 @@
               <span class="text-white/20">/</span>
               <span class="text-xs font-semibold text-white truncate">Фильтры</span>
               {#if activeFilterCount > 0}
-                <span class="px-1.5 py-0.2 rounded bg-white/10 text-white font-mono text-[10px]">
+                <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-mono text-[10px]">
                   {activeFilterCount}
                 </span>
               {/if}
@@ -661,6 +698,36 @@
           <!-- Offcanvas Scrollable Content (No horizontal scroll, clean Steam aesthetic) -->
           <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-5 text-xs select-none">
             
+            <!-- 0. Источник загрузки -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#64748b]">Источник</span>
+                {#if selectedSource !== 'all'}
+                  <button
+                    type="button"
+                    onclick={() => (selectedSource = 'all')}
+                    class="text-[10px] text-[#8e95a2] hover:text-white cursor-pointer"
+                  >
+                    Сброс
+                  </button>
+                {/if}
+              </div>
+              <div class="space-y-1">
+                {#each SOURCE_FILTER_OPTIONS as opt}
+                  <button
+                    type="button"
+                    onclick={() => (selectedSource = opt.id)}
+                    class="w-full flex items-center justify-between px-3 py-1.5 rounded-sm text-left transition-colors cursor-pointer {selectedSource === opt.id ? 'bg-white/10 text-white font-medium border border-white/15' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.03] border border-transparent'}"
+                  >
+                    <span>{opt.label}</span>
+                    {#if selectedSource === opt.id}
+                      <Check class="w-3.5 h-3.5 text-white" />
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            </div>
+
             <!-- 1. Оценка Steam -->
             <div>
               <div class="flex items-center justify-between mb-2">

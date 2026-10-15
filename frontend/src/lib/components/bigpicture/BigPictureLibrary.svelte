@@ -20,6 +20,11 @@
   import { gamepad } from '../../navigation/gamepad';
   import { deduplicateGames } from '../../utils/gameDeduplication';
   import { getGameAddedTime, getGameUpdatedTime } from '../../utils/dateUtils';
+  import {
+    matchesSourceFilter,
+    SOURCE_FILTER_OPTIONS,
+    type SourceFilterType
+  } from '../../utils/sourceUtils';
 
   let {
     games = [] as any[],
@@ -35,11 +40,13 @@
   let activeFilter = $state<FilterType>('all');
   let searchInputEl = $state<HTMLInputElement | null>(null);
 
-  // Sorting & Genre State
+  // Sorting, Source & Genre State
   type SortType = 'added_desc' | 'updated_desc' | 'date_desc' | 'rating_desc' | 'popular_desc' | 'name' | 'size_desc';
   let selectedSort = $state<SortType>('added_desc');
+  let selectedSource = $state<SourceFilterType>('all');
   let selectedGenre = $state<string>('all');
   let isSortDropdownOpen = $state<boolean>(false);
+  let isSourceDropdownOpen = $state<boolean>(false);
 
   // Debounced search query (150ms) to eliminate keystroke lag
   let debouncedSearchQuery = $state<string>('');
@@ -133,6 +140,11 @@
     const activeIds = filter === 'downloading' ? new Set((activeDownloads || []).map((d) => d && d.gameId)) : null;
 
     let result = deduplicatedList.filter((g) => {
+      // 0. Filter by source
+      if (!matchesSourceFilter(g, selectedSource)) {
+        return false;
+      }
+
       // 1. Filter by category
       if (filter === 'downloading') {
         if (!activeIds || !activeIds.has(g.id)) return false;
@@ -255,15 +267,20 @@
     }
   }
 
+  function getSourceLabel(src: SourceFilterType): string {
+    const opt = SOURCE_FILTER_OPTIONS.find((o) => o.id === src);
+    return opt ? opt.label : 'Все источники';
+  }
+
   function handleScroll() {
     if (scrollContainer) {
       scrollTop = scrollContainer.scrollTop;
     }
   }
 
-  // Reset scroll when filter, genre, sort, or search changes
+  // Reset scroll when filter, genre, sort, source, or search changes
   $effect(() => {
-    const _ = [activeFilter, debouncedSearchQuery, selectedGenre, selectedSort];
+    const _ = [activeFilter, debouncedSearchQuery, selectedGenre, selectedSort, selectedSource];
     if (scrollContainer) {
       scrollContainer.scrollTop = 0;
       scrollTop = 0;
@@ -286,9 +303,55 @@
       ro.observe(scrollContainer);
     }
 
-    const handleGoBack = (e: CustomEvent) => {
+    const closeSortDropdown = () => {
       if (isSortDropdownOpen) {
         isSortDropdownOpen = false;
+        sound.playBack();
+        window.dispatchEvent(new CustomEvent('app:modal-closed'));
+        setTimeout(() => gamepad.retryFocusZone('grid'), 40);
+      }
+    };
+
+    const toggleSortDropdown = () => {
+      if (isSortDropdownOpen) {
+        closeSortDropdown();
+      } else {
+        if (isSourceDropdownOpen) closeSourceDropdown();
+        isSortDropdownOpen = true;
+        sound.playFocus();
+        window.dispatchEvent(new CustomEvent('app:modal-opened'));
+        setTimeout(() => gamepad.retryFocusZone('modal'), 40);
+      }
+    };
+
+    const closeSourceDropdown = () => {
+      if (isSourceDropdownOpen) {
+        isSourceDropdownOpen = false;
+        sound.playBack();
+        window.dispatchEvent(new CustomEvent('app:modal-closed'));
+        setTimeout(() => gamepad.retryFocusZone('grid'), 40);
+      }
+    };
+
+    const toggleSourceDropdown = () => {
+      if (isSourceDropdownOpen) {
+        closeSourceDropdown();
+      } else {
+        if (isSortDropdownOpen) closeSortDropdown();
+        isSourceDropdownOpen = true;
+        sound.playFocus();
+        window.dispatchEvent(new CustomEvent('app:modal-opened'));
+        setTimeout(() => gamepad.retryFocusZone('modal'), 40);
+      }
+    };
+
+    const handleGoBack = (e: CustomEvent) => {
+      if (isSortDropdownOpen) {
+        closeSortDropdown();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (isSourceDropdownOpen) {
+        closeSourceDropdown();
         e.preventDefault();
         e.stopImmediatePropagation();
       } else if (isSearchOpen) {
@@ -298,13 +361,24 @@
       }
     };
 
+    const handleModalClose = (e: Event) => {
+      if (isSortDropdownOpen) {
+        closeSortDropdown();
+        e.preventDefault();
+      }
+      if (isSourceDropdownOpen) {
+        closeSourceDropdown();
+        e.preventDefault();
+      }
+    };
+
     const handleBtnY = (e: CustomEvent) => {
-      sound.playFocus();
-      isSortDropdownOpen = !isSortDropdownOpen;
+      toggleSortDropdown();
       e.preventDefault();
     };
 
     window.addEventListener('app:go-back', handleGoBack as EventListener, true);
+    window.addEventListener('app:modal-close', handleModalClose);
     window.addEventListener('app:btn-y', handleBtnY as EventListener);
 
     setTimeout(() => {
@@ -313,6 +387,7 @@
 
     return () => {
       window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
+      window.removeEventListener('app:modal-close', handleModalClose);
       window.removeEventListener('app:btn-y', handleBtnY as EventListener);
     };
   });
@@ -446,7 +521,7 @@
     <div class="flex items-center gap-2">
       <button
         data-nav-item
-        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer {activeFilter === 'all' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer {activeFilter === 'all' ? 'bg-white/[0.08] text-white border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           activeFilter = 'all';
@@ -457,7 +532,7 @@
 
       <button
         data-nav-item
-        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer {activeFilter === 'has_steam' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer {activeFilter === 'has_steam' ? 'bg-white/[0.08] text-white border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           activeFilter = 'has_steam';
@@ -468,7 +543,7 @@
 
       <button
         data-nav-item
-        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {activeFilter === 'downloading' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {activeFilter === 'downloading' ? 'bg-white/[0.08] text-white border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           activeFilter = 'downloading';
@@ -476,7 +551,7 @@
       >
         <span>В загрузках</span>
         {#if (activeDownloads || []).length > 0}
-          <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-sky-500 text-black font-black">
+          <span class="px-1.5 py-0.5 rounded-[6px] text-[10px] font-mono bg-[#2563eb] text-white font-bold">
             {(activeDownloads || []).length}
           </span>
         {/if}
@@ -486,10 +561,10 @@
     <!-- Right Controls: Sort Dropdown & Search Query Badge -->
     <div class="flex items-center gap-3 relative">
       {#if searchQuery}
-        <div class="flex items-center gap-2 px-3 py-1.5 rounded-[8px] bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-[10px] bg-white/[0.06] border border-white/10 text-white text-xs">
           <span>Поиск: "{searchQuery}"</span>
           <button
-            class="hover:text-white cursor-pointer"
+            class="hover:text-white text-[#8e95a2] cursor-pointer"
             onclick={() => {
               searchQuery = '';
             }}
@@ -499,24 +574,76 @@
         </div>
       {/if}
 
+      <!-- Console Source Selector -->
+      <div class="relative">
+        <button
+          data-nav-item
+          class="px-3.5 py-2 rounded-[12px] bg-white/[0.04] hover:bg-white/[0.08] text-xs font-semibold {selectedSource !== 'all' ? 'text-white border-white/20 bg-white/[0.08]' : 'text-[#8e95a2] hover:text-white border-white/[0.06]'} flex items-center gap-2 transition-colors cursor-pointer border"
+          onclick={toggleSourceDropdown}
+          title="Фильтр по источнику"
+        >
+          <HardDrive size={14} class="text-[#4C7DFF]" />
+          <span>{getSourceLabel(selectedSource)}</span>
+          <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isSourceDropdownOpen ? 'rotate-180' : ''}" />
+        </button>
+
+        {#if isSourceDropdownOpen}
+          <!-- Backdrop to dismiss on outside click -->
+          <button
+            type="button"
+            aria-label="Закрыть меню источников"
+            class="fixed inset-0 z-40 bg-black/40 cursor-default border-none p-0 m-0 w-full h-full"
+            onclick={closeSourceDropdown}
+          ></button>
+
+          <div
+            data-nav-zone="modal"
+            class="absolute right-0 top-full mt-2 z-50 w-52 rounded-[16px] bg-[#0c0e14] border border-white/10 shadow-2xl p-1.5 space-y-0.5 bp-popover-3d"
+          >
+            {#each SOURCE_FILTER_OPTIONS as opt}
+              <button
+                data-nav-item
+                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {selectedSource === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/[0.06] hover:text-white'}"
+                onclick={() => {
+                  sound.playSelect();
+                  selectedSource = opt.id;
+                  closeSourceDropdown();
+                }}
+              >
+                <span>{opt.label}</span>
+                {#if selectedSource === opt.id}
+                  <Check class="w-3.5 h-3.5 text-[#4C7DFF]" />
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
       <!-- Console Sort Selector -->
       <div class="relative">
         <button
           data-nav-item
-          class="px-3.5 py-2 rounded-[12px] bg-white/[0.05] hover:bg-white/10 text-xs font-semibold text-[#8e95a2] hover:text-white flex items-center gap-2 transition-colors cursor-pointer border border-white/5"
-          onclick={() => {
-            sound.playFocus();
-            isSortDropdownOpen = !isSortDropdownOpen;
-          }}
+          class="px-3.5 py-2 rounded-[12px] bg-white/[0.04] hover:bg-white/[0.08] text-xs font-semibold text-[#8e95a2] hover:text-white flex items-center gap-2 transition-colors cursor-pointer border border-white/[0.06]"
+          onclick={toggleSortDropdown}
         >
-          <ArrowsDownUp size={14} class="text-sky-400" />
+          <ArrowsDownUp size={14} class="text-[#4C7DFF]" />
           <span>{getSortLabel(selectedSort)}</span>
           <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isSortDropdownOpen ? 'rotate-180' : ''}" />
         </button>
 
         {#if isSortDropdownOpen}
+          <!-- Backdrop to dismiss on outside click -->
+          <button
+            type="button"
+            aria-label="Закрыть меню сортировки"
+            class="fixed inset-0 z-40 bg-black/40 cursor-default border-none p-0 m-0 w-full h-full"
+            onclick={closeSortDropdown}
+          ></button>
+
           <div
-            class="absolute right-0 top-full mt-2 z-50 w-48 rounded-[14px] bg-[#0d1117] border border-white/10 shadow-2xl p-1 space-y-0.5"
+            data-nav-zone="modal"
+            class="absolute right-0 top-full mt-2 z-50 w-52 rounded-[16px] bg-[#0c0e14] border border-white/10 shadow-2xl p-1.5 space-y-0.5 bp-popover-3d"
           >
             {#each [
               { id: 'added_desc', label: 'По дате добавления' },
@@ -529,16 +656,16 @@
             ] as opt}
               <button
                 data-nav-item
-                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[8px] text-xs transition-colors cursor-pointer {selectedSort === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {selectedSort === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/[0.06] hover:text-white'}"
                 onclick={() => {
                   sound.playSelect();
                   selectedSort = opt.id as SortType;
-                  isSortDropdownOpen = false;
+                  closeSortDropdown();
                 }}
               >
                 <span>{opt.label}</span>
                 {#if selectedSort === opt.id}
-                  <Check class="w-3.5 h-3.5 text-sky-400" />
+                  <Check class="w-3.5 h-3.5 text-[#4C7DFF]" />
                 {/if}
               </button>
             {/each}
@@ -550,14 +677,14 @@
 
   <!-- Quick Genre Ribbon -->
   {#if availableGenres.length > 0}
-    <div class="px-8 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-white/[0.04] bg-[#050608]/40 flex-shrink-0">
+    <div class="px-8 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-white/[0.04] bg-[#07080a] flex-shrink-0">
       <span class="text-[11px] font-bold text-[#64748b] uppercase tracking-wider mr-1 flex items-center gap-1 flex-shrink-0">
         <Layers class="w-3.5 h-3.5" />
         Жанр:
       </span>
       <button
         data-nav-item
-        class="px-3 py-1.5 rounded-[8px] text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre === 'all' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+        class="px-3 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre === 'all' ? 'bg-white/[0.12] text-white border border-white/20 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           selectedGenre = 'all';
@@ -568,7 +695,7 @@
       {#each availableGenres as item}
         <button
           data-nav-item
-          class="px-3 py-1.5 rounded-[8px] text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre.toLowerCase() === item.name.toLowerCase() ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
+          class="px-3 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex-shrink-0 {selectedGenre.toLowerCase() === item.name.toLowerCase() ? 'bg-white/[0.12] text-white border border-white/20 font-bold' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
           onclick={() => {
             sound.playFocus();
             selectedGenre = item.name;
@@ -580,11 +707,18 @@
     </div>
   {/if}
 
-  <!-- Search Modal Overlay (when X is pressed) -->
+  <!-- Search Modal Overlay (3D Bottom Fly-Up when X is pressed) -->
   {#if isSearchOpen}
-    <div data-nav-zone="modal" class="absolute inset-x-0 top-0 z-50 bg-[#07080a] border-b border-white/10 p-6 flex items-center justify-center animate-fade-in shadow-2xl">
-      <div class="w-full max-w-2xl flex items-center gap-3">
-        <Search class="w-5 h-5 text-sky-400 flex-shrink-0" />
+    <div
+      data-nav-zone="modal"
+      class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md bp-modal-backdrop-3d flex items-center justify-center p-6 select-none"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) onCloseSearch();
+      }}
+      role="presentation"
+    >
+      <div class="bp-modal-content-3d w-full max-w-2xl bg-[#0c0e14] border border-white/10 rounded-[20px] p-5 shadow-2xl flex items-center gap-4">
+        <Search class="w-5 h-5 text-[#4C7DFF] flex-shrink-0" />
         <input
           data-nav-item
           bind:this={searchInputEl}
@@ -600,7 +734,7 @@
         />
         <button
           data-nav-item
-          class="px-4 py-2 rounded-[12px] text-xs font-bold bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+          class="px-4 py-2 rounded-[12px] text-xs font-bold bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors"
           onclick={() => onCloseSearch()}
         >
           Готово
@@ -608,6 +742,7 @@
       </div>
     </div>
   {/if}
+
 
   <!-- Main 10-foot Console Posters Grid with Virtualization -->
   <div
@@ -645,7 +780,7 @@
             <button
               data-nav-item
               use:measureCard
-              class="group relative flex flex-col rounded-[16px] overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-1 focus:ring-white focus:outline-none focus:z-20 hover:scale-102 bg-[#0d1017] border border-white/[0.04] focus:border-white"
+              class="group relative flex flex-col rounded-[16px] overflow-hidden text-left cursor-pointer transition-all duration-200 focus:scale-105 focus:ring-2 focus:ring-white focus:outline-none focus:z-20 hover:scale-[1.02] bg-[#0c0e14] border border-white/[0.06] focus:border-white"
               onclick={() => {
                 sound.playSelect();
                 onSelectGame(game);
@@ -686,11 +821,12 @@
 
                 <!-- Downloading / Queued Badge Overlay -->
                 {#if isDownloading}
-                  <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-[6px] bg-[#07080a]/90 border border-sky-500/40 text-sky-400 text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
+                  <div class="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-[6px] bg-[#07080a]/90 border border-[#2563eb]/40 text-[#4C7DFF] text-[9px] font-bold tracking-wider flex items-center gap-1 shadow-md z-20">
                     <Download class="w-3 h-3" />
                     <span>СКАЧИВАЕТСЯ</span>
                   </div>
                 {/if}
+
 
                 <!-- Steam rating badge bottom left -->
                 {#if game.reviewPercent && game.reviewPercent > 0}

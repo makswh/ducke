@@ -10,12 +10,20 @@ export function AddTorrentSource(arg1) {
   return window['go']['main']['App']['AddTorrentSource'](arg1);
 }
 
+export function ApplyUpdateAndRestart() {
+  return window['go']['main']['App']['ApplyUpdateAndRestart']();
+}
+
 export function CancelAllDownloads() {
   return window['go']['main']['App']['CancelAllDownloads']();
 }
 
 export function CancelDownload(arg1) {
   return window['go']['main']['App']['CancelDownload'](arg1);
+}
+
+export function CheckForUpdates() {
+  return window['go']['main']['App']['CheckForUpdates']();
 }
 
 export function CheckGameInSteam(arg1) {
@@ -154,6 +162,10 @@ export function GetTorrentSources() {
   return window['go']['main']['App']['GetTorrentSources']();
 }
 
+export function GetUpdateStatus() {
+  return window['go']['main']['App']['GetUpdateStatus']();
+}
+
 export function ImportFileZillaFile() {
   return window['go']['main']['App']['ImportFileZillaFile']();
 }
@@ -274,6 +286,10 @@ export function SetActiveServer(arg1) {
   return window['go']['main']['App']['SetActiveServer'](arg1);
 }
 
+export function SetAutoExtractArchives(arg1) {
+  return window['go']['main']['App']['SetAutoExtractArchives'](arg1);
+}
+
 export function SetFavoriteLaunchConfig(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetFavoriteLaunchConfig'](arg1, arg2, arg3);
 }
@@ -282,12 +298,20 @@ export function SetFavoriteStatus(arg1, arg2) {
   return window['go']['main']['App']['SetFavoriteStatus'](arg1, arg2);
 }
 
+export function StartDDLDownload(arg1, arg2, arg3) {
+  return window['go']['main']['App']['StartDDLDownload'](arg1, arg2, arg3);
+}
+
 export function StartDownload(arg1, arg2) {
   return window['go']['main']['App']['StartDownload'](arg1, arg2);
 }
 
 export function StartTorrentDownload(arg1, arg2) {
   return window['go']['main']['App']['StartTorrentDownload'](arg1, arg2);
+}
+
+export function StartUpdateDownload() {
+  return window['go']['main']['App']['StartUpdateDownload']();
 }
 
 export function SyncTorrentSources() {

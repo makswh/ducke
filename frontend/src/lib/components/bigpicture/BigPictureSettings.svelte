@@ -72,6 +72,7 @@
     steamDeckMode: boolean;
     steamApiKey: string;
     enableLogs?: boolean;
+    autoExtractArchives?: boolean;
     activeServer?: ServerConfig;
     savedServers: ServerConfig[];
     torrentSources?: any[];
@@ -101,6 +102,7 @@
     steamDeckMode: true,
     steamApiKey: '',
     enableLogs: false,
+    autoExtractArchives: true,
     savedServers: [],
     torrentSources: [],
     activeServer: {
@@ -344,6 +346,7 @@
           steamDeckMode: current.steamDeckMode ?? true,
           steamApiKey: current.steamApiKey || '',
           enableLogs: !!current.enableLogs,
+          autoExtractArchives: current.autoExtractArchives !== undefined ? !!current.autoExtractArchives : true,
           savedServers,
           activeServer,
           torrentSources: Array.isArray(current.torrentSources) ? current.torrentSources.map((s: any) => ({ ...s })) : []
@@ -554,8 +557,90 @@
     triggerSave();
   }
 
+  function sanitizeServerInput(srv: ServerConfig | null) {
+    if (!srv || !srv.host) return;
+    let raw = srv.host.trim();
+    if (!raw) return;
+
+    const lower = raw.toLowerCase();
+    if (lower.startsWith('ftp://')) {
+      srv.protocol = 'ftp';
+      if (!srv.port || srv.port === 2022) srv.port = 21;
+      raw = raw.slice(6);
+    } else if (lower.startsWith('ftps://')) {
+      srv.protocol = 'ftps';
+      if (!srv.port || srv.port === 2022) srv.port = 990;
+      raw = raw.slice(7);
+    } else if (lower.startsWith('sftp://')) {
+      srv.protocol = 'sftp';
+      if (!srv.port || srv.port === 21) srv.port = 2022;
+      raw = raw.slice(7);
+    } else if (lower.startsWith('http://')) {
+      raw = raw.slice(7);
+    } else if (lower.startsWith('https://')) {
+      raw = raw.slice(8);
+    }
+
+    // Extract path if present (e.g. ftp.matrixgames.com/pub/ or server/dir)
+    const slashIdx = raw.indexOf('/');
+    const backslashIdx = raw.indexOf('\\');
+    const splitIdx = slashIdx !== -1 ? slashIdx : backslashIdx;
+    if (splitIdx !== -1) {
+      const extractedPath = raw.slice(splitIdx).replace(/\\/g, '/');
+      raw = raw.slice(0, splitIdx);
+      if (!srv.remoteDir || srv.remoteDir === '/' || srv.remoteDir === '.' || srv.remoteDir === '0') {
+        srv.remoteDir = extractedPath.replace(/\/+$/, '') || '/';
+      }
+    }
+
+    // Extract credentials user:pass@host
+    const atIdx = raw.lastIndexOf('@');
+    if (atIdx !== -1) {
+      const creds = raw.slice(0, atIdx);
+      raw = raw.slice(atIdx + 1);
+      if (!srv.user) {
+        const colIdx = creds.indexOf(':');
+        if (colIdx !== -1) {
+          srv.user = creds.slice(0, colIdx);
+          if (!srv.password) srv.password = creds.slice(colIdx + 1);
+        } else {
+          srv.user = creds;
+        }
+      }
+    }
+
+    // Extract port :21
+    const portMatch = raw.match(/:(\d+)$/);
+    if (portMatch) {
+      srv.port = parseInt(portMatch[1], 10);
+      raw = raw.slice(0, -portMatch[0].length);
+    }
+
+    srv.host = raw.replace(/^[/\\:]+|[/\\:]+$/g, '').trim();
+  }
+
+  let isAnonymous = $derived.by(() => {
+    if (!selectedServer) return false;
+    const u = (selectedServer.user || '').trim().toLowerCase();
+    return u === 'anonymous' || u === 'guest';
+  });
+
+  function toggleAnonymous() {
+    if (!selectedServer) return;
+    sound.playSelect();
+    if (isAnonymous) {
+      selectedServer.user = '';
+      selectedServer.password = '';
+    } else {
+      selectedServer.user = 'anonymous';
+      selectedServer.password = 'anonymous@';
+    }
+    triggerSave();
+  }
+
   function handleServerFieldChange() {
     if (!selectedServer) return;
+    sanitizeServerInput(selectedServer);
     const idx = localSettings.savedServers.findIndex(s => s.id === selectedServer.id);
     if (idx !== -1) {
       localSettings.savedServers[idx] = { ...selectedServer };
@@ -567,11 +652,23 @@
 
   async function handleTestConn() {
     if (!selectedServer) return;
+    sanitizeServerInput(selectedServer);
     sound.playSelect();
     isTestingConnection = true;
     testResult = null;
     try {
       const res = await onTestConnection(selectedServer);
+      if (res.cleanedHost && selectedServer) {
+        selectedServer.host = res.cleanedHost;
+      }
+      if (res.cleanedDir && selectedServer && (!selectedServer.remoteDir || selectedServer.remoteDir === '/')) {
+        selectedServer.remoteDir = res.cleanedDir;
+      }
+      if (res.cleanedPort && selectedServer) {
+        selectedServer.port = res.cleanedPort;
+      }
+      triggerSave();
+
       if (res.success) {
         testResult = {
           success: true,
@@ -1014,13 +1111,17 @@
 
             <!-- Host -->
             <div class="flex items-center justify-between py-2 border-b border-white/[0.06]">
-              <span class="text-sm font-bold text-white font-mono">Хост / IP-адрес</span>
+              <div class="flex flex-col">
+                <span class="text-sm font-bold text-white font-mono">Хост / IP-адрес</span>
+                <span class="text-[11px] text-[#8e95a2] font-mono">Поддерживает URL (ftp://host/path)</span>
+              </div>
               <input
                 data-nav-item
                 type="text"
                 bind:value={selectedServer.host}
                 onchange={triggerSave}
-                placeholder="192.168.1.100"
+                onblur={triggerSave}
+                placeholder="192.168.1.100 или ftp.example.com"
                 class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
               />
             </div>
@@ -1037,45 +1138,80 @@
               />
             </div>
 
+            <!-- Anonymous Login Toggle -->
+            <div class="flex items-center justify-between py-2 border-b border-white/[0.06]">
+              <div class="flex flex-col">
+                <span class="text-sm font-bold text-white font-mono">Анонимный вход</span>
+                <span class="text-[11px] text-[#8e95a2] font-mono">Вход без пароля (для открытых FTP)</span>
+              </div>
+              <button
+                data-nav-item
+                type="button"
+                class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:ring-1 focus:ring-white focus:outline-none {isAnonymous ? 'bg-sky-500' : 'bg-white/10'}"
+                onclick={toggleAnonymous}
+                title="Переключить анонимный вход"
+              >
+                <span
+                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out {isAnonymous ? 'translate-x-5' : 'translate-x-0'}"
+                ></span>
+              </button>
+            </div>
+
             <!-- User -->
             <div class="flex items-center justify-between py-2 border-b border-white/[0.06]">
               <span class="text-sm font-bold text-white font-mono">Пользователь</span>
-              <input
-                data-nav-item
-                type="text"
-                bind:value={selectedServer.user}
-                onchange={triggerSave}
-                placeholder="anonymous"
-                class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
-              />
+              {#if isAnonymous}
+                <div class="flex items-center gap-2">
+                  <span class="px-3 py-1.5 rounded-[8px] bg-white/5 border border-white/10 text-white font-mono text-xs font-bold">
+                    anonymous
+                  </span>
+                  <span class="text-xs text-[#8e95a2] font-mono">(гостевой доступ)</span>
+                </div>
+              {:else}
+                <input
+                  data-nav-item
+                  type="text"
+                  bind:value={selectedServer.user}
+                  onchange={triggerSave}
+                  placeholder="Логин"
+                  class="w-72 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
+                />
+              {/if}
             </div>
 
             <!-- Password -->
             <div class="flex items-center justify-between py-2 border-b border-white/[0.06]">
               <span class="text-sm font-bold text-white font-mono">Пароль</span>
-              <div class="flex items-center gap-2">
-                <button
-                  data-nav-item
-                  type="button"
-                  class="p-2 rounded-[8px] text-[#8e95a2] hover:text-white cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
-                  onclick={() => (showPassword = !showPassword)}
-                  title={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
-                >
-                  {#if showPassword}
-                    <EyeOff class="w-4 h-4" />
-                  {:else}
-                    <Eye class="w-4 h-4" />
-                  {/if}
-                </button>
-                <input
-                  data-nav-item
-                  type={showPassword ? 'text' : 'password'}
-                  bind:value={selectedServer.password}
-                  onchange={triggerSave}
-                  placeholder="••••••••"
-                  class="w-64 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
-                />
-              </div>
+              {#if isAnonymous}
+                <div class="flex items-center gap-2 text-xs font-mono text-[#8e95a2] py-1.5">
+                  <span class="text-white/70">Пароль не требуется</span>
+                  <span class="text-[11px] text-white/40 font-mono">(anonymous@)</span>
+                </div>
+              {:else}
+                <div class="flex items-center gap-2">
+                  <button
+                    data-nav-item
+                    type="button"
+                    class="p-2 rounded-[8px] text-[#8e95a2] hover:text-white cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
+                    onclick={() => (showPassword = !showPassword)}
+                    title={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                  >
+                    {#if showPassword}
+                      <EyeOff class="w-4 h-4" />
+                    {:else}
+                      <Eye class="w-4 h-4" />
+                    {/if}
+                  </button>
+                  <input
+                    data-nav-item
+                    type={showPassword ? 'text' : 'password'}
+                    bind:value={selectedServer.password}
+                    onchange={triggerSave}
+                    placeholder="••••••••"
+                    class="w-64 bg-[#07080a] border border-white/10 text-right text-white font-mono text-xs px-3.5 py-2 rounded-[10px] focus:border-sky-400 focus:ring-1 focus:ring-white focus:outline-none"
+                  />
+                </div>
+              {/if}
             </div>
 
             <!-- Remote Dir -->
@@ -1407,6 +1543,27 @@
               }}
             >
               <span class="w-4 h-4 rounded-full bg-white transition-transform absolute top-1 {localSettings.enableLogs ? 'left-7' : 'left-1'}"></span>
+            </button>
+          </div>
+
+          <div class="flex items-center justify-between py-3 border-b border-white/[0.06] text-sm">
+            <div>
+              <p class="text-white font-mono font-medium">Распаковка архивов</p>
+              <p class="text-xs text-[#64748b] font-mono">Автоматически распаковывать многотомные архивы (.rar, .zip, .7z) после загрузки</p>
+            </div>
+            <button
+              data-nav-item
+              type="button"
+              aria-label="Автоматическая распаковка архивов"
+              title="Автоматическая распаковка архивов"
+              class="w-12 h-6 rounded-full transition-colors cursor-pointer relative focus:ring-1 focus:ring-white focus:outline-none {localSettings.autoExtractArchives ? 'bg-sky-500' : 'bg-white/10'}"
+              onclick={() => {
+                sound.playSelect();
+                localSettings.autoExtractArchives = !localSettings.autoExtractArchives;
+                triggerSave();
+              }}
+            >
+              <span class="w-4 h-4 rounded-full bg-white transition-transform absolute top-1 {localSettings.autoExtractArchives ? 'left-7' : 'left-1'}"></span>
             </button>
           </div>
 

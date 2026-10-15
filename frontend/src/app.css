@@ -243,13 +243,8 @@
   outline: none !important;
   border-color: var(--game-accent, #ffffff) !important;
   box-shadow: 0 0 0 2px var(--game-accent, #ffffff) !important;
-  transform: scale(1.015);
-  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s ease, border-color 0.15s ease;
+  transition: box-shadow 0.12s ease, border-color 0.12s ease;
   z-index: 30;
-}
-
-.nav-content-card.gamepad-focused {
-  transform: none !important;
 }
 
 /* Steam HTML Content Formatter (Responsive images, clean typography, dark theme harmony) */
@@ -401,4 +396,46 @@
   background-repeat: no-repeat;
   animation: sk-shimmer 2.2s ease-in-out infinite;
   border-radius: 3px;
+}
+
+/* ─── Big Picture 3D Modals & Bottom Fly-Up Animations ────────── */
+@keyframes bp-modal-fly-up-3d {
+  0% {
+    opacity: 0;
+    transform: translateY(75px) scale(0.93) rotateX(15deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotateX(0deg);
+  }
+}
+
+@keyframes bp-popover-fly-up-3d {
+  0% {
+    opacity: 0;
+    transform: translateY(35px) scale(0.94) rotateX(16deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotateX(0deg);
+  }
+}
+
+.bp-modal-backdrop-3d {
+  perspective: 1200px;
+  perspective-origin: center bottom;
+}
+
+.bp-modal-content-3d {
+  transform-origin: center bottom;
+  animation: bp-modal-fly-up-3d 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+.bp-popover-3d {
+  transform-origin: center bottom;
+  animation: bp-popover-fly-up-3d 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }

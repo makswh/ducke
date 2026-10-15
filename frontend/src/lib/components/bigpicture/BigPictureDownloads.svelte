@@ -15,10 +15,16 @@
     Check,
     ArrowRight,
     ChartBar,
-    ChartLineUp
+    ChartLineUp,
+    GameController
   } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
+  import { gamepad } from '../../navigation/gamepad';
   import { downloadsStore } from '../../stores/downloads.svelte';
+  import {
+    matchesDownloadRecordSource,
+    type SourceFilterType
+  } from '../../utils/sourceUtils';
 
   interface DownloadItem {
     downloadId: string;
@@ -63,6 +69,7 @@
 
   let {
     games = [] as any[],
+    torrentGames = [] as any[],
     activeDownloads = [] as DownloadItem[],
     downloadHistory = [] as DownloadRecord[],
     downloadPath = '',
@@ -74,8 +81,42 @@
     onClearCompleted = () => {},
     onDeleteRecord = (id: string, removeFiles: boolean) => {},
     onOpenFolder = (path: string) => {},
+    onSelectGame = (game: any) => {},
     onGoToCatalog = () => {}
   } = $props();
+
+  function findGameForDownload(gameId?: number, gameTitle?: string): any {
+    const all = [...(games || []), ...(torrentGames || [])];
+    const key = (gameTitle || '').trim().toLowerCase();
+    const cleanKey = (gameTitle || '').replace(/\[.*?\]|\(.*?\)/g, '').trim().toLowerCase();
+
+    let found = all.find(
+      (g) => g && ((gameId && g.id === gameId) || (g.cleanTitle && g.cleanTitle.toLowerCase() === key))
+    );
+    if (!found && cleanKey) {
+      found = all.find(
+        (g) => g && ((g.cleanTitle && g.cleanTitle.toLowerCase() === cleanKey) || (g.rawName && g.rawName.toLowerCase().includes(cleanKey)))
+      );
+    }
+
+    if (found) return found;
+
+    return {
+      id: gameId || 0,
+      cleanTitle: gameTitle || 'Игра',
+      rawName: gameTitle || 'Игра',
+      steamTitle: gameTitle || 'Игра',
+      steamAppId: 0
+    };
+  }
+
+  function handleOpenGame(gameId?: number, gameTitle?: string) {
+    const target = findGameForDownload(gameId, gameTitle);
+    if (target) {
+      sound.playSelect();
+      onSelectGame(target);
+    }
+  }
 
   let isMounted = true;
   let resolvedCovers = $state<Record<string, string>>({});
@@ -299,9 +340,13 @@
   let safeDownloadHistory = $derived(downloadsStore.completedHistory);
   type HistorySort = 'date_desc' | 'date_asc' | 'name' | 'size_desc';
   let historySort = $state<HistorySort>('date_desc');
+  let historySourceFilter = $state<SourceFilterType>('all');
 
   let sortedDownloadHistory = $derived.by(() => {
-    const list = [...safeDownloadHistory];
+    let list = [...safeDownloadHistory];
+    if (historySourceFilter !== 'all') {
+      list = list.filter((r) => matchesDownloadRecordSource(r, historySourceFilter));
+    }
     if (historySort === 'date_desc') {
       list.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
     } else if (historySort === 'date_asc') {
@@ -504,6 +549,22 @@
       .join(' ');
   }
 
+  function cycleHistorySort() {
+    const sorts: HistorySort[] = ['date_desc', 'date_asc', 'name', 'size_desc'];
+    const curIdx = sorts.indexOf(historySort);
+    const nextIdx = (curIdx + 1) % sorts.length;
+    historySort = sorts[nextIdx];
+    sound.playTab();
+  }
+
+  function cycleHistorySource() {
+    const sources: SourceFilterType[] = ['all', 'ddl', 'torrent', 'ftp'];
+    const curIdx = sources.indexOf(historySourceFilter);
+    const nextIdx = (curIdx + 1) % sources.length;
+    historySourceFilter = sources[nextIdx];
+    sound.playTab();
+  }
+
   onMount(() => {
     isMounted = true;
     downloadsStore.refresh();
@@ -518,10 +579,25 @@
       speedHistory = [...speedHistory.slice(1), curNet];
       diskHistory = [...diskHistory.slice(1), curDisk];
     }, 1000);
+
+    const handleBtnY = (e: CustomEvent) => {
+      if (safeDownloadHistory.length > 1) {
+        cycleHistorySort();
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener('app:btn-y', handleBtnY as EventListener);
+
+    setTimeout(() => {
+      gamepad.retryFocusZone('detail');
+    }, 100);
+
     return () => {
       isMounted = false;
       clearInterval(diskTimer);
       clearInterval(speedTimer);
+      window.removeEventListener('app:btn-y', handleBtnY as EventListener);
     };
   });
 </script>
@@ -565,13 +641,19 @@
     <div class="relative z-10 w-full rounded-none bg-[#090d14] border-b border-[#1b222d] border-t-0 border-x-0 overflow-hidden shadow-xl flex flex-col md:flex-row items-stretch min-h-[170px] sm:min-h-[180px]">
       
       <!-- 1. LEFT GAME BANNER WITH OFFICIAL LOGO / TITLE OVERLAY -->
-      <div class="relative w-full md:w-[400px] lg:w-[460px] shrink-0 h-[170px] sm:h-[180px] overflow-hidden bg-[#0d121a]">
+      <button
+        data-nav-item
+        type="button"
+        onclick={() => handleOpenGame(currentDownload.gameId, currentDownload.gameTitle)}
+        class="relative w-full md:w-[400px] lg:w-[460px] shrink-0 h-[170px] sm:h-[180px] overflow-hidden bg-[#0d121a] text-left cursor-pointer group focus:outline-none focus:ring-1 focus:ring-white/40"
+        title="Перейти на страницу игры"
+      >
         {#if bannerUrl && !imageLoadFailed[bannerUrl]}
           <img
             src={bannerUrl}
             alt={currentDownload.gameTitle}
             referrerpolicy="no-referrer"
-            class="w-full h-full object-cover object-center brightness-90"
+            class="w-full h-full object-cover object-center brightness-90 group-hover:scale-105 transition-transform duration-300"
             onerror={() => {
               imageLoadFailed[bannerUrl] = true;
               resolveMissingCover(currentDownload.gameTitle, currentDownload.gameId);
@@ -581,6 +663,12 @@
         <!-- Scrim gradient for contrast and seamless blend on right -->
         <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent"></div>
         <div class="absolute top-0 bottom-0 right-0 w-16 bg-gradient-to-r from-transparent to-[#090d14] hidden md:block"></div>
+
+        <!-- Floating badge hint on hover/focus -->
+        <div class="absolute top-3 right-3 z-20 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-black/70 backdrop-blur-md border border-white/20 text-white text-[11px] font-mono">
+          <GameController size={13} />
+          <span>Страница игры</span>
+        </div>
 
         <!-- Game Logo or Title overlaid at bottom left -->
         <div class="absolute bottom-3.5 left-5 right-5 flex items-end z-20">
@@ -600,7 +688,7 @@
             </span>
           {/if}
         </div>
-      </div>
+      </button>
 
       <!-- 2. LIVE GRAPH SPANNING ACROSS BANNER RIGHT & MIDDLE SECTION (1:1 bar:gap) -->
       <div class="absolute bottom-0 left-[260px] sm:left-[300px] md:left-[340px] right-[400px] sm:right-[440px] md:right-[480px] h-[100px] z-10 pointer-events-none overflow-hidden hidden sm:flex items-end">
@@ -612,8 +700,17 @@
         </svg>
       </div>
 
-      <!-- 3. MIDDLE AREA (Gamepad actions: Folder, Cancel) -->
+      <!-- 3. MIDDLE AREA (Gamepad actions: Game Page, Folder, Cancel) -->
       <div class="hidden md:flex flex-col justify-center py-4 px-3 relative z-20 shrink-0 space-y-2">
+        <button
+          data-nav-item
+          type="button"
+          class="w-10 h-10 rounded-[12px] bg-white/5 hover:bg-white/10 active:bg-white/15 focus:ring-1 focus:ring-white focus:outline-none flex items-center justify-center text-[#8f98a0] hover:text-white transition-colors cursor-pointer"
+          onclick={() => handleOpenGame(currentDownload.gameId, currentDownload.gameTitle)}
+          title="Страница игры"
+        >
+          <GameController class="w-4 h-4" />
+        </button>
         {#if currentDownload.localPath}
           <button
             data-nav-item
@@ -625,7 +722,7 @@
             }}
             title="Открыть папку"
           >
-            <FolderOpen class="w-4.5 h-4.5" />
+            <FolderOpen class="w-4 h-4" />
           </button>
         {/if}
         <button
@@ -638,7 +735,7 @@
           }}
           title="Отменить загрузку"
         >
-          <X class="w-4.5 h-4.5" />
+          <X class="w-4 h-4" />
         </button>
       </div>
 
@@ -880,14 +977,21 @@
           {#each queuedDownloads as qItem, idx (qItem.downloadId)}
             {@const qCover = getGameCover(qItem)}
             <div class="w-full p-3.5 sm:p-4 rounded-[16px] bg-[#0c1017] hover:bg-[#111722] border border-white/[0.04] hover:border-white/[0.08] transition-colors flex items-center justify-between gap-4">
-              <div class="flex items-center gap-3.5 min-w-0 flex-1">
+              <div
+                role="button"
+                tabindex="0"
+                class="flex items-center gap-3.5 min-w-0 flex-1 cursor-pointer group/title"
+                onclick={() => handleOpenGame(qItem.gameId, qItem.gameTitle)}
+                onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleOpenGame(qItem.gameId, qItem.gameTitle)}
+                title="Перейти на страницу игры"
+              >
                 <span class="text-xs font-mono text-[#616875] w-6 text-center font-bold">#{idx + 1}</span>
                 <div class="w-24 h-12 rounded-[10px] bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
                   {#if qCover && !imageLoadFailed[qCover]}
                     <img
                       src={qCover}
                       alt=""
-                      class="w-full h-full object-cover"
+                      class="w-full h-full object-cover group-hover/title:scale-105 transition-transform duration-200"
                       onerror={() => {
                         imageLoadFailed[qCover] = true;
                         resolveMissingCover(qItem.gameTitle, qItem.gameId);
@@ -900,7 +1004,7 @@
                   {/if}
                 </div>
                 <div class="min-w-0">
-                  <h4 class="text-sm font-bold text-white uppercase tracking-wide truncate">{qItem.gameTitle}</h4>
+                  <h4 class="text-sm font-bold text-white group-hover/title:text-sky-300 transition-colors uppercase tracking-wide truncate">{qItem.gameTitle}</h4>
                   <span class="text-[11px] font-mono text-[#8f98a0] uppercase tracking-wider block mt-0.5">
                     РАЗМЕР: {formatBytesRu(qItem.totalBytes)} · В ОЧЕРЕДИ
                   </span>
@@ -908,6 +1012,15 @@
               </div>
 
               <div class="flex items-center gap-2.5 flex-shrink-0">
+                <button
+                  data-nav-item
+                  class="h-9 px-3 rounded-[10px] bg-[#171d27] hover:bg-white/10 text-[#8f98a0] hover:text-white focus:ring-1 focus:ring-white focus:outline-none border border-white/[0.06] flex items-center gap-1.5 text-xs font-mono font-bold cursor-pointer transition-colors"
+                  title="Страница игры"
+                  onclick={() => handleOpenGame(qItem.gameId, qItem.gameTitle)}
+                >
+                  <GameController class="w-3.5 h-3.5" />
+                  <span class="hidden sm:inline">Об игре</span>
+                </button>
                 <button
                   data-nav-item
                   class="h-9 px-3.5 rounded-[10px] bg-[#171d27] hover:bg-[#1a9fff] hover:text-white text-[#8f98a0] focus:ring-1 focus:ring-white focus:outline-none border border-white/[0.06] flex items-center gap-1.5 text-xs font-mono font-bold cursor-pointer transition-colors"
@@ -948,16 +1061,30 @@
         </span>
         <div class="flex-1 h-px bg-white/[0.06]"></div>
         {#if safeDownloadHistory.length > 1}
-          <select
+          <button
             data-nav-item
-            bind:value={historySort}
-            class="h-8 bg-[#0c1017] text-[#9ca3af] hover:text-white text-xs font-mono px-2.5 rounded-[8px] border border-white/10 focus:outline-none focus:border-white/25 cursor-pointer transition-colors"
+            type="button"
+            class="h-8 bg-[#0c1017] hover:bg-white/10 {historySourceFilter !== 'all' ? 'text-white border-white/25 bg-white/10' : 'text-[#9ca3af]'} text-xs font-mono px-3 rounded-[8px] border border-white/10 focus:ring-1 focus:ring-white focus:outline-none cursor-pointer transition-colors flex items-center gap-2"
+            onclick={cycleHistorySource}
+            title="Фильтр по источнику"
           >
-            <option value="date_desc">Новые</option>
-            <option value="date_asc">Старые</option>
-            <option value="name">По названию</option>
-            <option value="size_desc">По размеру</option>
-          </select>
+            <span>
+              {#if historySourceFilter === 'all'}Все источники{:else if historySourceFilter === 'ddl'}DDL{:else if historySourceFilter === 'torrent'}Торрент{:else}FTP{/if}
+            </span>
+          </button>
+
+          <button
+            data-nav-item
+            type="button"
+            class="h-8 bg-[#0c1017] hover:bg-white/10 text-[#9ca3af] hover:text-white text-xs font-mono px-3 rounded-[8px] border border-white/10 focus:ring-1 focus:ring-white focus:outline-none cursor-pointer transition-colors flex items-center gap-2"
+            onclick={cycleHistorySort}
+            title="Сменить сортировку (Y)"
+          >
+            <span>
+              {#if historySort === 'date_desc'}Новые{:else if historySort === 'date_asc'}Старые{:else if historySort === 'name'}По названию{:else}По размеру{/if}
+            </span>
+            <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">Y</span>
+          </button>
         {/if}
       </div>
 
@@ -969,13 +1096,20 @@
             {@const rCover = getRecordCover(record)}
             <div class="w-full p-3.5 sm:p-4 rounded-[16px] bg-[#0c1017] hover:bg-[#111722] border border-white/[0.04] hover:border-white/[0.08] transition-colors flex items-center justify-between gap-4">
               
-              <div class="flex items-center gap-3.5 min-w-0 flex-1">
+              <div
+                role="button"
+                tabindex="0"
+                class="flex items-center gap-3.5 min-w-0 flex-1 cursor-pointer group/hist"
+                onclick={() => handleOpenGame(record.gameId, record.gameTitle)}
+                onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleOpenGame(record.gameId, record.gameTitle)}
+                title="Перейти на страницу игры"
+              >
                 <div class="w-24 h-12 rounded-[10px] bg-black/50 border border-white/[0.06] overflow-hidden flex-shrink-0 relative">
                   {#if rCover && !imageLoadFailed[rCover]}
                     <img
                       src={rCover}
                       alt=""
-                      class="w-full h-full object-cover"
+                      class="w-full h-full object-cover group-hover/hist:scale-105 transition-transform duration-200"
                       onerror={() => {
                         imageLoadFailed[rCover] = true;
                         resolveMissingCover(record.gameTitle, record.gameId);
@@ -989,7 +1123,7 @@
                 </div>
 
                 <div class="min-w-0">
-                  <h4 class="text-sm font-bold text-white uppercase tracking-wide truncate">{record.gameTitle}</h4>
+                  <h4 class="text-sm font-bold text-white group-hover/hist:text-sky-300 transition-colors uppercase tracking-wide truncate">{record.gameTitle}</h4>
                   <span class="text-[11px] font-mono text-[#8f98a0] uppercase tracking-wider block mt-0.5">
                     ЗАГРУЖЕНО: {formatBytesRu(record.downloadedBytes || record.totalBytes)} из {formatBytesRu(record.totalBytes || record.downloadedBytes)}
                   </span>
@@ -1000,8 +1134,18 @@
                 {formatSteamDate(record.updatedAt)}
               </div>
 
-              <!-- Actions (STRICTLY NO PLAY BUTTON) -->
+              <!-- Actions -->
               <div class="flex items-center gap-2.5 flex-shrink-0">
+                <button
+                  data-nav-item
+                  class="bg-[#171d27] hover:bg-[#202937] focus:ring-1 focus:ring-white focus:outline-none text-[#c6d4df] hover:text-white text-xs px-3.5 py-2 rounded-[10px] border border-white/[0.06] flex items-center gap-1.5 transition-colors cursor-pointer font-mono"
+                  onclick={() => handleOpenGame(record.gameId, record.gameTitle)}
+                  title="Страница игры"
+                >
+                  <GameController class="w-3.5 h-3.5 text-[#8f98a0]" />
+                  <span>Об игре</span>
+                </button>
+
                 {#if record.status === 'completed'}
                   {#if isLinux && installerMap[record.id]}
                     <button

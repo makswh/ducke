@@ -28,6 +28,7 @@
   import Hls from 'hls.js';
   import { sound } from '../../navigation/audio';
   import { gamepad } from '../../navigation/gamepad';
+  import BigPictureOptionWheel, { type WheelOption } from './BigPictureOptionWheel.svelte';
   import { deduplicateGames, cleanCanonicalKey } from '../../utils/gameDeduplication';
   import {
     GetFavorites,
@@ -93,25 +94,23 @@
   let lightboxImage = $state<string | null>(null);
   let lightboxIndex = $state<number>(0);
 
-  // More options menu popover state (...)
+  // More options menu state
   let isActionMenuOpen = $state<boolean>(false);
 
   function toggleActionMenu() {
     isActionMenuOpen = !isActionMenuOpen;
-    if (isActionMenuOpen) {
-      sound.playSelect();
-      setTimeout(() => gamepad.retryFocusZone('modal'), 40);
-    } else {
-      sound.playBack();
-      setTimeout(() => gamepad.retryFocusZone('detail'), 40);
-    }
   }
 
   function closeActionMenu() {
     if (isActionMenuOpen) {
       isActionMenuOpen = false;
-      sound.playBack();
-      setTimeout(() => gamepad.retryFocusZone('detail'), 40);
+      setTimeout(() => {
+        const targetBtn = (document.querySelector('button[title*="Опции игры"]') ||
+          (cardRefs && focusedIndex !== undefined ? cardRefs[focusedIndex] : null)) as HTMLElement | null;
+        if (targetBtn) {
+          gamepad.setFocus(targetBtn);
+        }
+      }, 40);
     }
   }
 
@@ -174,13 +173,21 @@
         return;
       }
 
-      // When more options menu is open
+      // When OptionWheel action menu is open, let BigPictureOptionWheel handle its keys
       if (isActionMenuOpen) {
-        if (e.key === 'Escape' || e.key === 'Backspace') {
+        if (
+          e.key === 'Escape' ||
+          e.key === 'Backspace' ||
+          e.key === 'b' ||
+          e.key === 'B' ||
+          e.key === 'и' ||
+          e.key === 'И' ||
+          e.code === 'KeyB'
+        ) {
           closeActionMenu();
           e.preventDefault();
-          return;
         }
+        return;
       }
 
       // When in Theater Mode
@@ -207,17 +214,29 @@
       }
 
       // Normal Dashboard Mode
-      if (e.key === 'ArrowUp') {
-        if (movieList.length > 0) {
-          enterTheaterMode();
-          e.preventDefault();
-        }
-      } else if (e.key === 'ArrowLeft') {
+      if (e.key === 'x' || e.key === 'X' || e.key === 'ContextMenu' || e.key === 'o' || e.key === 'O') {
+        toggleActionMenu();
+        e.preventDefault();
+        return;
+      }
+
+      if (e.key === 'ArrowLeft') {
         moveFocus(-1);
         e.preventDefault();
       } else if (e.key === 'ArrowRight') {
         moveFocus(1);
         e.preventDefault();
+      } else if (e.key === 'ArrowUp') {
+        if (movieList.length > 0) {
+          enterTheaterMode();
+          e.preventDefault();
+        } else {
+          const actionBtn = document.querySelector('[data-nav-item]') as HTMLElement;
+          if (actionBtn) {
+            gamepad.setFocus(actionBtn);
+            e.preventDefault();
+          }
+        }
       }
     };
 
@@ -226,6 +245,11 @@
       const dir = e.detail?.dir;
       if (!dir) return;
 
+      if (isActionMenuOpen) {
+        e.preventDefault();
+        return;
+      }
+
       if (isTheaterMode) {
         if (dir === 'DOWN') {
           exitTheaterMode();
@@ -233,6 +257,39 @@
           nextTrailer();
         } else if (dir === 'LEFT') {
           prevTrailer();
+        }
+        return;
+      }
+
+      if (lightboxImage) return;
+
+      const focusedEl = document.querySelector('.gamepad-focused') as HTMLElement | null;
+      const inStrip = focusedEl && stripContainerEl && stripContainerEl.contains(focusedEl);
+
+      if (inStrip) {
+        if (dir === 'LEFT') {
+          moveFocus(-1);
+          setTimeout(() => {
+            if (cardRefs[focusedIndex]) gamepad.setFocus(cardRefs[focusedIndex]);
+          }, 15);
+          e.preventDefault();
+        } else if (dir === 'RIGHT') {
+          moveFocus(1);
+          setTimeout(() => {
+            if (cardRefs[focusedIndex]) gamepad.setFocus(cardRefs[focusedIndex]);
+          }, 15);
+          e.preventDefault();
+        } else if (dir === 'UP') {
+          if (movieList.length > 0) {
+            enterTheaterMode();
+            e.preventDefault();
+          } else {
+            const actionBtn = document.querySelector('[data-nav-item]') as HTMLElement;
+            if (actionBtn) {
+              gamepad.setFocus(actionBtn);
+              e.preventDefault();
+            }
+          }
         }
       }
     };
@@ -243,17 +300,26 @@
         e.preventDefault();
         return;
       }
-      handlePrimaryAction();
+      if (isActionMenuOpen) {
+        closeActionMenu();
+        e.preventDefault();
+        return;
+      }
+      toggleActionMenu();
       e.preventDefault();
     };
 
     const handleBtnY = (e: CustomEvent) => {
-      if (isTheaterMode) return;
+      if (isTheaterMode || isActionMenuOpen) return;
       handleToggleFavorite();
       e.preventDefault();
     };
 
     const handleSubtabPrev = (e: CustomEvent) => {
+      if (isActionMenuOpen) {
+        e.preventDefault();
+        return;
+      }
       if (isTheaterMode) {
         prevTrailer();
         e.preventDefault();
@@ -264,6 +330,10 @@
     };
 
     const handleSubtabNext = (e: CustomEvent) => {
+      if (isActionMenuOpen) {
+        e.preventDefault();
+        return;
+      }
       if (isTheaterMode) {
         nextTrailer();
         e.preventDefault();
@@ -274,16 +344,28 @@
     };
 
     const handleGoBack = (e: CustomEvent) => {
-      if (lightboxImage) {
-        closeLightbox();
+      if (isActionMenuOpen) {
+        closeActionMenu();
         e.preventDefault();
         e.stopImmediatePropagation();
-      } else if (isActionMenuOpen) {
-        closeActionMenu();
+      } else if (lightboxImage) {
+        closeLightbox();
         e.preventDefault();
         e.stopImmediatePropagation();
       } else if (isTheaterMode) {
         exitTheaterMode();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+
+    const handleModalClose = (e: CustomEvent) => {
+      if (isActionMenuOpen) {
+        closeActionMenu();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (lightboxImage) {
+        closeLightbox();
         e.preventDefault();
         e.stopImmediatePropagation();
       }
@@ -296,6 +378,7 @@
     window.addEventListener('app:subtab-prev', handleSubtabPrev as EventListener);
     window.addEventListener('app:subtab-next', handleSubtabNext as EventListener);
     window.addEventListener('app:go-back', handleGoBack as EventListener, true);
+    window.addEventListener('app:modal-close', handleModalClose as EventListener, true);
 
     return () => {
       isMounted = false;
@@ -314,6 +397,7 @@
       window.removeEventListener('app:subtab-prev', handleSubtabPrev as EventListener);
       window.removeEventListener('app:subtab-next', handleSubtabNext as EventListener);
       window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
+      window.removeEventListener('app:modal-close', handleModalClose as EventListener, true);
     };
   });
 
@@ -1415,6 +1499,85 @@
     }
   }
 
+  let wheelItems = $derived.by<WheelOption[]>(() => {
+    if (!effectiveFocusedGame) return [];
+    const list: WheelOption[] = [];
+
+    // 1. Game Detail Page
+    list.push({
+      id: 'game-page',
+      label: 'Страница игры',
+      icon: Info,
+      onSelect: () => {
+        closeActionMenu();
+        onSelectGame(effectiveFocusedGame);
+      }
+    });
+
+    // 2. Folder (if installed) or Download
+    if (isFocusedInstalled) {
+      list.push({
+        id: 'open-folder',
+        label: 'Открыть папку с игрой',
+        icon: Folder,
+        onSelect: () => {
+          closeActionMenu();
+          handleSecondaryAction();
+        }
+      });
+    } else {
+      list.push({
+        id: 'download',
+        label: 'Скачать игру',
+        icon: Download,
+        onSelect: () => {
+          closeActionMenu();
+          handleSecondaryAction();
+        }
+      });
+    }
+
+    // 3. Favorite toggle
+    list.push({
+      id: 'favorite',
+      label: isFocusedFavorite ? 'Удалить из избранного' : 'Добавить в избранное',
+      icon: Star,
+      danger: isFocusedFavorite,
+      onSelect: () => {
+        closeActionMenu();
+        handleToggleFavorite();
+      }
+    });
+
+    // 4. Trailer
+    if (movieList.length > 0) {
+      list.push({
+        id: 'trailer',
+        label: 'Смотреть трейлер',
+        icon: Volume2,
+        onSelect: () => {
+          closeActionMenu();
+          enterTheaterMode();
+        }
+      });
+    }
+
+    // 5. Screenshots
+    if (gameScreenshots.length > 0) {
+      list.push({
+        id: 'screenshots',
+        label: 'Скриншоты игры',
+        icon: ImageIcon,
+        onSelect: () => {
+          closeActionMenu();
+          openLightbox(0);
+        }
+      });
+    }
+
+    return list;
+  });
+
   function getInitials(title: string): string {
     if (!title) return 'G';
     const clean = title.replace(/\[.*?\]|\(.*?\)/g, '').trim();
@@ -1559,13 +1722,13 @@
             {/if}
           </div>
 
-          <!-- Tactical Action Buttons: Only Primary Button and Three Dots Button (PS5 Console Style) -->
+          <!-- Tactical Action Buttons: Only Primary Button and Three Dots Button (Console Style) -->
           <div class="flex items-center gap-3 pt-2">
             <!-- Primary Action Pill (A) -->
             <button
               data-nav-item
               type="button"
-              class="px-8 py-3.5 rounded-[14px] bg-white text-black font-extrabold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-2xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+              class="px-7 py-3 rounded-[14px] bg-white text-black font-bold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
               onclick={handlePrimaryAction}
             >
               {#if isFocusedInstalled}
@@ -1581,139 +1744,18 @@
               <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center">A</span>
             </button>
 
-            <!-- More Options Button (...) with Popover Action Menu -->
-            <div class="relative">
-              <button
-                data-nav-item
-                type="button"
-                class="w-11 h-11 rounded-[14px] bg-white/10 hover:bg-white/20 text-[#cbd5e1] hover:text-white border border-white/15 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none flex items-center justify-center {isActionMenuOpen ? 'bg-white/25 border-white/40 text-white' : ''}"
-                onclick={toggleActionMenu}
-                title="Дополнительные действия (...)"
-              >
-                <MoreHorizontal class="w-5 h-5" />
-              </button>
-
-              {#if isActionMenuOpen}
-                <!-- Backdrop to dismiss on outside click -->
-                <button
-                  type="button"
-                  aria-label="Закрыть меню опций"
-                  class="fixed inset-0 z-40 bg-black/50 cursor-default border-none p-0 m-0 w-full h-full"
-                  onclick={closeActionMenu}
-                ></button>
-
-                <!-- Console-style Popover Menu (PS5 / SteamOS style) -->
-                <div
-                  data-nav-zone="modal"
-                  class="absolute bottom-full left-0 mb-3 w-72 sm:w-80 bg-[#0d1117] border border-white/15 rounded-[16px] shadow-2xl p-1.5 space-y-1 z-50 animate-fade-in"
-                >
-                  <!-- Header: Game title -->
-                  <div class="px-3 py-2 border-b border-white/[0.08] text-left">
-                    <div class="text-[10px] font-bold uppercase tracking-wider text-[#8e95a2] truncate">Действия</div>
-                    <div class="text-xs font-semibold text-white truncate">{displayTitle}</div>
-                  </div>
-
-                  <!-- Menu Items -->
-                  <div class="space-y-0.5 pt-1">
-                    <!-- 1. Folder / Download secondary action -->
-                    <button
-                      data-nav-item
-                      type="button"
-                      class="w-full text-left px-3 py-2.5 rounded-[10px] hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
-                      onclick={() => {
-                        handleSecondaryAction();
-                        closeActionMenu();
-                      }}
-                    >
-                      <div class="flex items-center gap-2.5 min-w-0">
-                        {#if isFocusedInstalled}
-                          <Folder class="w-4 h-4 text-[#94a3b8] group-hover:text-white flex-shrink-0" />
-                          <span class="truncate">Открыть папку с игрой</span>
-                        {:else}
-                          <Download class="w-4 h-4 text-[#94a3b8] group-hover:text-white flex-shrink-0 stroke-[2.5]" />
-                          <span class="truncate">Скачать игру</span>
-                        {/if}
-                      </div>
-                      <span class="text-[10px] font-mono text-[#64748b]">X</span>
-                    </button>
-
-                    <!-- 2. Favorite Toggle -->
-                    <button
-                      data-nav-item
-                      type="button"
-                      class="w-full text-left px-3 py-2.5 rounded-[10px] hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
-                      onclick={() => {
-                        handleToggleFavorite();
-                        closeActionMenu();
-                      }}
-                    >
-                      <div class="flex items-center gap-2.5 min-w-0">
-                        <Star class="w-4 h-4 flex-shrink-0 {isFocusedFavorite ? 'text-amber-400 fill-amber-400' : 'text-[#94a3b8] group-hover:text-white'}" />
-                        <span class="truncate">{isFocusedFavorite ? 'Удалить из избранного' : 'Добавить в избранное'}</span>
-                      </div>
-                      <span class="text-[10px] font-mono text-[#64748b]">Y</span>
-                    </button>
-
-                    <!-- 3. Fullscreen Trailer (if available) -->
-                    {#if movieList.length > 0}
-                      <button
-                        data-nav-item
-                        type="button"
-                        class="w-full text-left px-3 py-2.5 rounded-[10px] hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
-                        onclick={() => {
-                          enterTheaterMode();
-                          closeActionMenu();
-                        }}
-                      >
-                        <div class="flex items-center gap-2.5 min-w-0">
-                          <Volume2 class="w-4 h-4 text-sky-400 flex-shrink-0" />
-                          <span class="truncate">Смотреть трейлер</span>
-                        </div>
-                        <span class="text-[10px] font-mono text-[#64748b]">↑</span>
-                      </button>
-                    {/if}
-
-                    <!-- 4. Screenshots Lightbox (if available) -->
-                    {#if gameScreenshots.length > 0}
-                      <button
-                        data-nav-item
-                        type="button"
-                        class="w-full text-left px-3 py-2.5 rounded-[10px] hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
-                        onclick={() => {
-                          openLightbox(0);
-                          closeActionMenu();
-                        }}
-                      >
-                        <div class="flex items-center gap-2.5 min-w-0">
-                          <ImageIcon class="w-4 h-4 text-[#94a3b8] group-hover:text-white flex-shrink-0" />
-                          <span class="truncate">Скриншоты</span>
-                        </div>
-                        <span class="text-[10px] font-mono text-[#64748b]">({gameScreenshots.length})</span>
-                      </button>
-                    {/if}
-
-                    <!-- 5. Game Detail Page -->
-                    <button
-                      data-nav-item
-                      type="button"
-                      class="w-full text-left px-3 py-2.5 rounded-[10px] hover:bg-white/10 focus:bg-white/15 focus:outline-none flex items-center justify-between text-xs font-semibold text-white transition-colors cursor-pointer group"
-                      onclick={() => {
-                        onSelectGame(effectiveFocusedGame);
-                        closeActionMenu();
-                      }}
-                    >
-                      <div class="flex items-center gap-2.5 min-w-0">
-                        <Info class="w-4 h-4 text-[#94a3b8] group-hover:text-white flex-shrink-0" />
-                        <span class="truncate">Страница игры</span>
-                      </div>
-                      <span class="text-[10px] font-mono text-[#64748b]">Подробнее</span>
-                    </button>
-                  </div>
-                </div>
-              {/if}
-            </div>
+            <!-- More Options Button (...) with OptionWheel Action Menu -->
+            <button
+              data-nav-item
+              type="button"
+              class="h-11 px-3.5 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-[#cbd5e1] hover:text-white border border-white/10 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none flex items-center gap-2.5 {isActionMenuOpen ? 'bg-white/20 border-white/30 text-white' : ''}"
+              onclick={toggleActionMenu}
+              title="Дополнительные действия [X]"
+            >
+              <MoreHorizontal class="w-5 h-5" />
+              <span class="w-5 h-5 rounded-full bg-white/15 text-white text-[10px] font-black flex items-center justify-center">X</span>
+            </button>
           </div>
-
         </div>
 
       </div>
@@ -1727,78 +1769,12 @@
   <!-- 3. Bottom Docked Horizontal Game Strip with Category Filters (Smoothly fades out in Theater Mode) -->
   <div
     data-nav-zone="grid"
-    class="relative z-20 w-full flex-shrink-0 bg-[#07080a] border-t border-white/[0.08] pt-2 pb-3 transition-opacity duration-300 ease-out {isTheaterMode ? 'opacity-0 pointer-events-none translate-y-6' : 'opacity-100 translate-y-0'}"
+    class="relative z-20 w-full flex-shrink-0 bg-[#07080a] border-t border-white/[0.08] transition-opacity duration-300 ease-out {isTheaterMode ? 'opacity-0 pointer-events-none translate-y-6' : 'opacity-100 translate-y-0'}"
   >
-    
-    <!-- Filter Switcher Bar -->
-    <div class="px-8 sm:px-12 lg:px-16 flex items-center justify-between pb-2">
-      <div class="flex items-center gap-1.5 sm:gap-2">
-        <button
-          data-nav-item
-          type="button"
-          class="px-3.5 py-1.5 rounded-[10px] text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'all' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-          onclick={() => switchFilter('all')}
-        >
-          Все ({baseAllGames.length})
-        </button>
-
-        <button
-          data-nav-item
-          type="button"
-          class="px-3.5 py-1.5 rounded-[10px] text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'installed' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-          onclick={() => switchFilter('installed')}
-        >
-          Установленные ({installedCount})
-        </button>
-
-        <button
-          data-nav-item
-          type="button"
-          class="px-3.5 py-1.5 rounded-[10px] text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'favorites' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-          onclick={() => switchFilter('favorites')}
-        >
-          Избранное ({favoriteCount})
-        </button>
-
-        {#if hasFtpServers}
-          <button
-            data-nav-item
-            type="button"
-            class="px-3.5 py-1.5 rounded-[10px] text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'catalog' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-            onclick={() => switchFilter('catalog')}
-          >
-            Каталог (FTP)
-          </button>
-        {/if}
-
-        {#if hasTorrentSources}
-          <button
-            data-nav-item
-            type="button"
-            class="px-3.5 py-1.5 rounded-[10px] text-xs font-semibold transition-colors cursor-pointer focus:outline-none {selectedFilter === 'torrents' ? 'bg-white/20 text-white border border-white/30' : 'text-[#8e95a2] hover:text-white border border-transparent'}"
-            onclick={() => switchFilter('torrents')}
-          >
-            Торренты
-          </button>
-        {/if}
-      </div>
-
-      <div class="hidden sm:flex items-center gap-3 text-xs text-[#8e95a2]">
-        {#if movieList.length > 0}
-          <span class="inline-flex items-center gap-1.5 text-sky-400 font-medium">
-            <Volume2 class="w-3.5 h-3.5" />
-            <span>[↑] Трейлер</span>
-          </span>
-          <span class="text-white/20">•</span>
-        {/if}
-        <span>← → Выбор игры</span>
-      </div>
-    </div>
-
     <!-- Single Horizontal Carousel Strip with Virtual Sliding Window -->
     <div
       bind:this={stripContainerEl}
-      class="flex items-center gap-4 overflow-x-auto px-8 sm:px-12 lg:px-16 pt-8 pb-8 scrollbar-none"
+      class="flex items-center gap-4 overflow-x-auto px-8 sm:px-12 lg:px-16 pt-5 pb-6 scrollbar-none"
     >
       {#if filteredGames.length === 0}
         <div class="w-full py-8 text-center text-sm text-[#8e95a2]">
@@ -1806,7 +1782,7 @@
         </div>
       {:else}
         {#if spacerLeftWidth > 0}
-          <div style="width: ${spacerLeftWidth}px; flex-shrink: 0;" aria-hidden="true"></div>
+          <div style="width: {spacerLeftWidth}px; flex-shrink: 0;" aria-hidden="true"></div>
         {/if}
 
         {#each visibleWindow as rawG, vIdx (rawG?.id ? `${rawG.sourceType || 'g'}_${rawG.id}` : windowStart + vIdx)}
@@ -1819,15 +1795,15 @@
           {@const coverUrl = getGameCover(g)}
           {@const categoryBorderClass = 
             isCardFocused
-              ? (dl ? 'border border-white ring-1 ring-sky-400' : isInst ? 'border border-white ring-1 ring-emerald-500' : isFav ? 'border border-white ring-1 ring-amber-400' : 'border border-white ring-1 ring-white/40')
-              : (dl ? 'border border-sky-400/80' : isInst ? 'border border-emerald-500/80' : isFav ? 'border border-amber-400/80' : 'border border-white/10')
+              ? 'border-2 border-white shadow-2xl scale-105 opacity-100 z-20'
+              : 'border border-white/[0.06] opacity-80 hover:opacity-100 hover:scale-[1.02]'
           }
 
           <button
             bind:this={cardRefs[idx]}
             data-nav-item
             type="button"
-            class="my-2 w-28 sm:w-32 md:w-36 aspect-[3/4] rounded-[16px] overflow-hidden relative flex-shrink-0 cursor-pointer transition-all duration-150 text-left focus:outline-none {categoryBorderClass} {isCardFocused ? 'scale-105 shadow-2xl z-20 opacity-100' : 'opacity-75 hover:opacity-100 hover:scale-[1.02] bg-[#0d1117]'}"
+            class="my-2 w-28 sm:w-32 md:w-36 aspect-[3/4] rounded-[16px] overflow-hidden relative flex-shrink-0 cursor-pointer transition-all duration-150 text-left focus:outline-none bg-[#0c0e14] {categoryBorderClass}"
             onclick={() => {
               sound.playSelect();
               if (focusedIndex !== idx) {
@@ -1872,14 +1848,14 @@
             <!-- Downloading bottom progress bar -->
             {#if dl && dl.progressPercent !== undefined}
               <div class="absolute bottom-0 inset-x-0 h-1 bg-black/60 pointer-events-none">
-                <div class="h-full bg-sky-400" style="width: {dl.progressPercent}%"></div>
+                <div class="h-full bg-[#2563eb]" style="width: {dl.progressPercent}%"></div>
               </div>
             {/if}
           </button>
         {/each}
 
         {#if spacerRightWidth > 0}
-          <div style="width: ${spacerRightWidth}px; flex-shrink: 0;" aria-hidden="true"></div>
+          <div style="width: {spacerRightWidth}px; flex-shrink: 0;" aria-hidden="true"></div>
         {/if}
       {/if}
     </div>
@@ -1980,7 +1956,7 @@
   {#if lightboxImage}
     <div
       data-nav-zone="modal"
-      class="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4 select-none"
+      class="fixed inset-0 z-50 bg-black/95 backdrop-blur-md bp-modal-backdrop-3d flex flex-col items-center justify-center p-4 select-none"
       onclick={closeLightbox}
       role="button"
       tabindex="-1"
@@ -2031,9 +2007,9 @@
         </button>
       {/if}
 
-      <!-- Main Fullscreen Image -->
+      <!-- Main Fullscreen Image in 3D Content Wrapper -->
       <div
-        class="max-w-6xl max-h-[85vh] rounded-[20px] overflow-hidden border border-white/20 shadow-2xl bg-black"
+        class="bp-modal-content-3d max-w-6xl max-h-[85vh] rounded-[20px] overflow-hidden border border-white/15 shadow-2xl bg-black"
         onclick={(e) => e.stopPropagation()}
         role="presentation"
       >
@@ -2049,6 +2025,16 @@
         {lightboxIndex + 1} / {gameScreenshots.length}
       </div>
     </div>
+  {/if}
+
+  <!-- Console 3D OptionWheel Menu (Root Layer) -->
+  {#if isActionMenuOpen}
+    <BigPictureOptionWheel
+      items={wheelItems}
+      title={displayTitle}
+      subtitle="Опции игры"
+      onClose={closeActionMenu}
+    />
   {/if}
 
 </div>

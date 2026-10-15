@@ -134,6 +134,85 @@ func TestUpsertTorrentGames(t *testing.T) {
 	}
 }
 
+func TestDeleteAndPruneTorrentGames(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ducke_delete_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	db, err := InitDB(tempDir)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	defer db.Close()
+
+	// 1. Insert games from source 1 (magnet) and source 2 (DDL)
+	src1Items := []HydraDownloadItem{
+		{
+			Title:      "Game One",
+			URIs:       []string{"magnet:?xt=urn:btih:111aaa&dn=Game1"},
+			FileSize:   "1.0 GB",
+			UploadDate: "2024-01-01",
+		},
+	}
+	src2Items := []HydraDownloadItem{
+		{
+			Title:      "Game Two (DDL)",
+			URIs:       []string{"https://example.com/game2.zip"},
+			FileSize:   "2.0 GB",
+			UploadDate: "2024-01-02",
+		},
+	}
+
+	if err := db.UpsertTorrentGames("src_1", "Source One", src1Items); err != nil {
+		t.Fatalf("Upsert src1 failed: %v", err)
+	}
+	if err := db.UpsertTorrentGames("src_2", "Source Two", src2Items); err != nil {
+		t.Fatalf("Upsert src2 failed: %v", err)
+	}
+
+	all, err := db.GetTorrentGames()
+	if err != nil {
+		t.Fatalf("GetTorrentGames failed: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 games, got %d", len(all))
+	}
+
+	// Test GetTorrentGamesBySources
+	src1Only, err := db.GetTorrentGamesBySources([]string{"src_1"})
+	if err != nil || len(src1Only) != 1 {
+		t.Fatalf("GetTorrentGamesBySources(src_1) expected 1, got %d (err: %v)", len(src1Only), err)
+	}
+
+	// 2. Delete source 2 (which is DDL)
+	if err := db.DeleteTorrentGamesBySource("src_2", "Source Two"); err != nil {
+		t.Fatalf("DeleteTorrentGamesBySource failed: %v", err)
+	}
+
+	remaining, err := db.GetTorrentGames()
+	if err != nil {
+		t.Fatalf("GetTorrentGames after delete failed: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].CleanTitle != "Game One" {
+		t.Fatalf("expected 1 remaining game (Game One), got %d (%+v)", len(remaining), remaining)
+	}
+
+	// 3. Prune orphan torrent games with empty list (simulates deleting all sources)
+	if err := db.PruneOrphanTorrentGames([]string{}); err != nil {
+		t.Fatalf("PruneOrphanTorrentGames failed: %v", err)
+	}
+
+	afterPrune, err := db.GetTorrentGames()
+	if err != nil {
+		t.Fatalf("GetTorrentGames after prune failed: %v", err)
+	}
+	if len(afterPrune) != 0 {
+		t.Fatalf("expected 0 games after full prune, got %d", len(afterPrune))
+	}
+}
+
 func TestMatchLibraryGame(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "ducke_match_test_*")
 	if err != nil {

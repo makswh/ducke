@@ -39,6 +39,28 @@ var (
 	reHTMLTags     = regexp.MustCompile(`<[^>]+>`)
 )
 
+var rePressPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\s*[\(\[\{]?\s*(?:по\s+версии|по\s+мнению|от\s+редакции|выбор\s+редакции|редакция|выбор)?\s*stopgame(?:\.ru)?\s*[\)\]\}]?`),
+	regexp.MustCompile(`(?i)\s*[\-–—|•:]\s*stopgame(?:\.ru)?.*$`),
+	regexp.MustCompile(`(?i)^stopgame(?:\.ru)?\s*[\-–—|•:]\s*`),
+	regexp.MustCompile(`(?i)^(?:подборка|от\s+редакции|пресса|выбор\s+редакции)\s*:\s*`),
+	regexp.MustCompile(`(?i)\bstopgame(?:\.ru)?\b`),
+}
+
+// CleanCompilationTitle cleans press watermarks and editorial labels from compilation titles
+func CleanCompilationTitle(raw string) string {
+	res := strings.TrimSpace(raw)
+	for _, re := range rePressPatterns {
+		res = re.ReplaceAllString(res, " ")
+	}
+	res = strings.Trim(res, " \t\r\n-–—|•:.,")
+	res = strings.Join(strings.Fields(res), " ")
+	if res == "" {
+		return strings.TrimSpace(raw)
+	}
+	return res
+}
+
 type StopGameService struct {
 	db     *database.Database
 	client *http.Client
@@ -87,6 +109,13 @@ func (s *StopGameService) fetchHTML(targetURL string) (string, error) {
 	return string(body), nil
 }
 
+const (
+	// StopGameCacheTTL defines the minimum cache duration for StopGame data (at least 24 hours)
+	StopGameCacheTTL = 24 * time.Hour
+	// StopGameStaleFallbackTTL allows returning older cached data if network request fails
+	StopGameStaleFallbackTTL = 30 * 24 * time.Hour
+)
+
 // FetchCompilations retrieves a paginated list of StopGame compilations
 func (s *StopGameService) FetchCompilations(sort string, page int) (*CompilationsResponse, error) {
 	if sort == "" {
@@ -98,7 +127,7 @@ func (s *StopGameService) FetchCompilations(sort string, page int) (*Compilation
 
 	cacheKey := fmt.Sprintf("catalog:%s:%d", sort, page)
 	if s.db != nil {
-		if cachedJSON, ok := s.db.GetStopGameCache(cacheKey, 2*time.Hour); ok {
+		if cachedJSON, ok := s.db.GetStopGameCache(cacheKey, StopGameCacheTTL); ok {
 			var resp CompilationsResponse
 			if err := json.Unmarshal([]byte(cachedJSON), &resp); err == nil && len(resp.Items) > 0 {
 				return &resp, nil
@@ -109,6 +138,15 @@ func (s *StopGameService) FetchCompilations(sort string, page int) (*Compilation
 	targetURL := fmt.Sprintf("https://stopgame.ru/games/compilations?sort=%s&page=%d", sort, page)
 	htmlContent, err := s.fetchHTML(targetURL)
 	if err != nil {
+		// Fallback to stale cache if network request fails
+		if s.db != nil {
+			if cachedJSON, ok := s.db.GetStopGameCache(cacheKey, StopGameStaleFallbackTTL); ok {
+				var resp CompilationsResponse
+				if err2 := json.Unmarshal([]byte(cachedJSON), &resp); err2 == nil && len(resp.Items) > 0 {
+					return &resp, nil
+				}
+			}
+		}
 		return nil, fmt.Errorf("failed to fetch compilations: %w", err)
 	}
 
@@ -163,7 +201,7 @@ func (s *StopGameService) ParseCompilationsCatalog(htmlContent, sort string, pag
 
 		// Title
 		if tm := reCompTitle.FindStringSubmatch(body); len(tm) > 1 {
-			item.Title = strings.TrimSpace(html.UnescapeString(tm[1]))
+			item.Title = CleanCompilationTitle(html.UnescapeString(tm[1]))
 		}
 
 		// Images
@@ -222,7 +260,7 @@ func (s *StopGameService) FetchCompilationDetail(id string, forceRefresh bool) (
 	cacheKey := fmt.Sprintf("detail:%s", id)
 
 	if !forceRefresh && s.db != nil {
-		if cachedJSON, ok := s.db.GetStopGameCache(cacheKey, 24*time.Hour); ok {
+		if cachedJSON, ok := s.db.GetStopGameCache(cacheKey, StopGameCacheTTL); ok {
 			var detail CompilationDetail
 			if err := json.Unmarshal([]byte(cachedJSON), &detail); err == nil && len(detail.Games) > 0 {
 				// Re-match against library in memory so dynamic downloads/new games are recognized
@@ -236,6 +274,16 @@ func (s *StopGameService) FetchCompilationDetail(id string, forceRefresh bool) (
 	page1URL := fmt.Sprintf("https://stopgame.ru/games/compilation/%s", id)
 	html1, err := s.fetchHTML(page1URL)
 	if err != nil {
+		// Fallback to stale cache if network request fails
+		if s.db != nil {
+			if cachedJSON, ok := s.db.GetStopGameCache(cacheKey, StopGameStaleFallbackTTL); ok {
+				var detail CompilationDetail
+				if err2 := json.Unmarshal([]byte(cachedJSON), &detail); err2 == nil && len(detail.Games) > 0 {
+					s.matchGamesAgainstLibrary(&detail)
+					return &detail, nil
+				}
+			}
+		}
 		return nil, fmt.Errorf("failed to fetch compilation detail %s: %w", id, err)
 	}
 
@@ -310,7 +358,7 @@ func (s *StopGameService) ParseCompilationDetail(id, htmlContent string) *Compil
 	// Title and count
 	if tm := reDetailH1.FindStringSubmatch(htmlContent); len(tm) > 1 {
 		rawTitle := reHTMLTags.ReplaceAllString(tm[1], "")
-		detail.Title = strings.TrimSpace(html.UnescapeString(rawTitle))
+		detail.Title = CleanCompilationTitle(html.UnescapeString(rawTitle))
 		if len(tm) > 2 {
 			if count, err := strconv.Atoi(tm[2]); err == nil {
 				detail.GamesCount = count

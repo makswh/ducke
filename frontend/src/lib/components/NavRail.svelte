@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    Store,
     LayoutGrid,
     Magnet,
     Compass,
@@ -12,7 +13,7 @@
   } from 'lucide-svelte';
 
   let {
-    activeTab = $bindable<'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('catalog'),
+    activeTab = $bindable<'storefront' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('storefront'),
     activeDownloadsCount = 0,
     downloadProgress = { isDownloading: false, percent: 0, title: '', speed: '' },
     hasFtpServers = false,
@@ -61,6 +62,19 @@
   <!-- Navigation Tabs (Vertical Icons 44x44, radius 14, gap 6px) -->
   <div class="flex flex-col items-center gap-[6px] w-full">
     <nav class="flex flex-col items-center gap-[6px] w-full">
+      <!-- Storefront Tab (Витрина) -->
+      <div class="relative w-full flex items-center justify-center">
+        <button
+          data-nav-item
+          style="width: 44px; height: 44px;"
+          class="relative w-[44px] h-[44px] rounded-[14px] flex items-center justify-center transition-all duration-[160ms] cursor-pointer {activeTab === 'storefront' ? 'bg-white/[0.08] text-white' : 'text-white/50 hover:text-white hover:bg-white/[0.05]'}"
+          onclick={() => (activeTab = 'storefront')}
+          title="Витрина игр"
+        >
+          <Store size={20} strokeWidth={1.5} class={activeTab === 'storefront' ? 'text-[#4C7DFF]' : ''} />
+        </button>
+      </div>
+
       <!-- Catalog Tab (only shown if FTP servers are configured) -->
       {#if hasFtpServers}
         <div class="relative w-full flex items-center justify-center">
@@ -169,7 +183,7 @@
         <!-- Floating Tooltip Card for Active Download on Hover (only when not on downloads tab) -->
         {#if downloadProgress.isDownloading && activeTab !== 'downloads'}
           <div
-            class="pointer-events-none group-hover/dl:opacity-100 group-hover/dl:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-3 py-2 bg-[#0B0D12] border-t border-t-white/[0.06] rounded-[14px] shadow-2xl flex flex-col gap-1 min-w-[190px] max-w-[260px]"
+            class="pointer-events-none group-hover/dl:opacity-100 group-hover/dl:translate-x-0 opacity-0 -translate-x-1.5 transition-all duration-150 z-50 absolute left-14 px-3 py-2 bg-[#0B0D12] border border-white/10 rounded-[14px] shadow-2xl flex flex-col gap-1 min-w-[190px] max-w-[260px]"
           >
             <div class="flex items-center justify-between text-[11px] font-normal text-white">
               <span>Загрузка игры</span>

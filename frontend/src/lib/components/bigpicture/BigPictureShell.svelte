@@ -57,6 +57,17 @@
     }
   });
 
+  let previousTab = $state<TabType>(activeTab);
+  $effect(() => {
+    if (activeTab !== previousTab) {
+      previousTab = activeTab;
+      if (selectedGame) {
+        selectedGame = null;
+        isTheaterActive = false;
+      }
+    }
+  });
+
   function handleSelectGame(game: any) {
     selectedGame = game;
   }
@@ -243,6 +254,7 @@
     {:else if activeTab === 'downloads'}
       <BigPictureDownloads
         {games}
+        {torrentGames}
         {activeDownloads}
         {downloadHistory}
         downloadPath={settings?.downloadPath || ''}
@@ -254,6 +266,7 @@
         {onClearCompleted}
         {onDeleteRecord}
         {onOpenFolder}
+        onSelectGame={handleSelectGame}
         onGoToCatalog={() => {
           activeTab = hasFtpServers ? 'catalog' : (hasTorrentSources ? 'torrents' : 'home');
           selectedGame = null;
@@ -276,134 +289,142 @@
   </div>
 
   <!-- SteamOS Gamepad Footer HUD -->
-  <footer class="h-10 px-8 flex items-center justify-between bg-[#050608] border-t border-white/[0.06] text-[#8e95a2] text-xs font-medium z-30 select-none flex-shrink-0">
+  <footer class="h-10 px-6 sm:px-8 flex items-center justify-between bg-[#07080a] border-t border-white/[0.06] text-[#8e95a2] text-xs font-medium z-30 select-none flex-shrink-0">
     <div class="flex items-center gap-5 sm:gap-6 flex-wrap">
       {#if isTheaterActive}
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
-          <span>Пауза</span>
+          <span class="w-4 h-4 rounded-full bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center shadow-sm">A</span>
+          <span class="text-[#cbd5e1]">Пауза</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-          <span>Выход</span>
+          <span class="w-4 h-4 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">B</span>
+          <span class="text-[#cbd5e1]">Выход</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
-          <span>Звук</span>
+          <span class="w-4 h-4 rounded-full bg-sky-400 text-black font-black text-[10px] flex items-center justify-center shadow-sm">X</span>
+          <span class="text-[#cbd5e1]">Звук</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
-          <span>Трейлеры</span>
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LB / RB</span>
+          <span class="text-[#cbd5e1]">Трейлеры</span>
         </div>
       {:else if selectedGame}
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
-          <span>Скачать / Играть</span>
+          <span class="w-4 h-4 rounded-full bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center shadow-sm">A</span>
+          <span class="text-[#cbd5e1]">Скачать / Играть</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-          <span>Назад</span>
+          <span class="w-4 h-4 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">B</span>
+          <span class="text-[#cbd5e1]">Назад</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
-          <span>Версии / Папка</span>
+          <span class="w-4 h-4 rounded-full bg-sky-400 text-black font-black text-[10px] flex items-center justify-center shadow-sm">X</span>
+          <span class="text-[#cbd5e1]">Опции</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
-          <span>В избранное</span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
-          <span>Разделы</span>
+          <span class="px-1.5 py-0.5 rounded-[5px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">↑</span>
+          <span class="text-[#cbd5e1]">Медиа</span>
         </div>
       {:else if activeTab === 'home'}
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
-          <span>Подробнее</span>
+          <span class="w-4 h-4 rounded-full bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center shadow-sm">A</span>
+          <span class="text-[#cbd5e1]">Подробнее</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-          <span>Назад</span>
+          <span class="w-4 h-4 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">B</span>
+          <span class="text-[#cbd5e1]">Назад</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
-          <span>Скачать / Играть</span>
+          <span class="w-4 h-4 rounded-full bg-sky-400 text-black font-black text-[10px] flex items-center justify-center shadow-sm">X</span>
+          <span class="text-[#cbd5e1]">Опции</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
-          <span>Избранное</span>
+          <span class="w-4 h-4 rounded-full bg-amber-400 text-black font-black text-[10px] flex items-center justify-center shadow-sm">Y</span>
+          <span class="text-[#cbd5e1]">Избранное</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
-          <span>Вкладки</span>
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LB / RB</span>
+          <span class="text-[#cbd5e1]">Вкладки</span>
         </div>
       {:else if (hasFtpServers && activeTab === 'catalog') || activeTab === 'torrents'}
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
-          <span>Открыть</span>
+          <span class="w-4 h-4 rounded-full bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center shadow-sm">A</span>
+          <span class="text-[#cbd5e1]">Открыть</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-          <span>Главная</span>
+          <span class="w-4 h-4 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">B</span>
+          <span class="text-[#cbd5e1]">Главная</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">X</span>
-          <span>Поиск</span>
+          <span class="w-4 h-4 rounded-full bg-sky-400 text-black font-black text-[10px] flex items-center justify-center shadow-sm">X</span>
+          <span class="text-[#cbd5e1]">Поиск</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
-          <span>Сортировка</span>
+          <span class="w-4 h-4 rounded-full bg-amber-400 text-black font-black text-[10px] flex items-center justify-center shadow-sm">Y</span>
+          <span class="text-[#cbd5e1]">Сортировка</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
-          <span>Вкладки</span>
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LB / RB</span>
+          <span class="text-[#cbd5e1]">Вкладки</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LT / RT</span>
+          <span class="text-[#cbd5e1]">Страница</span>
         </div>
       {:else if activeTab === 'favorites'}
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
-          <span>Открыть</span>
+          <span class="w-4 h-4 rounded-full bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center shadow-sm">A</span>
+          <span class="text-[#cbd5e1]">Открыть</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-          <span>Главная</span>
+          <span class="w-4 h-4 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">B</span>
+          <span class="text-[#cbd5e1]">Главная</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">Y</span>
-          <span>Сменить статус</span>
+          <span class="w-4 h-4 rounded-full bg-amber-400 text-black font-black text-[10px] flex items-center justify-center shadow-sm">Y</span>
+          <span class="text-[#cbd5e1]">Статус / Сортировка</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
-          <span>Вкладки</span>
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LB / RB</span>
+          <span class="text-[#cbd5e1]">Вкладки</span>
         </div>
       {:else if activeTab === 'downloads'}
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
-          <span>Действие</span>
+          <span class="w-4 h-4 rounded-full bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center shadow-sm">A</span>
+          <span class="text-[#cbd5e1]">Действие</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-          <span>Главная</span>
+          <span class="w-4 h-4 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">B</span>
+          <span class="text-[#cbd5e1]">Главная</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
-          <span>Вкладки</span>
+          <span class="w-4 h-4 rounded-full bg-amber-400 text-black font-black text-[10px] flex items-center justify-center shadow-sm">Y</span>
+          <span class="text-[#cbd5e1]">Сортировка</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LB / RB</span>
+          <span class="text-[#cbd5e1]">Вкладки</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LT / RT</span>
+          <span class="text-[#cbd5e1]">Прокрутка</span>
         </div>
       {:else if activeTab === 'settings'}
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">A</span>
-          <span>Выбрать</span>
+          <span class="w-4 h-4 rounded-full bg-emerald-500 text-black font-black text-[10px] flex items-center justify-center shadow-sm">A</span>
+          <span class="text-[#cbd5e1]">Выбрать</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="w-4 h-4 rounded-full bg-white/10 text-white font-bold text-[10px] flex items-center justify-center border border-white/20">B</span>
-          <span>Главная</span>
+          <span class="w-4 h-4 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">B</span>
+          <span class="text-[#cbd5e1]">Назад</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">← →</span>
-          <span>Сайдбар / Настройки</span>
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LB / RB</span>
+          <span class="text-[#cbd5e1]">Вкладки</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="px-1.5 py-0.5 rounded-[6px] bg-white/10 text-white font-bold text-[10px] border border-white/20">LB / RB</span>
-          <span>Вкладки</span>
+          <span class="px-2 py-0.5 rounded-[6px] bg-white/[0.08] border border-white/10 text-white font-mono text-[9px] font-bold">LT / RT</span>
+          <span class="text-[#cbd5e1]">Прокрутка</span>
         </div>
       {/if}
     </div>
@@ -418,4 +439,5 @@
       {/if}
     </div>
   </footer>
+
 </div>

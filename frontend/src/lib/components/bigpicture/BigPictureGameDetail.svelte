@@ -28,13 +28,17 @@
     SteamLogo,
     ThumbsUp,
     ThumbsDown,
+    Smiley,
     ChatText,
-    ArrowSquareOut as ExternalLink
+    ArrowSquareOut as ExternalLink,
+    DotsThree as MoreHorizontal
   } from 'phosphor-svelte';
   import Hls from 'hls.js';
   import { sound } from '../../navigation/audio';
+  import { gamepad } from '../../navigation/gamepad';
+  import BigPictureOptionWheel, { type WheelOption } from './BigPictureOptionWheel.svelte';
   import * as AppAPI from '../../../../wailsjs/go/main/App';
-  import { BrowserOpenURL } from '../../../../wailsjs/runtime/runtime';
+  import { BrowserOpenURL, EventsOn } from '../../../../wailsjs/runtime/runtime';
   import type {
     GameEntity,
     SteamMovie,
@@ -162,10 +166,15 @@
     }
   });
 
+  let descButtonTriggerEl = $state<HTMLButtonElement | null>(null);
+  let wizardButtonTriggerEl = $state<HTMLButtonElement | null>(null);
+  let steamButtonTriggerEl = $state<HTMLButtonElement | null>(null);
+
   function openDescriptionModal() {
     sound.playSelect();
     isDescriptionModalOpen = true;
     window.dispatchEvent(new CustomEvent('app:modal-opened'));
+    setTimeout(() => gamepad.retryFocusZone('modal'), 40);
   }
 
   function closeDescriptionModal() {
@@ -173,6 +182,10 @@
     if (isDescriptionModalOpen) {
       isDescriptionModalOpen = false;
       window.dispatchEvent(new CustomEvent('app:modal-closed'));
+      setTimeout(() => {
+        if (descButtonTriggerEl) gamepad.setFocus(descButtonTriggerEl);
+        else gamepad.retryFocusZone('detail');
+      }, 40);
     }
   }
 
@@ -196,6 +209,7 @@
     }
     isDownloadWizardOpen = true;
     window.dispatchEvent(new CustomEvent('app:modal-opened'));
+    setTimeout(() => gamepad.retryFocusZone('modal'), 40);
   }
 
   function closeDownloadWizard() {
@@ -203,6 +217,10 @@
     if (isDownloadWizardOpen) {
       isDownloadWizardOpen = false;
       window.dispatchEvent(new CustomEvent('app:modal-closed'));
+      setTimeout(() => {
+        if (wizardButtonTriggerEl) gamepad.setFocus(wizardButtonTriggerEl);
+        else gamepad.retryFocusZone('detail');
+      }, 40);
     }
   }
 
@@ -226,6 +244,261 @@
   let isFavoriteDropdownOpen = $state<boolean>(false);
   let favoriteDropdownContainerEl = $state<HTMLDivElement | null>(null);
   let favoriteDropdownTriggerEl = $state<HTMLButtonElement | null>(null);
+
+  function toggleFavoriteDropdown() {
+    if (isFavoriteDropdownOpen) {
+      closeFavoriteDropdown();
+    } else {
+      sound.playSelect();
+      isFavoriteDropdownOpen = true;
+      window.dispatchEvent(new CustomEvent('app:modal-opened'));
+      setTimeout(() => gamepad.retryFocusZone('modal'), 40);
+    }
+  }
+
+  function closeFavoriteDropdown() {
+    if (isFavoriteDropdownOpen) {
+      isFavoriteDropdownOpen = false;
+      sound.playBack();
+      window.dispatchEvent(new CustomEvent('app:modal-closed'));
+      setTimeout(() => {
+        if (favoriteDropdownTriggerEl) gamepad.setFocus(favoriteDropdownTriggerEl);
+        else gamepad.retryFocusZone('detail');
+      }, 40);
+    }
+  }
+
+  // More options menu state
+  let isActionMenuOpen = $state<boolean>(false);
+
+  function toggleActionMenu() {
+    isActionMenuOpen = !isActionMenuOpen;
+  }
+
+  function closeActionMenu() {
+    if (isActionMenuOpen) {
+      isActionMenuOpen = false;
+      setTimeout(() => {
+        const moreBtn = document.querySelector('button[title*="Дополнительные действия"]') as HTMLElement;
+        if (moreBtn) {
+          gamepad.setFocus(moreBtn);
+        }
+      }, 40);
+    }
+  }
+
+  let displayTitle = $derived(
+    (activeGame ? getDisplayTitle(activeGame) : null) || activeGame?.cleanTitle || activeGame?.rawName || activeGame?.folderName || 'Игра'
+  );
+
+  function formatReleaseYear(rawDate: string | undefined | null): string {
+    if (!rawDate) return '';
+    const match = String(rawDate).match(/\b(19\d\d|20\d\d)\b/);
+    return match ? match[1] : '';
+  }
+
+  function formatSteamRatingText(g: any): string {
+    const percent = g?.reviewPercent ?? g?.ratingPercent;
+    if (typeof percent !== 'number' || percent <= 0) return '';
+    if (percent >= 70) return `${percent}% Положительные`;
+    if (percent >= 40) return `${percent}% Смешанные`;
+    return `${percent}% Отрицательные`;
+  }
+
+  function getRatingColor(percent: number | undefined | null): string {
+    if (typeof percent !== 'number' || percent <= 0) return 'text-[#8e95a2]';
+    if (percent >= 70) return 'text-emerald-400';
+    if (percent >= 40) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+
+  async function handleToggleFavoriteSimple() {
+    if (!activeGame || !activeGame.id) return;
+    if (currentFavoriteStatus) {
+      await handleToggleFavoriteStatus(currentFavoriteStatus);
+    } else {
+      await handleToggleFavoriteStatus('planned');
+    }
+  }
+
+  let wheelItems = $derived.by<WheelOption[]>(() => {
+    if (!activeGame) return [];
+    const list: WheelOption[] = [];
+
+    // 1. Description
+    list.push({
+      id: 'description',
+      label: 'Описание игры',
+      icon: Info,
+      onSelect: () => {
+        closeActionMenu();
+        openDescriptionModal();
+      }
+    });
+
+    // 2. Folder / Versions
+    if (isCompleted) {
+      list.push({
+        id: 'open-folder',
+        label: 'Открыть папку с игрой',
+        icon: Folder,
+        onSelect: () => {
+          closeActionMenu();
+          handleOpenGameFolder();
+        }
+      });
+    } else if (activeVariantsList && activeVariantsList.length > 1) {
+      list.push({
+        id: 'versions',
+        label: `Выбрать версию (${activeVariantsList.length})`,
+        icon: Disc,
+        onSelect: () => {
+          closeActionMenu();
+          openDownloadWizard();
+        }
+      });
+    }
+
+    // 3. Favorite toggle
+    list.push({
+      id: 'favorite',
+      label: currentFavoriteStatus ? 'Удалить из избранного' : 'Добавить в избранное',
+      icon: Star,
+      danger: !!currentFavoriteStatus,
+      onSelect: () => {
+        closeActionMenu();
+        handleToggleFavoriteSimple();
+      }
+    });
+
+    // 4. Trailer / Media
+    if (unifiedMediaList.length > 0) {
+      list.push({
+        id: 'media',
+        label: movieList.length > 0 ? 'Смотреть трейлер' : 'Смотреть медиа',
+        icon: movieList.length > 0 ? Volume2 : ImageIcon,
+        onSelect: () => {
+          closeActionMenu();
+          enterTheaterMode(0);
+        }
+      });
+    }
+
+    // 5. Steam Store Page
+    if (activeGame?.steamAppId && activeGame.steamAppId > 0) {
+      list.push({
+        id: 'steam-store',
+        label: 'Страница в Steam',
+        icon: SteamLogo,
+        onSelect: () => {
+          closeActionMenu();
+          handleOpenSteamStore();
+        }
+      });
+    }
+
+    // 6. Steam Metadata / AppID binding
+    list.push({
+      id: 'steam-meta',
+      label: activeGame?.steamAppId > 0 ? `Steam AppID: ${activeGame.steamAppId}` : (activeGame?.steamAppId < 0 ? `SteamGridDB: ${-activeGame.steamAppId}` : 'Привязать Steam'),
+      icon: Edit3,
+      onSelect: () => {
+        closeActionMenu();
+        openSteamModal();
+      }
+    });
+
+    return list;
+  });
+
+  // Cover poster resolution and error fallback
+  let brokenCovers = $state<Record<string, boolean>>({});
+  const fetchingSGDB = new Set<string>();
+
+  function isHorizontalAsset(url: string): boolean {
+    if (!url) return false;
+    return /capsule_231x87|capsule_616x353|capsule_467x181|header\.jpg|header_alt/i.test(url);
+  }
+
+  let currentCoverUrl = $derived.by<string>(() => {
+    const g = activeGame || game;
+    if (!g) return '';
+    if (g.capsuleImage && !isHorizontalAsset(g.capsuleImage) && !brokenCovers[g.capsuleImage]) {
+      return sanitizeMediaUrl(g.capsuleImage);
+    }
+    if (pageDetails?.coverUrl && !isHorizontalAsset(pageDetails.coverUrl) && !brokenCovers[pageDetails.coverUrl]) {
+      return sanitizeMediaUrl(pageDetails.coverUrl);
+    }
+    if (g.steamAppId && g.steamAppId > 0 && !brokenCovers[`steam_${g.steamAppId}`]) {
+      return `https://shared.steamstatic.com/store_item_assets/steam/apps/${g.steamAppId}/library_600x900.jpg`;
+    }
+    if (g.libraryCover && !isHorizontalAsset(g.libraryCover) && !brokenCovers[g.libraryCover]) {
+      return sanitizeMediaUrl(g.libraryCover);
+    }
+    if (g.coverUrl && !isHorizontalAsset(g.coverUrl) && !brokenCovers[g.coverUrl]) {
+      return sanitizeMediaUrl(g.coverUrl);
+    }
+    if (g.capsuleImage && !brokenCovers[g.capsuleImage]) {
+      return sanitizeMediaUrl(g.capsuleImage);
+    }
+    if (g.headerImage && !brokenCovers[g.headerImage]) {
+      return sanitizeMediaUrl(g.headerImage);
+    }
+    return '';
+  });
+
+  async function handleCoverError(e: Event) {
+    const target = e.currentTarget as HTMLImageElement;
+    if (!target) return;
+    const g = activeGame || game;
+    if (!g) return;
+    const appId = g.steamAppId;
+    const currentSrc = target.src;
+    const gameKey = String(g.id || g.folderName || '');
+
+    if (appId && appId > 0) {
+      if (currentSrc.includes('shared.steamstatic.com')) {
+        target.src = `https://steamcdn-a.akamaihd.net/steam/apps/${appId}/library_600x900.jpg`;
+        return;
+      }
+      if (currentSrc.includes('steamcdn-a.akamaihd.net')) {
+        target.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`;
+        return;
+      }
+      if (currentSrc.includes('cdn.cloudflare.steamstatic.com')) {
+        target.src = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/library_600x900_2x.jpg`;
+        return;
+      }
+    }
+
+    if (g.capsuleImage && !isHorizontalAsset(g.capsuleImage) && target.src !== g.capsuleImage) {
+      target.src = sanitizeMediaUrl(g.capsuleImage);
+      return;
+    }
+
+    // On-the-fly fetch from SteamGridDB if missing
+    const term = g.cleanTitle || g.rawName || g.folderName || '';
+    if (term && !fetchingSGDB.has(gameKey)) {
+      fetchingSGDB.add(gameKey);
+      try {
+        const appApi = (window as any)?.go?.main?.App;
+        if (appApi && typeof appApi.ResolveGameCover === 'function') {
+          const sgdbCover = await appApi.ResolveGameCover(g.id || 0, term, g.steamAppId || 0);
+          if (sgdbCover) {
+            g.capsuleImage = sgdbCover;
+            target.src = sgdbCover;
+            return;
+          }
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    if (currentSrc) {
+      brokenCovers[currentSrc] = true;
+    }
+  }
 
   // Variant selector state
   let selectedVariantId = $state<number | null>(null);
@@ -377,7 +650,8 @@
   let isCompleted = $derived(
     (activeDownload && activeDownload.status === 'completed') ||
     downloadsStore.isGameInstalled(pageDetails?.game || game) ||
-    pageDetails?.isInstalled
+    (!!pageDetails?.isInstalled && pageDetails?.downloadStatus !== 'cancelled' && pageDetails?.downloadStatus !== 'failed' && pageDetails?.downloadStatus !== 'downloading' && pageDetails?.downloadStatus !== 'queued' && pageDetails?.downloadStatus !== 'scanning' && pageDetails?.downloadStatus !== 'paused') ||
+    pageDetails?.downloadStatus === 'completed'
   );
 
   let currentFavoriteStatus = $derived(activeGame?.favoriteStatus || '');
@@ -1044,7 +1318,7 @@
     if (!activeGame?.id) return;
     try {
       sound.playSelect();
-      isFavoriteDropdownOpen = false;
+      closeFavoriteDropdown();
       await AppAPI.SetFavoriteStatus(activeGame.id, status);
       activeGame.favoriteStatus = status;
       if (game) game.favoriteStatus = status;
@@ -1057,7 +1331,7 @@
     if (!activeGame?.id) return;
     try {
       sound.playFocus();
-      isFavoriteDropdownOpen = false;
+      closeFavoriteDropdown();
       await AppAPI.RemoveFromFavorites(activeGame.id);
       activeGame.favoriteStatus = '';
       if (game) game.favoriteStatus = '';
@@ -1124,6 +1398,7 @@
     steamCandidates = [];
     isSteamModalOpen = true;
     window.dispatchEvent(new CustomEvent('app:modal-opened'));
+    setTimeout(() => gamepad.retryFocusZone('modal'), 40);
     await performSteamSearch();
   }
 
@@ -1132,6 +1407,10 @@
     if (isSteamModalOpen) {
       isSteamModalOpen = false;
       window.dispatchEvent(new CustomEvent('app:modal-closed'));
+      setTimeout(() => {
+        if (steamButtonTriggerEl) gamepad.setFocus(steamButtonTriggerEl);
+        else gamepad.retryFocusZone('detail');
+      }, 40);
     }
   }
 
@@ -1307,6 +1586,23 @@
         return;
       }
 
+      // When OptionWheel action menu is open, let BigPictureOptionWheel handle its keys
+      if (isActionMenuOpen) {
+        if (
+          e.key === 'Escape' ||
+          e.key === 'Backspace' ||
+          e.key === 'b' ||
+          e.key === 'B' ||
+          e.key === 'и' ||
+          e.key === 'И' ||
+          e.code === 'KeyB'
+        ) {
+          closeActionMenu();
+          e.preventDefault();
+        }
+        return;
+      }
+
       // Root game detail Escape or Backspace exits to library
       if (e.key === 'Escape' || e.key === 'Backspace') {
         sound.playBack();
@@ -1316,14 +1612,14 @@
         return;
       }
 
-      if (e.key === 'x' || e.key === 'X') {
-        openDescriptionModal();
+      if (e.key === 'x' || e.key === 'X' || e.key === 'ContextMenu' || e.key === 'o' || e.key === 'O') {
+        toggleActionMenu();
         e.preventDefault();
         return;
       }
 
       if (e.key === 'y' || e.key === 'Y') {
-        isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
+        toggleFavoriteDropdown();
         e.preventDefault();
         return;
       }
@@ -1337,6 +1633,11 @@
     const handleGamepadDir = (e: CustomEvent) => {
       const dir = e.detail?.dir;
       if (!dir) return;
+
+      if (isActionMenuOpen) {
+        e.preventDefault();
+        return;
+      }
 
       if (isDescriptionModalOpen) {
         if (dir === 'DOWN') {
@@ -1371,10 +1672,9 @@
         return;
       }
 
-      if (!isDownloadWizardOpen && !isSteamModalOpen && !isFavoriteDropdownOpen) {
+      if (!isDownloadWizardOpen && !isSteamModalOpen && !isFavoriteDropdownOpen && !isActionMenuOpen) {
         if (dir === 'UP') {
-          const isCarouselFocused = document.activeElement?.closest('.media-carousel-container') !== null;
-          if (!isCarouselFocused && unifiedMediaList.length > 0) {
+          if (unifiedMediaList.length > 0) {
             enterTheaterMode(0);
           }
         }
@@ -1400,18 +1700,27 @@
         e.preventDefault();
         return;
       }
-      openDescriptionModal();
+      if (isActionMenuOpen) {
+        closeActionMenu();
+        e.preventDefault();
+        return;
+      }
+      toggleActionMenu();
       e.preventDefault();
     };
 
     const handleBtnY = (e: CustomEvent) => {
-      if (isTheaterMode || isDescriptionModalOpen || isDownloadWizardOpen) return;
-      isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
+      if (isTheaterMode || isDescriptionModalOpen || isDownloadWizardOpen || isSteamModalOpen || isActionMenuOpen) return;
+      toggleFavoriteDropdown();
       e.preventDefault();
     };
 
     const handleGoBack = (e: CustomEvent) => {
-      if (isSteamModalOpen) {
+      if (isActionMenuOpen) {
+        closeActionMenu();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (isSteamModalOpen) {
         closeSteamModal();
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -1428,7 +1737,7 @@
         e.preventDefault();
         e.stopImmediatePropagation();
       } else if (isFavoriteDropdownOpen) {
-        isFavoriteDropdownOpen = false;
+        closeFavoriteDropdown();
         e.preventDefault();
         e.stopImmediatePropagation();
       } else {
@@ -1440,7 +1749,13 @@
     };
 
     const handleModalClose = (e: Event) => {
-      if (isSteamModalOpen) {
+      if (isActionMenuOpen) {
+        closeActionMenu();
+        e.preventDefault();
+      } else if (isFavoriteDropdownOpen) {
+        closeFavoriteDropdown();
+        e.preventDefault();
+      } else if (isSteamModalOpen) {
         closeSteamModal();
         e.preventDefault();
       } else if (isDescriptionModalOpen) {
@@ -1456,43 +1771,39 @@
     };
 
     const handleSubtabPrev = (e: Event) => {
-      if (isDescriptionModalOpen) {
-        cycleDescTab(-1);
-        e.preventDefault();
-      } else if (isTheaterMode) {
+      if (isTheaterMode) {
         prevMedia();
-        e.preventDefault();
+      } else {
+        cycleDescTab(-1);
       }
+      e.preventDefault();
     };
 
     const handleSubtabNext = (e: Event) => {
-      if (isDescriptionModalOpen) {
-        cycleDescTab(1);
-        e.preventDefault();
-      } else if (isTheaterMode) {
+      if (isTheaterMode) {
         nextMedia();
-        e.preventDefault();
+      } else {
+        cycleDescTab(1);
       }
+      e.preventDefault();
     };
 
     const handleGalleryPrev = (e: Event) => {
-      if (isDescriptionModalOpen) {
-        cycleDescTab(-1);
-        e.preventDefault();
-      } else if (isTheaterMode) {
+      if (isTheaterMode) {
         prevMedia();
-        e.preventDefault();
+      } else {
+        cycleDescTab(-1);
       }
+      e.preventDefault();
     };
 
     const handleGalleryNext = (e: Event) => {
-      if (isDescriptionModalOpen) {
-        cycleDescTab(1);
-        e.preventDefault();
-      } else if (isTheaterMode) {
+      if (isTheaterMode) {
         nextMedia();
-        e.preventDefault();
+      } else {
+        cycleDescTab(1);
       }
+      e.preventDefault();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -1506,6 +1817,15 @@
     window.addEventListener('app:subtab-next', handleSubtabNext as EventListener);
     window.addEventListener('app:gallery-prev', handleGalleryPrev as EventListener);
     window.addEventListener('app:gallery-next', handleGalleryNext as EventListener);
+
+    const unsubDownloadsUpdated = EventsOn('downloads:updated', () => {
+      if (!isMounted) return;
+      const curId = game?.id;
+      if (curId) {
+        pageDetailsCache.delete(curId);
+        fetchGamePageDetails(curId, switchSequence);
+      }
+    });
 
     return () => {
       isMounted = false;
@@ -1522,6 +1842,7 @@
       window.removeEventListener('app:subtab-next', handleSubtabNext as EventListener);
       window.removeEventListener('app:gallery-prev', handleGalleryPrev as EventListener);
       window.removeEventListener('app:gallery-next', handleGalleryNext as EventListener);
+      if (typeof unsubDownloadsUpdated === 'function') unsubDownloadsUpdated();
     };
   });
 
@@ -1599,7 +1920,7 @@
       <button
         data-nav-item
         type="button"
-        class="px-4 py-2 rounded bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-xs font-bold text-white hover:border-white/30 flex items-center gap-2.5 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none shadow-md"
+        class="px-4 py-2 rounded-[12px] bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-xs font-bold text-white hover:border-white/30 flex items-center gap-2.5 cursor-pointer transition-all active:scale-95 focus:ring-1 focus:ring-white focus:outline-none shadow-md"
         onclick={() => {
           sound.playBack();
           onBack();
@@ -1607,395 +1928,136 @@
       >
         <ArrowLeft class="w-4 h-4" />
         <span>Библиотека</span>
-        <span class="w-4 h-4 rounded bg-white/20 text-[10px] flex items-center justify-center font-bold">B</span>
+        <span class="w-4 h-4 rounded-[6px] bg-white/20 text-[10px] flex items-center justify-center font-bold">B</span>
       </button>
 
-      <div class="flex items-center gap-2.5">
-        {#if isEnrichingCurrentGame}
-          <div class="flex items-center gap-2 px-3 py-1.5 rounded-sm bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-mono">
-            <RefreshCw class="w-3.5 h-3.5 animate-spin" />
-            <span>Поиск данных...</span>
-          </div>
-        {/if}
-
-        <button
-          data-nav-item
-          type="button"
-          class="px-3.5 py-1.5 rounded bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-xs font-semibold text-[#cbd5e1] hover:text-white flex items-center gap-2 cursor-pointer transition-colors focus:ring-1 focus:ring-white focus:outline-none shadow-md"
-          onclick={openSteamModal}
-          title="Привязать Steam / Изменить метаданные"
-        >
-          <Edit3 class="w-3.5 h-3.5 text-sky-400" />
-          <span>{activeGame?.steamAppId > 0 ? `Steam AppID: ${activeGame.steamAppId}` : (activeGame?.steamAppId < 0 ? `SteamGridDB: ${-activeGame.steamAppId}` : 'Привязать Steam')}</span>
-        </button>
-      </div>
+      {#if isEnrichingCurrentGame}
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-[8px] bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-mono">
+          <RefreshCw class="w-3.5 h-3.5 animate-spin" />
+          <span>Поиск данных...</span>
+        </div>
+      {/if}
     </div>
 
-    <!-- Middle Hero Stage: Game Title/Logo, Meta Badges & Action Buttons -->
+    <!-- Middle Stage: Left (Hero details) + Right (Large Game Cover) -->
     {#if activeGame}
-      <div class="max-w-4xl space-y-4 my-auto z-20">
-        <!-- Official Steam Logo or Large Google Sans Title -->
-        <div class="min-h-[60px] sm:min-h-[80px] flex items-end">
-          {#if activeGame.steamAppId && !logoFailedMap[activeGame.steamAppId]}
-            <img
-              src="https://shared.steamstatic.com/store_item_assets/steam/apps/{activeGame.steamAppId}/logo.png"
-              alt={activeGame.cleanTitle || activeGame.rawName}
-              class="max-h-24 sm:max-h-28 md:max-h-32 max-w-[320px] sm:max-w-lg object-contain object-left-bottom drop-shadow-2xl transition-all duration-500"
-              onerror={() => {
-                if (activeGame?.steamAppId) logoFailedMap[activeGame.steamAppId] = true;
-              }}
-            />
-          {:else}
-            <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight leading-none drop-shadow-2xl line-clamp-2">
-              {activeGame.cleanTitle || activeGame.rawName || activeGame.folderName || 'Игра'}
-            </h1>
-          {/if}
-        </div>
-
-        <!-- 1. Status & Source Badges Strip -->
-        <div class="flex flex-wrap items-center gap-2 pt-0.5">
-          <span class="px-2 py-0.5 rounded bg-white/[0.08] text-[#8e95a2] text-[10px] font-black tracking-widest border border-white/10 uppercase font-mono">
-            PC
-          </span>
-
-          {#if isCompleted}
-            <span class="px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
-              <Check class="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>Установлено</span>
-            </span>
-          {:else if isDownloading}
-            <span class="px-2.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-semibold flex items-center gap-1.5">
-              <Download class="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>{Math.round(activeDownload?.progressPercent ?? (activeDownload as any)?.progress ?? pageDetails?.downloadProgress?.progressPercent ?? 0)}%</span>
-            </span>
-          {/if}
-
-          {#if downloadSourceInfo}
-            <span class="px-2.5 py-0.5 rounded border border-white/10 bg-white/[0.05] text-[#94a3b8] text-xs font-medium flex items-center gap-1.5">
-              <span>{downloadSourceInfo.name}</span>
-            </span>
-          {/if}
-
-          {#if currentFavoriteStatus}
-            <span class="px-2.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-semibold flex items-center gap-1.5">
-              <Star class="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-              <span>
-                {#if currentFavoriteStatus === 'playing'}
-                  Прохожу
-                {:else if currentFavoriteStatus === 'completed'}
-                  Пройдено
-                {:else}
-                  В планах
-                {/if}
-              </span>
-            </span>
-          {/if}
-        </div>
-
-        <!-- 2. Metadata Factline (No trailing bullets, clean typography) -->
-        <div class="flex flex-wrap items-center gap-y-1 gap-x-2 text-xs text-[#8e95a2]">
-          {#if activeGame.releaseDate || activeGame.steamReleaseDate}
-            <span>{activeGame.releaseDate || activeGame.steamReleaseDate}</span>
-          {/if}
-
-          {#if (activeGame.releaseDate || activeGame.steamReleaseDate) && (activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr)}
-            <span class="text-white/20 select-none">•</span>
-          {/if}
-
-          {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
-            <span class="font-mono text-[#cbd5e1]">{activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}</span>
-          {/if}
-
-          {#if !isCompleted && currentVariantSeedInfo}
-            {#if (activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr || activeGame.releaseDate || activeGame.steamReleaseDate)}
-              <span class="text-white/20 select-none">•</span>
-            {/if}
-            <span class="inline-flex items-center gap-1 font-mono {currentVariantSeedInfo.seeders > 0 ? 'text-emerald-400 font-semibold' : 'text-[#8e95a2]'}">
-              <UploadSimple class="w-3 h-3 stroke-[2.5]" />
-              {#if currentVariantSeedInfo.loading}
-                <span class="animate-pulse text-[#64748b]">...</span>
-              {:else}
-                <span>{formatSeedsCount(currentVariantSeedInfo.seeders)}</span>
-              {/if}
-            </span>
-          {/if}
-
-          {#if activeGame.reviewPercent}
-            {#if (activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr || activeGame.releaseDate || activeGame.steamReleaseDate || (!isCompleted && currentVariantSeedInfo))}
-              <span class="text-white/20 select-none">•</span>
-            {/if}
-            <span class="font-bold text-white flex items-center gap-1">
-              <Star class="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-              <span>{activeGame.reviewPercent}%</span>
-            </span>
-          {/if}
-
-          {#if activeGame.genres && Array.isArray(activeGame.genres) && activeGame.genres.length > 0}
-            {#if (activeGame.reviewPercent || activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr || activeGame.releaseDate || (!isCompleted && currentVariantSeedInfo))}
-              <span class="text-white/20 select-none">•</span>
-            {/if}
-            <span class="text-[#8e95a2]">
-              {activeGame.genres.slice(0, 3).join(', ')}
-            </span>
-          {/if}
-        </div>
-
-        <!-- 3. Short Synopsis Preview -->
-        {#if activeGame.shortDescription}
-          <p class="text-xs sm:text-sm text-[#cbd5e1]/90 leading-relaxed line-clamp-2 max-w-2xl font-normal drop-shadow-sm">
-            {activeGame.shortDescription.replace(/<[^>]*>?/gm, '')}
-          </p>
-        {/if}
-
-        <!-- 4. Tactile Action Buttons Row (Unified single-row Steam Deck layout) -->
-        <div class="flex items-center gap-2.5 pt-1.5 flex-wrap">
-          <!-- Primary Action Pill (A) -->
-          <button
-            data-nav-item
-            type="button"
-            class="h-11 px-6 rounded-[14px] bg-white hover:bg-slate-100 text-black font-extrabold text-sm inline-flex items-center gap-2.5 transition-all cursor-pointer shadow-lg shadow-white/5 active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
-            onclick={handlePrimaryAction}
-          >
-            {#if isCompleted}
-              <Play class="w-4 h-4 fill-black text-black" />
-              <span>Играть</span>
-            {:else if isDownloading}
-              <Download class="w-4 h-4 stroke-[2.5]" />
-              <span>{activeDownload?.status === 'paused' || pageDetails?.downloadStatus === 'paused' ? 'Приостановлено' : (activeDownload?.status === 'queued' || pageDetails?.downloadStatus === 'queued' ? 'В очереди...' : 'Скачивается...')}</span>
+      <div class="mt-auto pb-6 sm:pb-8 w-full flex items-end justify-between gap-8 z-20">
+        <!-- Left Column: Logo, Meta, Tactical Actions -->
+        <div class="max-w-2xl space-y-4">
+          <!-- Official Steam Logo or Bold Title -->
+          <div class="min-h-[90px] sm:min-h-[120px] flex items-end">
+            {#if activeGame.steamAppId && !logoFailedMap[activeGame.steamAppId]}
+              <img
+                src="https://shared.steamstatic.com/store_item_assets/steam/apps/{activeGame.steamAppId}/logo.png"
+                alt={displayTitle}
+                class="max-h-24 sm:max-h-32 md:max-h-36 max-w-[320px] sm:max-w-lg object-contain object-left-bottom filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.8)] transition-all duration-700 ease-out"
+                onerror={() => {
+                  if (activeGame?.steamAppId) logoFailedMap[activeGame.steamAppId] = true;
+                }}
+              />
             {:else}
-              <Download class="w-4 h-4 stroke-[2.5]" />
-              <span>Скачать</span>
-              {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
-                <span class="text-xs font-mono opacity-60 font-bold">• {activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}</span>
-              {/if}
-            {/if}
-            <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center ml-0.5">A</span>
-          </button>
-
-          <!-- Description Button (X) -->
-          <button
-            data-nav-item
-            type="button"
-            class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
-            onclick={openDescriptionModal}
-            title="Открыть описание игры [X]"
-          >
-            <Info class="w-4 h-4 text-sky-400" />
-            <span>Описание</span>
-            <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">X</span>
-          </button>
-
-          <!-- Versions or Folder Action -->
-          {#if isCompleted}
-            <button
-              data-nav-item
-              type="button"
-              class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
-              onclick={handleOpenGameFolder}
-              title="Открыть папку с игрой"
-            >
-              <Folder class="w-4 h-4 fill-current text-[#cbd5e1]" />
-              <span>Папка</span>
-            </button>
-          {:else if activeVariantsList && activeVariantsList.length > 1}
-            <button
-              data-nav-item
-              type="button"
-              class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
-              onclick={openDownloadWizard}
-              title="Выбрать версию ({activeVariantsList.length} доступно)"
-            >
-              <Disc class="w-4 h-4 text-sky-400" />
-              <span>Версии ({activeVariantsList.length})</span>
-            </button>
-          {/if}
-
-          <!-- Open Steam Store Page -->
-          {#if activeGame?.steamAppId && activeGame.steamAppId > 0}
-            <button
-              data-nav-item
-              type="button"
-              class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
-              onclick={handleOpenSteamStore}
-              title="Открыть страницу игры в магазине Steam"
-            >
-              <SteamLogo size={16} weight="bold" class="text-sky-400" />
-              <span>В Steam</span>
-              <ExternalLink class="w-3.5 h-3.5 text-[#8e95a2]" />
-            </button>
-          {/if}
-
-          <!-- Watch Media Fullscreen Button (↑) -->
-          {#if unifiedMediaList.length > 0}
-            <button
-              data-nav-item
-              type="button"
-              class="h-11 px-4 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white font-bold text-xs inline-flex items-center gap-2 border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none flex-shrink-0"
-              onclick={() => enterTheaterMode(0)}
-              title="Смотреть во весь экран [↑]"
-            >
-              {#if movieList.length > 0}
-                <Volume2 class="w-4 h-4 text-sky-400" />
-                <span>Трейлер</span>
-              {:else}
-                <ImageIcon class="w-4 h-4 text-sky-400" />
-                <span>Медиа</span>
-              {/if}
-              <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center font-mono">↑</span>
-            </button>
-          {/if}
-
-          <!-- Favorite Toggle (Y) -->
-          <div class="relative flex-shrink-0">
-            <button
-              bind:this={favoriteDropdownTriggerEl}
-              data-nav-item
-              type="button"
-              class="h-11 px-3.5 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-white border border-white/10 hover:border-white/20 transition-all cursor-pointer active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none inline-flex items-center gap-2"
-              onclick={() => {
-                isFavoriteDropdownOpen = !isFavoriteDropdownOpen;
-              }}
-              title="Статус в избранном [Y]"
-            >
-              <Star class="w-4 h-4 {currentFavoriteStatus ? 'text-amber-400 fill-amber-400' : 'text-white/40 fill-white/20'}" />
-              <span class="w-4 h-4 rounded-full bg-white/15 text-[#cbd5e1] text-[9px] font-bold flex items-center justify-center">Y</span>
-            </button>
-
-            {#if isFavoriteDropdownOpen}
-              <div
-                bind:this={favoriteDropdownContainerEl}
-                class="absolute left-0 bottom-full mb-3 z-50 w-52 rounded-[16px] bg-[#0d1117] border border-white/15 shadow-2xl p-1.5 space-y-1"
-              >
-                <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#64748b]">
-                  Статус игры
-                </div>
-                <button
-                  data-nav-item
-                  type="button"
-                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'planned' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                  onclick={() => handleToggleFavoriteStatus('planned')}
-                >
-                  <span>В планах</span>
-                  {#if currentFavoriteStatus === 'planned'}
-                    <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
-                  {/if}
-                </button>
-
-                <button
-                  data-nav-item
-                  type="button"
-                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'playing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                  onclick={() => handleToggleFavoriteStatus('playing')}
-                >
-                  <span>Прохожу</span>
-                  {#if currentFavoriteStatus === 'playing'}
-                    <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
-                  {/if}
-                </button>
-
-                <button
-                  data-nav-item
-                  type="button"
-                  class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {currentFavoriteStatus === 'completed' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
-                  onclick={() => handleToggleFavoriteStatus('completed')}
-                >
-                  <span>Пройдено</span>
-                  {#if currentFavoriteStatus === 'completed'}
-                    <Check class="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
-                  {/if}
-                </button>
-
-                {#if currentFavoriteStatus}
-                  <button
-                    data-nav-item
-                    type="button"
-                    class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                    onclick={() => handleToggleFavoriteStatus('')}
-                  >
-                    <span>Убрать из избранного</span>
-                    <X class="w-3.5 h-3.5 text-rose-400" />
-                  </button>
-                {/if}
-              </div>
+              <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight leading-none drop-shadow-2xl line-clamp-2 transition-all duration-500">
+                {displayTitle}
+              </h1>
             {/if}
           </div>
-        </div>
-      </div>
-    {/if}
 
-    <!-- Bottom Strip: Trailers & Screenshots Carousel -->
-    {#if movieList.length > 0 || gameScreenshots.length > 0}
-      <div class="w-full pt-3 pb-1 z-20 flex-shrink-0">
-        <div class="flex items-center justify-between pb-2">
-          <span class="text-xs font-bold uppercase tracking-wider text-[#8e95a2]">Медиа и скриншоты</span>
-          <span class="text-xs text-[#64748b] font-medium hidden sm:inline">Нажмите [A] для полноэкранного просмотра</span>
-        </div>
-        <div class="media-carousel-container flex items-center gap-3 overflow-x-auto scrollbar-none py-1">
-          <!-- Video Trailers -->
-          {#each movieList as movie, mIdx}
-            <button
-              data-nav-item
-              type="button"
-              class="w-44 sm:w-52 aspect-video rounded-[12px] overflow-hidden border border-white/15 bg-black hover:border-sky-400 focus:border-sky-400 hover:scale-105 focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
-              onclick={() => enterTheaterMode(mIdx)}
-              title={movie.name || `Трейлер ${mIdx + 1}`}
-            >
-              {#if movie.thumbnail}
-                <img src={sanitizeMediaUrl(movie.thumbnail)} alt={movie.name || 'Трейлер'} class="w-full h-full object-cover" loading="lazy" />
-              {:else}
-                <div class="w-full h-full bg-[#0d1117] flex items-center justify-center">
-                  <Film class="w-8 h-8 text-white/30" />
-                </div>
+          <!-- Clean Meta Line: Genres • Rating • Year • Size -->
+          <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:text-sm font-medium text-[#8e95a2]">
+            {#if activeGame.genres && Array.isArray(activeGame.genres) && activeGame.genres.length > 0}
+              <span class="text-white/90">
+                {activeGame.genres.slice(0, 3).join(', ')}
+              </span>
+            {/if}
+
+            {#if formatSteamRatingText(activeGame)}
+              {#if activeGame.genres && activeGame.genres.length > 0}
+                <span class="text-white/20 select-none">•</span>
               {/if}
-              <div class="absolute inset-0 bg-black/40 group-hover/thumb:bg-black/20 transition-colors flex items-center justify-center">
-                <div class="w-9 h-9 rounded-full bg-black/80 group-hover/thumb:bg-sky-500 text-white flex items-center justify-center border border-white/20 group-hover/thumb:border-transparent transition-all shadow-md">
-                  <Play class="w-3.5 h-3.5 fill-white translate-x-0.5" />
-                </div>
-              </div>
-              <div class="absolute bottom-1.5 inset-x-1.5 flex items-center justify-between pointer-events-none">
-                <span class="px-2 py-0.5 rounded-[6px] bg-black/80 text-[10px] font-bold text-white max-w-[120px] truncate border border-white/10">
-                  {movie.name || `Трейлер ${mIdx + 1}`}
-                </span>
-                <span class="px-1.5 py-0.5 rounded-[6px] bg-sky-500/80 text-[9px] font-bold uppercase tracking-wider text-black">
-                  Видео
-                </span>
-              </div>
-            </button>
-          {/each}
+              <span class="font-semibold {getRatingColor(activeGame.reviewPercent ?? activeGame.ratingPercent)}">
+                {formatSteamRatingText(activeGame)}
+              </span>
+            {/if}
 
-          <!-- Screenshots -->
-          {#each gameScreenshots as sc, idx}
+            {#if formatReleaseYear(activeGame.releaseDate || activeGame.steamReleaseDate)}
+              <span class="text-white/20 select-none">•</span>
+              <span>{formatReleaseYear(activeGame.releaseDate || activeGame.steamReleaseDate)}</span>
+            {/if}
+
+            {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
+              <span class="text-white/20 select-none">•</span>
+              <span class="font-mono text-[#cbd5e1]">{activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}</span>
+            {/if}
+          </div>
+
+          <!-- Tactical Action Buttons: Only Primary Button and Three Dots Button (Console Style) -->
+          <div class="flex items-center gap-3 pt-2">
+            <!-- Primary Action Pill (A) -->
             <button
               data-nav-item
               type="button"
-              class="w-44 sm:w-52 aspect-video rounded-[12px] overflow-hidden border border-white/10 bg-black/60 hover:border-white hover:scale-105 focus:border-white focus:scale-105 focus:outline-none transition-all flex-shrink-0 cursor-pointer relative group/thumb shadow-lg"
-              onclick={() => enterTheaterMode(movieList.length + idx)}
-              onmouseenter={() => {
-                activeScreenshotPreview = sc;
-              }}
-              onfocus={() => {
-                activeScreenshotPreview = sc;
-              }}
-              title="Скриншот {idx + 1}"
+              class="px-7 py-3 rounded-[14px] bg-white text-black font-bold text-sm flex items-center gap-3 hover:bg-slate-100 transition-all cursor-pointer shadow-xl active:scale-95 focus:ring-2 focus:ring-white focus:outline-none"
+              onclick={handlePrimaryAction}
             >
-              <img src={sc} alt="" class="w-full h-full object-cover" loading="lazy" />
-              <div class="absolute inset-0 bg-white/10 opacity-0 group-hover/thumb:opacity-100 transition-opacity"></div>
+              {#if isCompleted}
+                <Play class="w-4 h-4 fill-black text-black" />
+                <span>Играть</span>
+              {:else if isDownloading}
+                <Download class="w-4 h-4 stroke-[2.5]" />
+                <span>{activeDownload?.status === 'paused' || pageDetails?.downloadStatus === 'paused' ? 'Приостановлено' : (activeDownload?.status === 'queued' || pageDetails?.downloadStatus === 'queued' ? 'В очереди...' : 'Скачивается...')}</span>
+              {:else}
+                <Download class="w-4 h-4 stroke-[2.5]" />
+                <span>Скачать</span>
+                {#if activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}
+                  <span class="text-xs font-mono opacity-60 font-bold">• {activeVariant?.sizeDisplay || activeGame?.sizeDisplay || activeGame?.sizeStr}</span>
+                {/if}
+              {/if}
+              <span class="w-5 h-5 rounded-full bg-black/15 text-black text-[10px] font-black flex items-center justify-center">A</span>
             </button>
-          {/each}
+
+            <!-- More Options Button (...) with OptionWheel Action Menu -->
+            <button
+              data-nav-item
+              type="button"
+              class="h-11 px-3.5 rounded-[14px] bg-white/[0.08] hover:bg-white/[0.14] text-[#cbd5e1] hover:text-white border border-white/10 transition-all cursor-pointer active:scale-95 focus:ring-2 focus:ring-white focus:outline-none flex items-center gap-2.5 {isActionMenuOpen ? 'bg-white/20 border-white/30 text-white' : ''}"
+              onclick={toggleActionMenu}
+              title="Дополнительные действия [X]"
+            >
+              <MoreHorizontal class="w-5 h-5" />
+              <span class="w-5 h-5 rounded-full bg-white/15 text-white text-[10px] font-black flex items-center justify-center">X</span>
+            </button>
+          </div>
         </div>
+
+        <!-- Right Column: Large Game Cover (Vertical Poster) -->
+        {#if currentCoverUrl}
+          <div class="hidden sm:flex flex-col items-center flex-shrink-0 self-end mr-2 sm:mr-4 lg:mr-8 mb-1">
+            <div class="w-52 md:w-60 lg:w-72 xl:w-80 aspect-[2/3] rounded-[20px] overflow-hidden border border-white/15 shadow-[0_24px_60px_rgba(0,0,0,0.9)] bg-[#0c0e14] transition-all duration-500 ease-out relative group/cover select-none">
+              <img
+                src={currentCoverUrl}
+                alt={displayTitle}
+                class="w-full h-full object-cover select-none"
+                onerror={handleCoverError}
+                loading="eager"
+                decoding="async"
+              />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none"></div>
+            </div>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
 
-  <!-- 3. Description Overlay Screen (Opened by [X]) -->
+  <!-- 3. Description Overlay Screen (Opened by [X]) with 3D bottom fly-up -->
   {#if isDescriptionModalOpen}
     <div
       data-nav-zone="modal"
-      class="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 animate-fade-in select-none"
+      class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md bp-modal-backdrop-3d flex items-center justify-center p-4 sm:p-8 select-none"
     >
-      <div class="w-full max-w-5xl h-[88vh] bg-[#07080a] border border-white/10 rounded-md flex flex-col overflow-hidden shadow-2xl">
+      <div class="bp-modal-content-3d w-full max-w-5xl h-[88vh] bg-[#0c0e14] border border-white/10 rounded-[20px] flex flex-col overflow-hidden shadow-2xl">
         <!-- 1. Modal Top Bar: Game Title & Subtitle + Close Button -->
-        <div class="px-6 sm:px-8 pt-5 pb-4 flex items-center justify-between flex-shrink-0 bg-[#0c0e14]">
+        <div class="px-6 sm:px-8 pt-5 pb-4 flex items-center justify-between flex-shrink-0 bg-[#0c0e14] border-b border-white/[0.06]">
           <div class="min-w-0 flex-1 pr-4">
             <h2 class="text-base sm:text-xl font-bold text-white tracking-tight leading-snug truncate">
               {getDisplayTitle(activeGame) || 'Об игре'}
@@ -2019,11 +2081,11 @@
             <button
               data-nav-item
               type="button"
-              class="px-3.5 py-1.5 rounded-sm bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs font-bold flex items-center gap-2 cursor-pointer focus:ring-1 focus:ring-white focus:outline-none transition-colors"
+              class="px-3.5 py-1.5 rounded-[12px] bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-white text-xs font-bold flex items-center gap-2 cursor-pointer focus:ring-1 focus:ring-white focus:outline-none transition-colors"
               onclick={closeDescriptionModal}
             >
               <span>Закрыть</span>
-              <span class="w-4 h-4 rounded-sm bg-white/20 text-[10px] flex items-center justify-center font-bold">B</span>
+              <span class="w-4 h-4 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">B</span>
             </button>
           </div>
         </div>
@@ -2302,10 +2364,12 @@
               <!-- Top Controls: Header + Language switcher + Open in Steam -->
               <div class="flex flex-wrap items-center justify-between gap-4 pb-2">
                 <div class="flex items-center gap-3">
-                  <ChatText class="w-5 h-5 text-sky-400" />
+                  <div class="w-8 h-8 rounded-[10px] bg-sky-500/10 flex items-center justify-center text-sky-400">
+                    <ChatText class="w-5 h-5" />
+                  </div>
                   <span class="text-sm font-bold uppercase tracking-wider text-white">Отзывы сообщества Steam</span>
                   {#if steamReviewsTotal > 0}
-                    <span class="text-xs text-white/40 font-mono">({formatReviewsCount(steamReviewsTotal)})</span>
+                    <span class="text-xs text-[#8e95a2]">({formatReviewsCount(steamReviewsTotal)})</span>
                   {/if}
                 </div>
 
@@ -2373,51 +2437,54 @@
               {:else}
                 <div class="space-y-4">
                   {#each steamReviews as rev (rev.id)}
-                    <div class="p-5 rounded-[18px] bg-white/[0.025] hover:bg-white/[0.035] transition-all space-y-3">
-                      <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="p-5 rounded-[16px] bg-[#0d1117] border border-white/[0.06] hover:border-white/10 transition-colors space-y-3">
+                      <div class="flex flex-wrap items-center justify-between gap-2.5">
                         <div class="flex items-center gap-2.5">
                           {#if rev.votedUp}
-                            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-[10px] bg-sky-500/15 text-sky-400 text-xs font-bold">
+                            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-sky-500/15 text-sky-400 text-xs font-semibold">
                               <ThumbsUp class="w-3.5 h-3.5" weight="fill" />
                               <span>Рекомендую</span>
                             </div>
                           {:else}
-                            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-[10px] bg-rose-500/15 text-rose-400 text-xs font-bold">
+                            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-rose-500/15 text-rose-400 text-xs font-semibold">
                               <ThumbsDown class="w-3.5 h-3.5" weight="fill" />
                               <span>Не рекомендую</span>
                             </div>
                           {/if}
 
-                          <span class="text-xs text-white font-mono font-medium">
-                            {rev.playtimeHours} в игре
+                          <span class="text-xs text-white/90 font-medium">
+                            {rev.playtimeHours} всего
                           </span>
 
                           {#if rev.playtimeAtReview}
-                            <span class="text-xs text-[#64748b]">
+                            <span class="text-xs text-[#8e95a2]">
                               ({rev.playtimeAtReview} на момент отзыва)
                             </span>
                           {/if}
                         </div>
 
-                        <span class="text-xs text-[#64748b]">
+                        <span class="text-xs text-[#8e95a2]">
                           {formatReviewDate(rev.timestampCreated)}
                         </span>
                       </div>
 
-                      <div class="text-sm text-[#d1d5db] leading-relaxed break-words">
+                      <div class="text-[13px] text-[#cbd5e1] leading-relaxed break-words">
                         {@html formatSteamReviewBBCode(rev.review)}
                       </div>
 
                       {#if rev.votesUp > 0 || rev.votesFunny > 0}
-                        <div class="pt-2 flex items-center gap-3 text-xs text-[#8e95a2]">
+                        <div class="pt-2 flex items-center gap-2 text-xs text-[#8e95a2] border-t border-white/[0.04]">
                           {#if rev.votesUp > 0}
-                            <span class="inline-flex items-center gap-1">
-                              <ThumbsUp class="w-3 h-3 text-[#8e95a2]" />
-                              <span>{rev.votesUp} посчитали полезным</span>
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] bg-white/[0.03] border border-white/[0.05]">
+                              <ThumbsUp class="w-3.5 h-3.5 text-[#8e95a2]" />
+                              <span>{rev.votesUp.toLocaleString('ru-RU')} посчитали полезным</span>
                             </span>
                           {/if}
                           {#if rev.votesFunny > 0}
-                            <span>😄 {rev.votesFunny}</span>
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] bg-white/[0.03] border border-white/[0.05]">
+                              <Smiley class="w-3.5 h-3.5 text-[#8e95a2]" />
+                              <span>{rev.votesFunny.toLocaleString('ru-RU')}</span>
+                            </span>
                           {/if}
                         </div>
                       {/if}
@@ -2473,13 +2540,13 @@
     </div>
   {/if}
 
-  <!-- 4. Download Variant Wizard Modal (PS5 Console Style, 80% screen, single-column, large typography) -->
+  <!-- 4. Download Variant Wizard Modal with 3D bottom fly-up -->
   {#if isDownloadWizardOpen}
     <div
       data-nav-zone="modal"
-      class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-8 animate-fade-in select-none"
+      class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md bp-modal-backdrop-3d flex items-center justify-center p-4 sm:p-8 select-none"
     >
-      <div class="w-[82vw] max-w-6xl h-[80vh] min-h-[560px] bg-[#07080a] border border-white/10 rounded-md flex flex-col overflow-hidden shadow-2xl relative">
+      <div class="bp-modal-content-3d w-[82vw] max-w-6xl h-[80vh] min-h-[560px] bg-[#0c0e14] border border-white/10 rounded-[20px] flex flex-col overflow-hidden shadow-2xl relative">
         <!-- Ambient Game Background Artwork (Subtle PS5 Hub immersion) -->
         {#if currentBackdropUrl}
           <div class="absolute inset-0 z-0 pointer-events-none overflow-hidden opacity-10">
@@ -2820,10 +2887,10 @@
     </div>
   {/if}
 
-  <!-- 7. Steam Candidate Matching Modal -->
+  <!-- 7. Steam Candidate Matching Modal with 3D bottom fly-up -->
   {#if isSteamModalOpen}
-    <div data-nav-zone="modal" class="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6 animate-fade-in">
-      <div class="w-full max-w-2xl bg-[#07080a] border border-white/10 rounded-md p-6 space-y-6 shadow-2xl max-h-[85vh] flex flex-col">
+    <div data-nav-zone="modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md bp-modal-backdrop-3d flex items-center justify-center p-6">
+      <div class="bp-modal-content-3d w-full max-w-2xl bg-[#0c0e14] border border-white/10 rounded-[20px] p-6 space-y-6 shadow-2xl max-h-[85vh] flex flex-col">
         
         <!-- Modal Header -->
         <div class="flex items-center justify-between">
@@ -2833,7 +2900,7 @@
           </div>
           <button
             data-nav-item
-            class="p-2 rounded-sm text-[#8e95a2] hover:text-white hover:bg-white/10 cursor-pointer focus:ring-1 focus:ring-white focus:outline-none"
+            class="p-2 rounded-[8px] text-[#8e95a2] hover:text-white hover:bg-white/10 cursor-pointer focus:ring-1 focus:ring-white focus:outline-none transition-colors"
             onclick={closeSteamModal}
           >
             <X class="w-4 h-4" />
@@ -2935,6 +3002,16 @@
 
       </div>
     </div>
+  {/if}
+
+  <!-- Console 3D OptionWheel Menu (Root Layer) -->
+  {#if isActionMenuOpen}
+    <BigPictureOptionWheel
+      items={wheelItems}
+      title={displayTitle}
+      subtitle="Опции игры"
+      onClose={closeActionMenu}
+    />
   {/if}
 
 </div>

@@ -8,7 +8,9 @@
   import SettingsView from './lib/components/SettingsView.svelte';
   import FavoritesView from './lib/components/FavoritesView.svelte';
   import CollectionsView from './lib/components/CollectionsView.svelte';
+  import StorefrontView from './lib/components/StorefrontView.svelte';
   import GamepadHUD from './lib/components/GamepadHUD.svelte';
+  import ShortcutsHelpModal from './lib/components/ShortcutsHelpModal.svelte';
   import { gamepad } from './lib/navigation/gamepad';
   import { downloadsStore } from './lib/stores/downloads.svelte';
 
@@ -39,14 +41,16 @@
     SyncTorrentSources,
     StartTorrentDownload,
     GetFavorites,
-    LogMessage
+    LogMessage,
+    CheckForUpdates,
+    ExportLogs
   } from '../wailsjs/go/main/App';
 
   import { EventsOn, EventsOff, Quit, WindowFullscreen, WindowUnfullscreen } from '../wailsjs/runtime/runtime';
 
   // Application State (Svelte 5 Runes)
   let displayMode = $state<'desktop' | 'bigpicture'>('desktop');
-  let activeTab = $state<'home' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('torrents');
+  let activeTab = $state<'home' | 'storefront' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings'>('storefront');
 
   function switchToBigPicture() {
     displayMode = 'bigpicture';
@@ -81,6 +85,9 @@
   let catalogStatusText = $state<string>('');
   let isGamepadConnected = $state<boolean>(false);
   let toastMessage = $state<string>('');
+  let activeSettingsSubTab = $state<string>('storage');
+  let activeFavoritesTab = $state<string>('all');
+  let isShortcutsHelpOpen = $state<boolean>(false);
   let metadataProgress = $state<{
     isSyncing: boolean;
     current: number;
@@ -154,6 +161,7 @@
             headerImage: enr.headerImage || updated.headerImage,
             capsuleImage: enr.capsuleImage || updated.capsuleImage,
             backgroundImage: enr.backgroundImage || updated.backgroundImage,
+            screenshots: (enr.screenshots && enr.screenshots.length > 0) ? enr.screenshots : updated.screenshots,
             genres: (enr.genres && enr.genres.length > 0) ? enr.genres : updated.genres,
             tags: (enr.tags && enr.tags.length > 0) ? enr.tags : updated.tags,
             developers: (enr.developers && enr.developers.length > 0) ? enr.developers : updated.developers,
@@ -216,8 +224,10 @@
   });
 
   let hasTorrentSources = $derived.by(() => {
-    const fromSettings = Array.isArray(settings?.torrentSources) && settings.torrentSources.some((s: any) => s && s.enabled);
-    return fromSettings || (Array.isArray(torrentGames) && torrentGames.length > 0);
+    if (settings && Array.isArray(settings.torrentSources)) {
+      return settings.torrentSources.some((s: any) => s && s.enabled);
+    }
+    return Array.isArray(torrentGames) && torrentGames.length > 0;
   });
 
   let activeDownloadProgress = $derived.by(() => {
@@ -347,6 +357,7 @@
             isTorrentsLoading = false;
             logApp('INFO', `First chunk displayed immediately: ${firstChunk.length} games (took ${Date.now() - chunkStart}ms)`);
           } else {
+            torrentGames = [];
             logApp('WARN', `First chunk was empty or invalid (total was ${total})`);
           }
 
@@ -397,15 +408,8 @@
             })();
           }
         } else {
-          // Fallback legacy RPC if count is 0 or uninitialized
-          logApp('INFO', `Attempting fallback GetTorrentCatalog(forceRefresh=${forceRefresh})...`);
-          const res = await withTimeout(GetTorrentCatalog(forceRefresh), 12000, [], 'GetTorrentCatalog');
-          if (Array.isArray(res) && res.length > 0) {
-            torrentGames = res;
-            logApp('INFO', `Fallback GetTorrentCatalog returned ${res.length} games`);
-          } else {
-            logApp('WARN', 'Fallback GetTorrentCatalog returned 0 games');
-          }
+          torrentGames = [];
+          logApp('INFO', 'Torrent catalog is empty (0 games), cleared torrentGames');
         }
       } catch (e: any) {
         logApp('ERROR', `Failed to load torrent catalog: ${e?.message || e}`);
@@ -481,12 +485,10 @@
       const torrentAvailable = (settings?.torrentSources || []).some((s: any) => s && s.enabled) ||
         (Array.isArray(fetchedSources) && fetchedSources.some((s: any) => s && s.enabled));
 
-      if (!ftpAvailable && torrentAvailable) {
-        activeTab = 'torrents';
-      } else if (!ftpAvailable && !torrentAvailable) {
+      if (!ftpAvailable && !torrentAvailable) {
         activeTab = 'settings';
       } else {
-        activeTab = 'catalog';
+        activeTab = 'storefront';
       }
       logApp('INFO', `Initial tab determined: "${activeTab}" (ftpAvailable=${ftpAvailable}, torrentAvailable=${torrentAvailable})`);
 
@@ -636,9 +638,15 @@
 
   async function handleSaveSettings(newSettings: any) {
     try {
+      const oldServerSig = settings?.activeServer ? `${settings.activeServer.protocol}|${settings.activeServer.host}|${settings.activeServer.port}|${settings.activeServer.remoteDir}` : '';
       await SaveSettings(newSettings);
       settings = newSettings;
       showToast('Настройки успешно сохранены');
+
+      const newServerSig = newSettings?.activeServer ? `${newSettings.activeServer.protocol}|${newSettings.activeServer.host}|${newSettings.activeServer.port}|${newSettings.activeServer.remoteDir}` : '';
+      if (newServerSig && newServerSig !== oldServerSig) {
+        handleRefreshCatalog();
+      }
     } catch (e: any) {
       showToast('Ошибка сохранения: ' + (e?.message || e));
     }
@@ -720,7 +728,104 @@
     }
   }
 
+  function handleOpenSettingsSubTab(subTab: string) {
+    activeSettingsSubTab = subTab;
+    activeTab = 'settings';
+  }
+
+  function handleOpenFavoritesFilter(filter: string) {
+    activeFavoritesTab = filter;
+    activeTab = 'favorites';
+  }
+
+  async function handleCheckForUpdates() {
+    showToast('Проверка обновлений...');
+    try {
+      const res = await CheckForUpdates();
+      if (res && res.updateAvailable) {
+        showToast(`Доступно обновление: v${res.latestVersion || res.version}`);
+        handleOpenSettingsSubTab('about');
+      } else {
+        showToast(`Установлена последняя версия (v${res?.currentVersion || '1.2.1'})`);
+      }
+    } catch (e: any) {
+      showToast('Ошибка проверки обновлений: ' + (e?.message || e));
+    }
+  }
+
+  async function handleExportLogs() {
+    try {
+      const path = await ExportLogs('');
+      if (path) {
+        showToast(`Логи сохранены: ${path}`);
+      }
+    } catch (e: any) {
+      showToast('Ошибка экспорта логов: ' + (e?.message || e));
+    }
+  }
+
+  async function handleTestConnectionQuick() {
+    if (!settings?.activeServer?.host) {
+      showToast('Активный FTP-сервер не настроен');
+      handleOpenSettingsSubTab('server');
+      return;
+    }
+    showToast('Проверка соединения с сервером...');
+    try {
+      const res = await TestConnection(settings.activeServer);
+      if (res && res.success) {
+        showToast(`Соединение успешно (${(res.protocolUsed || settings.activeServer.protocol || 'ftp').toUpperCase()})`);
+      } else {
+        showToast(`Ошибка: ${res?.errorMessage || 'Не удалось подключиться'}`);
+      }
+    } catch (e: any) {
+      showToast('Ошибка тестирования: ' + (e?.message || e));
+    }
+  }
+
+  let handleGlobalShortcuts: ((e: KeyboardEvent) => void) | null = null;
+
   onMount(() => {
+    handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      // F1: Shortcuts help
+      if (e.key === 'F1') {
+        e.preventDefault();
+        isShortcutsHelpOpen = !isShortcutsHelpOpen;
+        return;
+      }
+
+      // F11: Toggle Big Picture
+      if (e.key === 'F11') {
+        e.preventDefault();
+        if (displayMode === 'bigpicture') {
+          switchToDesktop();
+        } else {
+          switchToBigPicture();
+        }
+        return;
+      }
+
+      // Ctrl + , : Settings
+      if (e.ctrlKey && e.key === ',') {
+        e.preventDefault();
+        handleOpenSettingsSubTab('storage');
+        return;
+      }
+
+      if (isInput) return;
+
+      // F5: Refresh catalogs
+      if (e.key === 'F5') {
+        e.preventDefault();
+        handleRefreshCatalog();
+        return;
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+
     // Listen to real-time settings updates
     EventsOn('settings:updated', (updated: any) => {
       if (updated) {
@@ -736,7 +841,7 @@
       } catch (e) {
         console.error('Failed to reload settings on torrents:updated:', e);
       }
-      handleLoadTorrentCatalog(false);
+      await handleLoadTorrentCatalog(true);
     });
 
     loadInitialData();
@@ -786,6 +891,14 @@
       }
     });
 
+    // Listen to real-time catalog list updates
+    EventsOn('catalog:updated', (updatedGames: any) => {
+      if (Array.isArray(updatedGames)) {
+        games = updatedGames;
+        logApp('INFO', `Catalog updated via event: ${games.length} games`);
+      }
+    });
+
     // Listen to fast real-time icon updates
     EventsOn('game:icon-updated', (event: any) => {
       if (!event || (!event.appId && !event.gameId) || !event.iconUrl) return;
@@ -796,9 +909,11 @@
 
     // Setup Gamepad Navigation
     gamepad.onTabChange = (dir) => {
-      const tabs: ('home' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings')[] = [];
+      const tabs: ('home' | 'storefront' | 'catalog' | 'torrents' | 'collections' | 'favorites' | 'downloads' | 'settings')[] = [];
       if (displayMode === 'bigpicture') {
         tabs.push('home');
+      } else {
+        tabs.push('storefront');
       }
       if (hasFtpServers) tabs.push('catalog');
       if (hasTorrentSources) tabs.push('torrents');
@@ -846,6 +961,9 @@
   });
 
   onDestroy(() => {
+    if (handleGlobalShortcuts) {
+      window.removeEventListener('keydown', handleGlobalShortcuts);
+    }
     if (batchFlushTimer) {
       clearTimeout(batchFlushTimer);
       batchFlushTimer = null;
@@ -856,6 +974,7 @@
     EventsOff('metadata:progress');
     EventsOff('torrents:updated');
     EventsOff('catalog:status');
+    EventsOff('catalog:updated');
     EventsOff('game:icon-updated');
     EventsOff('game:reviews-updated');
   });
@@ -897,8 +1016,28 @@
 {:else}
   <!-- Full-viewport Master-Detail Application Shell (Desktop View) -->
   <div class="h-screen w-screen flex flex-col overflow-hidden bg-[#0F1218] text-white selection:bg-[#3b82f6] selection:text-white font-sans-ui">
-    <!-- Custom Window Control Bar -->
-    <TitleBar onToggleBigPicture={switchToBigPicture} {activeTab} />
+    <!-- Custom Window Control Bar with Steam Top Menu Bar -->
+    <TitleBar
+      onToggleBigPicture={switchToBigPicture}
+      {activeTab}
+      downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+      hasActiveDownloads={(activeDownloads || []).some((d) => d && (d.status === 'downloading' || d.status === 'queued'))}
+      hasPausedDownloads={(activeDownloads || []).some((d) => d && d.status === 'paused')}
+      onOpenSettingsSubTab={handleOpenSettingsSubTab}
+      onOpenFavoritesFilter={handleOpenFavoritesFilter}
+      onOpenFolder={handleOpenFolder}
+      onOpenConfigFolder={handleOpenConfigFolder}
+      onRefreshCatalog={handleRefreshCatalog}
+      onClearMetadataCache={handleClearMetadataCache}
+      onPauseAllDownloads={handlePauseAll}
+      onResumeAllDownloads={handleResumeAll}
+      onClearCompletedDownloads={handleClearCompleted}
+      onImportFileZilla={handleImportXMLFile}
+      onTestConnection={handleTestConnectionQuick}
+      onCheckForUpdates={handleCheckForUpdates}
+      onExportLogs={handleExportLogs}
+      onOpenShortcutsHelp={() => (isShortcutsHelpOpen = true)}
+    />
 
     <!-- Main Application Body: Left NavRail + Content Stage -->
     <div class="flex-1 flex overflow-hidden min-h-0">
@@ -922,7 +1061,20 @@
       <!-- Main Content Stage -->
       <div class="flex-1 flex overflow-hidden">
       {#key activeTab}
-      {#if activeTab === 'catalog'}
+      {#if activeTab === 'storefront'}
+        <StorefrontView
+          games={torrentGames.length > 0 ? torrentGames : games}
+          isLoading={isCatalogLoading || isTorrentsLoading}
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onStartDownload={handleStartDownload}
+          onSelectFolder={SelectDirectory}
+          onUpdateDownloadPath={handleUpdateDownloadPath}
+          onSearchInCatalog={(query: string) => {
+            searchQuery = query;
+            activeTab = hasTorrentSources ? 'torrents' : (hasFtpServers ? 'catalog' : 'settings');
+          }}
+        />
+      {:else if activeTab === 'catalog'}
         <MasterDetailCatalog
           {games}
           isLoading={isCatalogLoading}
@@ -957,6 +1109,7 @@
         />
       {:else if activeTab === 'favorites'}
         <FavoritesView
+          bind:selectedTab={activeFavoritesTab}
           downloadPath={settings?.downloadPath || 'C:\\Ducke'}
           onStartDownload={handleStartDownload}
           onSelectFolder={SelectDirectory}
@@ -966,10 +1119,14 @@
       {:else if activeTab === 'downloads'}
         <DownloadsView
           {games}
+          {torrentGames}
           {activeDownloads}
           {downloadHistory}
           {settings}
-          downloadPath={settings?.downloadPath || ''}
+          downloadPath={settings?.downloadPath || 'C:\\Ducke'}
+          onStartDownload={handleStartDownload}
+          onSelectFolder={SelectDirectory}
+          onUpdateDownloadPath={handleUpdateDownloadPath}
           onPause={handlePauseDownload}
           onResume={handleResumeDownload}
           onCancel={handleCancelDownload}
@@ -998,6 +1155,7 @@
       {:else if activeTab === 'settings'}
         <SettingsView
           {settings}
+          bind:activeSubTab={activeSettingsSubTab as any}
           onSaveSettings={handleSaveSettings}
           onImportFile={handleImportXMLFile}
           onTestConnection={TestConnection}
@@ -1018,6 +1176,12 @@
         <span>{toastMessage}</span>
       </div>
     {/if}
+
+    <!-- Shortcuts and Help Modal -->
+    <ShortcutsHelpModal
+      isOpen={isShortcutsHelpOpen}
+      onClose={() => (isShortcutsHelpOpen = false)}
+    />
 
     <!-- Gamepad HUD bar -->
     <GamepadHUD isVisible={isGamepadConnected} />

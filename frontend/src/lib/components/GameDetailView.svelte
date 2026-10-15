@@ -47,6 +47,7 @@
     UploadSimple,
     ThumbsUp,
     ThumbsDown,
+    Smiley,
     ChatText
   } from 'phosphor-svelte';
   import VideoPlayer from './VideoPlayer.svelte';
@@ -587,10 +588,11 @@
     const vg = pageDetails?.game || game;
     const v = activeVariant || vg;
     if (!v) return null;
-    const isTorrent = v.sourceType === 'torrent' || !!v.magnetUri;
+    const hasTorrent = v.sourceType === 'torrent' || !!v.magnetUri || (v.uris && v.uris.some((u: string) => u.startsWith('magnet:')));
+    const hasDDL = v.sourceType === 'ddl' || (v.hosters && v.hosters.length > 0) || (v.uris && v.uris.some((u: string) => u.startsWith('http://') || u.startsWith('https://')));
     const rawSrc = (v.torrentSource || '').trim();
     const resolvedName = formatSourceName(rawSrc);
-    if (isTorrent) {
+    if (hasTorrent) {
       let displayName = 'Торрент';
       if (resolvedName) {
         if (resolvedName.toLowerCase().startsWith('торрент')) {
@@ -605,6 +607,17 @@
         type: 'torrent',
         name: displayName,
         shortName: resolvedName || 'Торрент',
+        hosters: v.hosters || [],
+        badgeClass: 'bg-white/[0.04] border-white/10 text-[#cbd5e1]'
+      };
+    }
+    if (hasDDL) {
+      const hostersList = v.hosters && v.hosters.length > 0 ? v.hosters.join(', ') : 'Direct';
+      return {
+        type: 'ddl',
+        name: resolvedName ? `${resolvedName} (${hostersList})` : `Файлообменники (${hostersList})`,
+        shortName: 'DDL',
+        hosters: v.hosters || [],
         badgeClass: 'bg-white/[0.04] border-white/10 text-[#cbd5e1]'
       };
     }
@@ -612,6 +625,7 @@
       type: 'ftp',
       name: 'FTP-сервер',
       shortName: 'FTP',
+      hosters: [],
       badgeClass: 'bg-white/[0.04] border-white/10 text-[#cbd5e1]'
     };
   });
@@ -1254,7 +1268,7 @@
   }
 
   function formatReviewsCount(count: number): string {
-    if (!count || count <= 0) return 'Отзывы Steam';
+    if (!count || count <= 0) return '0 обзоров';
     const n = Math.abs(count) % 100;
     const n1 = n % 10;
     let word = 'обзоров';
@@ -1265,7 +1279,7 @@
     } else if (n1 === 1) {
       word = 'обзор';
     }
-    return `${count.toLocaleString('ru-RU')} ${word} в Steam`;
+    return `${count.toLocaleString('ru-RU')} ${word}`;
   }
 
   async function handleBrowseFolder() {
@@ -1495,8 +1509,19 @@
           pageDetails.downloadProgress = event;
           if (event.status === 'completed') {
             pageDetails.isInstalled = true;
+          } else if (event.status === 'cancelled' || event.status === 'failed') {
+            pageDetails.isInstalled = false;
           }
         }
+      }
+    });
+
+    const unsubDownloadsUpdated = EventsOn('downloads:updated', () => {
+      if (!isMounted) return;
+      const curId = game?.id;
+      if (curId) {
+        pageDetailsCache.delete(curId);
+        fetchGamePageDetails(curId, switchSequence);
       }
     });
 
@@ -1554,6 +1579,7 @@
       window.removeEventListener('app:subtab-next', onSubTabNext);
       window.removeEventListener('app:modal-close', onModalClose);
       if (typeof unsubProgress === 'function') unsubProgress();
+      if (typeof unsubDownloadsUpdated === 'function') unsubDownloadsUpdated();
       if (typeof unsubReviews === 'function') unsubReviews();
       if (typeof unsubEnriched === 'function') unsubEnriched();
       if (typeof unsubTorrents === 'function') unsubTorrents();
@@ -1591,7 +1617,8 @@
   let isDownloadCompleted = $derived(
     (activeGameDownload && activeGameDownload.status === 'completed') ||
     downloadsStore.isGameInstalled(pageDetails?.game || game) ||
-    !!(pageDetails?.isInstalled || pageDetails?.downloadStatus === 'completed')
+    (!!pageDetails?.isInstalled && pageDetails?.downloadStatus !== 'cancelled' && pageDetails?.downloadStatus !== 'failed' && pageDetails?.downloadStatus !== 'downloading' && pageDetails?.downloadStatus !== 'queued' && pageDetails?.downloadStatus !== 'scanning' && pageDetails?.downloadStatus !== 'paused') ||
+    pageDetails?.downloadStatus === 'completed'
   );
 
   let isGameInFavorites = $derived(
@@ -2016,7 +2043,7 @@
                   {#if isFavoriteDropdownOpen}
                     <div
                       bind:this={favoriteDropdownContainerEl}
-                      class="absolute left-0 top-full mt-2 z-50 min-w-[200px] rounded-[16px] bg-[#0d1117] p-2 space-y-1 text-xs"
+                      class="absolute left-0 top-full mt-2 z-50 min-w-[200px] rounded-[16px] bg-[#0d1117] border border-white/10 shadow-2xl p-2 space-y-1 text-xs"
                     >
                       <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
                         Статус в избранном
@@ -2141,6 +2168,15 @@
 
                       {@render gearButton()}
                       {@render folderButton()}
+                      <button
+                        data-nav-item
+                        type="button"
+                        class="h-11 px-3.5 rounded-[14px] bg-white/[0.04] hover:bg-white/[0.08] text-[#8e95a2] hover:text-white border border-white/[0.06] hover:border-white/15 flex items-center justify-center transition-all cursor-pointer"
+                        onclick={() => onStartDownload(selectedVariantId || g.id, customDownloadPath)}
+                        title="Скачать заново / переустановить"
+                      >
+                        <RefreshCw class="w-4 h-4" />
+                      </button>
                       {@render steamButton()}
                       {@render favoriteButton()}
                     </div>
@@ -2268,6 +2304,11 @@
                           >
                             <Download class="w-4 h-4 stroke-[2.5]" />
                             <span>СКАЧАТЬ</span>
+                            {#if downloadSourceInfo?.type === 'torrent'}
+                              <span class="opacity-75 text-[10px] tracking-normal font-sans font-bold px-1.5 py-0.5 rounded bg-black/20">ТОРРЕНТ</span>
+                            {:else if downloadSourceInfo?.type === 'ddl'}
+                              <span class="opacity-75 text-[10px] tracking-normal font-sans font-bold px-1.5 py-0.5 rounded bg-black/20">DDL</span>
+                            {/if}
                             <span class="opacity-35 font-normal">|</span>
                             <span class="font-mono text-xs font-bold tracking-normal">{activeVariant?.sizeDisplay || formatSizeDisplay(g)}</span>
                           </button>
@@ -2302,7 +2343,28 @@
                     <!-- Right Side: Source & Seeds Badge -->
                     <div class="flex items-center gap-2.5 text-xs font-mono text-[#8e95a2]">
                       {#if downloadSourceInfo}
-                        <span class="text-[#8e95a2]">{downloadSourceInfo.shortName}</span>
+                        {#if downloadSourceInfo.type === 'torrent'}
+                          <div class="inline-flex items-center gap-1.5">
+                            <span class="px-2 py-0.5 rounded-[4px] bg-white/[0.04] border border-white/[0.06] text-[11px] text-[#cbd5e1] font-semibold">
+                              {downloadSourceInfo.shortName}
+                            </span>
+                            {#if downloadSourceInfo.hosters && downloadSourceInfo.hosters.length > 0}
+                              <span class="text-white/20 select-none">•</span>
+                              <span class="text-[11px] text-[#8e95a2]">Зеркала: {downloadSourceInfo.hosters.join(', ')}</span>
+                            {/if}
+                          </div>
+                        {:else if downloadSourceInfo.type === 'ddl' && downloadSourceInfo.hosters && downloadSourceInfo.hosters.length > 0}
+                          <div class="inline-flex items-center gap-1.5 flex-wrap">
+                            <span class="text-[#8e95a2] font-semibold">DDL</span>
+                            {#each downloadSourceInfo.hosters as hoster}
+                              <span class="px-1.5 py-0.5 rounded-[4px] bg-white/[0.04] border border-white/[0.06] text-[11px] text-[#cbd5e1]">
+                                {hoster}
+                              </span>
+                            {/each}
+                          </div>
+                        {:else}
+                          <span class="text-[#8e95a2]">{downloadSourceInfo.shortName}</span>
+                        {/if}
                       {/if}
                       {#if currentVariantSeedInfo}
                         {#if downloadSourceInfo}
@@ -2847,28 +2909,32 @@
         {#if g.steamAppId && g.steamAppId > 0}
           <div class="space-y-4 pt-2">
             <!-- Section Header -->
-            <div class="flex items-center justify-between gap-3 pb-1">
-              <div class="flex items-center gap-2">
-                <ChatText class="w-4 h-4 text-sky-400" />
-                <h3 class="text-xs font-bold text-white uppercase tracking-wider">Отзывы сообщества Steam</h3>
-                {#if steamReviewsTotal > 0}
-                  <span class="text-xs text-white/40 font-mono">({formatReviewsCount(steamReviewsTotal)})</span>
-                {/if}
+            <div class="flex flex-wrap items-center justify-between gap-3 pb-1">
+              <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-[8px] bg-sky-500/10 flex items-center justify-center text-sky-400">
+                  <ChatText class="w-4 h-4" />
+                </div>
+                <div class="flex items-baseline gap-2">
+                  <h3 class="text-xs font-bold text-white uppercase tracking-wider">Отзывы сообщества Steam</h3>
+                  {#if steamReviewsTotal > 0}
+                    <span class="text-xs text-[#8e95a2]">({steamReviewsTotal.toLocaleString('ru-RU')})</span>
+                  {/if}
+                </div>
               </div>
 
               <div class="flex items-center gap-2">
                 <!-- Language Selector -->
-                <div class="inline-flex rounded-[12px] bg-white/[0.03] p-0.5 text-[11px]">
+                <div class="inline-flex rounded-[10px] bg-white/[0.03] border border-white/[0.06] p-0.5 text-xs">
                   <button
                     type="button"
-                    class="px-2.5 py-1 rounded-[10px] transition-colors cursor-pointer text-xs {reviewLanguage === 'russian' ? 'bg-white/[0.08] text-white font-medium' : 'text-white/50 hover:text-white'}"
+                    class="px-2.5 py-1 rounded-[8px] transition-colors cursor-pointer text-xs {reviewLanguage === 'russian' ? 'bg-white/[0.08] text-white font-medium' : 'text-[#8e95a2] hover:text-white'}"
                     onclick={() => handleLanguageChange('russian')}
                   >
                     Русские
                   </button>
                   <button
                     type="button"
-                    class="px-2.5 py-1 rounded-[10px] transition-colors cursor-pointer text-xs {reviewLanguage === 'all' ? 'bg-white/[0.08] text-white font-medium' : 'text-white/50 hover:text-white'}"
+                    class="px-2.5 py-1 rounded-[8px] transition-colors cursor-pointer text-xs {reviewLanguage === 'all' ? 'bg-white/[0.08] text-white font-medium' : 'text-[#8e95a2] hover:text-white'}"
                     onclick={() => handleLanguageChange('all')}
                   >
                     Все языки
@@ -2879,42 +2945,45 @@
                 <button
                   data-nav-item
                   type="button"
-                  class="hidden sm:inline-flex items-center gap-1.5 text-xs text-white/70 hover:text-white px-3 py-1.5 rounded-[12px] bg-white/[0.03] hover:bg-white/[0.07] transition-all cursor-pointer"
+                  class="hidden sm:inline-flex items-center gap-1.5 text-xs text-[#8e95a2] hover:text-white px-3 py-1.5 rounded-[10px] bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.07] transition-all cursor-pointer"
                   onclick={handleOpenSteamStore}
                   title="Открыть страницу игры в магазине Steam"
                 >
                   <SteamLogo size={14} weight="bold" />
                   <span>В Steam</span>
-                  <ExternalLink class="w-3.5 h-3.5" />
+                  <ExternalLink class="w-3.5 h-3.5 text-[#8e95a2]" />
                 </button>
               </div>
             </div>
 
             <!-- Reviews Content -->
             {#if isLoadingReviews}
-              <!-- Loading skeletons -->
+              <!-- Loading skeletons matching card design -->
               <div class="space-y-3">
                 {#each [1, 2, 3] as _}
-                  <div class="py-3.5 space-y-2 border-b border-white/[0.04] animate-pulse">
+                  <div class="p-4 sm:p-5 rounded-[14px] bg-[#0d1117] border border-white/[0.06] space-y-3 animate-pulse">
                     <div class="flex items-center justify-between">
-                      <div class="h-4 w-28 bg-white/10 rounded-[6px]"></div>
-                      <div class="h-3.5 w-20 bg-white/10 rounded-[6px]"></div>
+                      <div class="flex items-center gap-2.5">
+                        <div class="h-6 w-24 bg-white/10 rounded-[8px]"></div>
+                        <div class="h-4 w-20 bg-white/10 rounded-[6px]"></div>
+                      </div>
+                      <div class="h-3.5 w-24 bg-white/10 rounded-[6px]"></div>
                     </div>
-                    <div class="space-y-1.5">
+                    <div class="space-y-2 pt-1">
                       <div class="h-3 w-full bg-white/5 rounded-[4px]"></div>
-                      <div class="h-3 w-4/5 bg-white/5 rounded-[4px]"></div>
+                      <div class="h-3 w-5/6 bg-white/5 rounded-[4px]"></div>
                       <div class="h-3 w-2/3 bg-white/5 rounded-[4px]"></div>
                     </div>
                   </div>
                 {/each}
               </div>
             {:else if steamReviews.length === 0}
-              <div class="py-6 text-center text-xs text-[#8e95a2] space-y-1.5">
+              <div class="p-8 rounded-[14px] bg-[#0d1117] border border-white/[0.06] text-center text-xs text-[#8e95a2] space-y-2">
                 <p>Отзывов не найдено{reviewLanguage === 'russian' ? ' на русском языке' : ''}.</p>
                 {#if reviewLanguage === 'russian'}
                   <button
                     type="button"
-                    class="text-sky-400 hover:text-sky-300 hover:underline cursor-pointer"
+                    class="text-sky-400 hover:text-sky-300 hover:underline cursor-pointer transition-colors"
                     onclick={() => handleLanguageChange('all')}
                   >
                     Попробовать показать отзывы на всех языках
@@ -2922,39 +2991,39 @@
                 {/if}
               </div>
             {:else}
-              <div class="divide-y divide-white/[0.04]">
+              <div class="space-y-3">
                 {#each steamReviews as rev (rev.id)}
                   {@const isExpanded = !!expandedReviewIds[rev.id]}
                   {@const isLong = rev.review.length > 340 || rev.review.split('\n').length > 5}
                   
-                  <div class="py-3.5 space-y-2.5">
+                  <div class="p-4 sm:p-5 rounded-[14px] bg-[#0d1117] border border-white/[0.06] hover:border-white/10 transition-colors duration-150 space-y-3">
                     <!-- Top Row: Recommendation + Playtime + Date -->
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <div class="flex flex-wrap items-center gap-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2.5">
+                      <div class="flex flex-wrap items-center gap-2.5">
                         {#if rev.votedUp}
-                          <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[8px] bg-sky-500/15 text-sky-400 text-xs font-medium">
+                          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-sky-500/15 text-sky-400 text-xs font-semibold">
                             <ThumbsUp class="w-3.5 h-3.5" weight="fill" />
                             <span>Рекомендую</span>
                           </div>
                         {:else}
-                          <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[8px] bg-rose-500/15 text-rose-400 text-xs font-medium">
+                          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-rose-500/15 text-rose-400 text-xs font-semibold">
                             <ThumbsDown class="w-3.5 h-3.5" weight="fill" />
                             <span>Не рекомендую</span>
                           </div>
                         {/if}
 
-                        <span class="text-xs text-white/70 font-medium font-mono">
-                          {rev.playtimeHours} в игре
+                        <span class="text-xs text-white/90 font-medium">
+                          {rev.playtimeHours} всего
                         </span>
 
                         {#if rev.playtimeAtReview}
-                          <span class="text-[11px] text-white/40 hidden sm:inline">
+                          <span class="text-[11px] text-[#8e95a2] hidden sm:inline">
                             ({rev.playtimeAtReview} на момент отзыва)
                           </span>
                         {/if}
                       </div>
 
-                      <div class="text-[11px] text-white/40">
+                      <div class="text-[11px] text-[#8e95a2]">
                         {formatReviewDate(rev.timestampCreated)}
                       </div>
                     </div>
@@ -2962,37 +3031,41 @@
                     <!-- Review Text (anonymized, formatted BBCode) -->
                     <div class="relative">
                       <div
-                        class="text-xs text-white/[0.88] leading-relaxed break-words font-light {isLong && !isExpanded ? 'max-h-28 overflow-hidden' : ''}"
+                        class="text-xs sm:text-[13px] text-[#cbd5e1] leading-relaxed break-words font-normal {isLong && !isExpanded ? 'max-h-36 sm:max-h-40 overflow-hidden' : ''}"
                       >
                         {@html formatSteamReviewBBCode(rev.review)}
                       </div>
 
                       {#if isLong && !isExpanded}
-                        <div class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[#07080a] to-transparent pointer-events-none"></div>
+                        <div class="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#0d1117] via-[#0d1117]/80 to-transparent pointer-events-none"></div>
                       {/if}
                     </div>
 
                     <!-- Bottom Row: Helpful votes count & Expand button -->
-                    <div class="flex items-center justify-between gap-2 pt-1 text-[11px] text-white/50">
-                      <div class="flex items-center gap-3">
+                    <div class="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.04] text-[11px] text-[#8e95a2]">
+                      <div class="flex items-center gap-2">
                         {#if rev.votesUp > 0}
-                          <span class="inline-flex items-center gap-1">
-                            <ThumbsUp class="w-3 h-3 text-white/40" />
-                            <span>{rev.votesUp} посчитали полезным</span>
+                          <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] bg-white/[0.03] border border-white/[0.05] text-[#8e95a2]">
+                            <ThumbsUp class="w-3 h-3 text-[#8e95a2]" />
+                            <span>{rev.votesUp.toLocaleString('ru-RU')} посчитали полезным</span>
                           </span>
                         {/if}
                         {#if rev.votesFunny > 0}
-                          <span>😄 {rev.votesFunny}</span>
+                          <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] bg-white/[0.03] border border-white/[0.05] text-[#8e95a2]">
+                            <Smiley class="w-3.5 h-3.5 text-[#8e95a2]" />
+                            <span>{rev.votesFunny.toLocaleString('ru-RU')}</span>
+                          </span>
                         {/if}
                       </div>
 
                       {#if isLong}
                         <button
                           type="button"
-                          class="text-xs font-normal text-white/60 hover:text-white transition-colors cursor-pointer"
+                          class="inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 font-medium transition-colors cursor-pointer ml-auto"
                           onclick={() => toggleReviewExpand(rev.id)}
                         >
-                          {isExpanded ? 'Свернуть' : 'Читать полностью'}
+                          <span>{isExpanded ? 'Свернуть' : 'Читать полностью'}</span>
+                          <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}" />
                         </button>
                       {/if}
                     </div>
@@ -3007,7 +3080,7 @@
                     data-nav-item
                     type="button"
                     disabled={isLoadingMoreReviews}
-                    class="px-5 py-2.5 rounded-[14px] bg-white/[0.03] hover:bg-white/[0.07] text-xs font-medium text-white/80 hover:text-white transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
+                    class="px-5 py-2.5 rounded-[12px] bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] text-xs font-medium text-white/80 hover:text-white transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
                     onclick={() => loadSteamReviews(false)}
                   >
                     {#if isLoadingMoreReviews}
@@ -3329,7 +3402,7 @@
                           <div class="flex items-center gap-2">
                             <span class="text-xs font-semibold text-white truncate">{candidate.name}</span>
                             <span
-                              class="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-[6px]"
+                              class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-[6px]"
                               style="color: var(--game-accent); background-color: color-mix(in srgb, var(--game-accent) 15%, transparent);"
                             >
                               {matchPercent}%

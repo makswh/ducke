@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Minus, Square, Copy, X, TelevisionSimple } from 'phosphor-svelte';
+  import TopMenuBar from './TopMenuBar.svelte';
   import {
     WindowMinimise,
     WindowToggleMaximise,
@@ -10,22 +11,27 @@
 
   let {
     onToggleBigPicture = () => {},
-    activeTab = 'catalog'
+    activeTab = 'catalog',
+    downloadPath = 'C:\\Ducke',
+    hasActiveDownloads = false,
+    hasPausedDownloads = false,
+    onOpenSettingsSubTab = (subTab: string) => {},
+    onOpenFavoritesFilter = (filter: string) => {},
+    onOpenFolder = (path: string) => {},
+    onOpenConfigFolder = () => {},
+    onRefreshCatalog = () => {},
+    onClearMetadataCache = () => {},
+    onPauseAllDownloads = () => {},
+    onResumeAllDownloads = () => {},
+    onClearCompletedDownloads = () => {},
+    onImportFileZilla = () => {},
+    onTestConnection = () => {},
+    onCheckForUpdates = () => {},
+    onExportLogs = () => {},
+    onOpenShortcutsHelp = () => {}
   } = $props();
 
   let isMaximised = $state<boolean>(false);
-
-  function getTabTitle(tab: string) {
-    switch (tab) {
-      case 'catalog': return 'Каталог игр';
-      case 'torrents': return 'Торренты';
-      case 'collections': return 'Подборки';
-      case 'favorites': return 'Избранное';
-      case 'downloads': return 'Загрузки';
-      case 'settings': return 'Настройки';
-      default: return '';
-    }
-  }
 
   async function checkMaximised() {
     try {
@@ -76,18 +82,29 @@
   style="--wails-draggable: drag;"
   ondblclick={handleToggleMaximise}
 >
-  <!-- Left: App Branding & Breadcrumb Status -->
-  <div class="flex items-center gap-2.5 pointer-events-none">
-    <div class="w-7 h-7 rounded-[10px] bg-white/[0.04] flex items-center justify-center overflow-hidden">
-      <img src="/appicon.png" alt="Ducke" class="w-5 h-5 object-contain" />
-    </div>
-    <div class="flex items-center gap-1.5 font-mono text-[11px] tracking-wider uppercase">
-      <span class="font-bold text-[#cbd5e1]">DUCKE</span>
-      {#if getTabTitle(activeTab)}
-        <span class="text-white/20">/</span>
-        <span class="text-[#8e95a2] font-medium font-sans capitalize">{getTabTitle(activeTab)}</span>
-      {/if}
-    </div>
+  <!-- Left: Steam Menu Bar with Integrated Logo & Breadcrumb -->
+  <div class="flex items-center gap-2">
+    <TopMenuBar
+      {downloadPath}
+      {hasActiveDownloads}
+      {hasPausedDownloads}
+      {onOpenSettingsSubTab}
+      {onOpenFavoritesFilter}
+      {onOpenFolder}
+      {onOpenConfigFolder}
+      {onToggleBigPicture}
+      {onRefreshCatalog}
+      {onClearMetadataCache}
+      {onPauseAllDownloads}
+      {onResumeAllDownloads}
+      {onClearCompletedDownloads}
+      {onImportFileZilla}
+      {onTestConnection}
+      {onCheckForUpdates}
+      {onExportLogs}
+      {onOpenShortcutsHelp}
+      onQuit={handleClose}
+    />
   </div>
 
   <!-- Center: Draggable Area -->

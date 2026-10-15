@@ -41,9 +41,11 @@ export interface GameEntity {
   reviewScoreDesc?: string;
   reviewPercent?: number;
   totalReviews?: number;
-  sourceType?: string; // "ftp" or "torrent"
+  sourceType?: string; // "ftp", "torrent", or "ddl"
   torrentSource?: string;
   magnetUri?: string;
+  uris?: string[];
+  hosters?: string[];
   uploadDate?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -61,6 +63,8 @@ export interface GameVariant {
   torrentSource?: string;
   remotePath: string;
   magnetUri?: string;
+  uris?: string[];
+  hosters?: string[];
   uploadDate?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -110,6 +114,10 @@ export interface DownloadProgressEvent {
   magnetUri?: string;
   torrentSeeds?: number;
   torrentPeers?: number;
+  isDdl?: boolean;
+  ddlHost?: string;
+  currentPart?: number;
+  totalParts?: number;
 }
 
 export interface GamePageDetails {

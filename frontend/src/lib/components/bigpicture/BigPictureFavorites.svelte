@@ -7,9 +7,11 @@
     DownloadSimple as Download,
     ArrowsDownUp,
     CaretDown as ChevronDown,
-    Check
+    Check,
+    HardDrive
   } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
+  import { gamepad } from '../../navigation/gamepad';
   import {
     GetFavorites,
     SetFavoriteStatus,
@@ -19,6 +21,11 @@
   import type { GameEntity } from '../../types/game';
   import { getDisplayTitle } from '../../utils/titleUtils';
   import { parseDateToMs } from '../../utils/dateUtils';
+  import {
+    matchesSourceFilter,
+    SOURCE_FILTER_OPTIONS,
+    type SourceFilterType
+  } from '../../utils/sourceUtils';
 
   let {
     games = [] as any[],
@@ -32,10 +39,60 @@
   type FavSortType = 'updated_desc' | 'added_desc' | 'rating_desc' | 'name' | 'size_desc';
   let selectedTab = $state<FavoriteTab>('all');
   let selectedSort = $state<FavSortType>('updated_desc');
+  let selectedSource = $state<SourceFilterType>('all');
   let isSortDropdownOpen = $state<boolean>(false);
+  let isSourceDropdownOpen = $state<boolean>(false);
   let searchQuery = $state<string>('');
   let favorites = $state<any[]>([]);
   let isLoading = $state<boolean>(true);
+
+  function toggleSortDropdown() {
+    isSortDropdownOpen = !isSortDropdownOpen;
+    sound.playSelect();
+    if (isSortDropdownOpen) {
+      window.dispatchEvent(new CustomEvent('app:modal-opened'));
+      setTimeout(() => gamepad.retryFocusZone('modal'), 40);
+    } else {
+      window.dispatchEvent(new CustomEvent('app:modal-closed'));
+      setTimeout(() => gamepad.retryFocusZone('grid'), 40);
+    }
+  }
+
+  function closeSortDropdown() {
+    if (isSortDropdownOpen) {
+      isSortDropdownOpen = false;
+      sound.playBack();
+      window.dispatchEvent(new CustomEvent('app:modal-closed'));
+      setTimeout(() => gamepad.retryFocusZone('grid'), 40);
+    }
+  }
+
+  function toggleSourceDropdown() {
+    isSourceDropdownOpen = !isSourceDropdownOpen;
+    sound.playSelect();
+    if (isSourceDropdownOpen) {
+      if (isSortDropdownOpen) closeSortDropdown();
+      window.dispatchEvent(new CustomEvent('app:modal-opened'));
+      setTimeout(() => gamepad.retryFocusZone('modal'), 40);
+    } else {
+      window.dispatchEvent(new CustomEvent('app:modal-closed'));
+      setTimeout(() => gamepad.retryFocusZone('grid'), 40);
+    }
+  }
+
+  function closeSourceDropdown() {
+    if (isSourceDropdownOpen) {
+      isSourceDropdownOpen = false;
+      sound.playBack();
+      window.dispatchEvent(new CustomEvent('app:modal-closed'));
+      setTimeout(() => gamepad.retryFocusZone('grid'), 40);
+    }
+  }
+
+  function getSourceLabel(src: SourceFilterType): string {
+    const opt = SOURCE_FILTER_OPTIONS.find((o) => o.id === src);
+    return opt ? opt.label : 'Все источники';
+  }
 
   function getSortLabel(sort: FavSortType): string {
     switch (sort) {
@@ -220,6 +277,12 @@
     if (selectedTab !== 'all') {
       list = list.filter((f) => f.status === selectedTab);
     }
+    if (selectedSource !== 'all') {
+      list = list.filter((f) => {
+        const g = resolveFavoriteGame(f);
+        return matchesSourceFilter(g, selectedSource);
+      });
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       list = list.filter((f) => {
@@ -260,11 +323,8 @@
       case 'playing': return 'bg-[#07080a]/90 text-sky-400 border border-sky-500/30 font-bold';
       case 'completed': return 'bg-[#07080a]/90 text-emerald-400 border border-emerald-500/30 font-bold';
       case 'planned': return 'bg-[#07080a]/90 text-amber-400 border border-amber-500/30 font-bold';
-      default: return 'bg-[#07080a]/90 text-white border border-white/20 font-bold';
     }
   }
-
-  import { gamepad } from '../../navigation/gamepad';
 
   function getCleanTitle(game: any): string {
     return getDisplayTitle(game);
@@ -286,8 +346,7 @@
 
     const handleBtnY = (e: CustomEvent) => {
       const activeEl = document.activeElement as HTMLElement | null;
-      if (!activeEl) return;
-      const gameIdStr = activeEl.getAttribute('data-game-id');
+      const gameIdStr = activeEl?.getAttribute('data-game-id');
       if (gameIdStr) {
         const gameId = Number(gameIdStr);
         const item = favorites.find((f) => Number(f.gameId || f.id) === gameId);
@@ -304,10 +363,38 @@
           } else {
             handleRemove(gameId);
           }
+          return;
         }
+      }
+      toggleSortDropdown();
+      e.preventDefault();
+    };
+
+    const handleGoBack = (e: CustomEvent) => {
+      if (isSortDropdownOpen) {
+        closeSortDropdown();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (isSourceDropdownOpen) {
+        closeSourceDropdown();
+        e.preventDefault();
+        e.stopImmediatePropagation();
       }
     };
 
+    const handleModalClose = (e: Event) => {
+      if (isSortDropdownOpen) {
+        closeSortDropdown();
+        e.preventDefault();
+      }
+      if (isSourceDropdownOpen) {
+        closeSourceDropdown();
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener('app:go-back', handleGoBack as EventListener, true);
+    window.addEventListener('app:modal-close', handleModalClose);
     window.addEventListener('app:btn-y', handleBtnY as EventListener);
 
     unsubFavorites = EventsOn('favorites:updated', () => {
@@ -339,6 +426,8 @@
     }, 150);
 
     return () => {
+      window.removeEventListener('app:go-back', handleGoBack as EventListener, true);
+      window.removeEventListener('app:modal-close', handleModalClose);
       window.removeEventListener('app:btn-y', handleBtnY as EventListener);
     };
   });
@@ -357,14 +446,14 @@
       <!-- Tab: All -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'all' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'all' ? 'bg-white/15 text-white border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'all';
         }}
       >
         <span>Все</span>
-        <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-white/10 font-mono">
+        <span class="px-1.5 py-0.5 rounded-[6px] text-[10px] bg-white/10 font-mono">
           {counts.all}
         </span>
       </button>
@@ -372,7 +461,7 @@
       <!-- Tab: Planned -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'planned' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'planned' ? 'bg-white/15 text-white border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'planned';
@@ -380,7 +469,7 @@
       >
         <span>В планах</span>
         {#if counts.planned > 0}
-          <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-amber-400 text-black font-black font-mono">
+          <span class="px-1.5 py-0.5 rounded-[6px] text-[10px] bg-amber-400 text-black font-black font-mono">
             {counts.planned}
           </span>
         {/if}
@@ -389,7 +478,7 @@
       <!-- Tab: Playing -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'playing' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'playing' ? 'bg-white/15 text-white border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'playing';
@@ -397,7 +486,7 @@
       >
         <span>Прохожу</span>
         {#if counts.playing > 0}
-          <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-sky-500 text-black font-black font-mono">
+          <span class="px-1.5 py-0.5 rounded-[6px] text-[10px] bg-sky-500 text-black font-black font-mono">
             {counts.playing}
           </span>
         {/if}
@@ -406,7 +495,7 @@
       <!-- Tab: Completed -->
       <button
         data-nav-item
-        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'completed' ? 'bg-white/15 text-white shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        class="px-4 py-2 rounded-[12px] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 {selectedTab === 'completed' ? 'bg-white/15 text-white border border-white/10 shadow-sm' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04] border border-transparent'}"
         onclick={() => {
           sound.playFocus();
           selectedTab = 'completed';
@@ -414,7 +503,7 @@
       >
         <span>Пройдено</span>
         {#if counts.completed > 0}
-          <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] bg-emerald-500 text-black font-black font-mono">
+          <span class="px-1.5 py-0.5 rounded-[6px] text-[10px] bg-emerald-500 text-black font-black font-mono">
             {counts.completed}
           </span>
         {/if}
@@ -424,10 +513,10 @@
     <div class="flex items-center gap-3">
       <!-- Active Search Filter Indicator -->
       {#if searchQuery}
-        <div class="flex items-center gap-2 px-3 py-1.5 rounded-[8px] bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-[10px] bg-white/[0.06] border border-white/10 text-white text-xs">
           <span>Поиск: "{searchQuery}"</span>
           <button
-            class="hover:text-white cursor-pointer"
+            class="hover:text-white text-[#8e95a2] cursor-pointer"
             onclick={() => {
               searchQuery = '';
             }}
@@ -437,25 +526,78 @@
         </div>
       {/if}
 
-      <!-- Console Sort Selector -->
+      <!-- Console Source Selector with 3D Popover -->
       <div class="relative">
         <button
           data-nav-item
           type="button"
-          class="h-9 px-3.5 rounded-[12px] bg-[#0c1017] hover:bg-[#161d28] border border-white/10 hover:border-white/20 flex items-center gap-2 text-xs font-medium text-slate-200 cursor-pointer transition-colors"
-          onclick={() => {
-            sound.playSelect();
-            isSortDropdownOpen = !isSortDropdownOpen;
-          }}
+          class="h-9 px-3.5 rounded-[12px] bg-white/[0.04] hover:bg-white/[0.08] border {selectedSource !== 'all' ? 'text-white border-white/20 bg-white/[0.08]' : 'text-slate-200 border-white/[0.06] hover:border-white/20'} flex items-center gap-2 text-xs font-medium cursor-pointer transition-colors"
+          onclick={toggleSourceDropdown}
+          title="Фильтр по источнику"
         >
-          <ArrowsDownUp size={14} class="text-sky-400" />
+          <HardDrive size={14} class="text-[#4C7DFF]" />
+          <span>{getSourceLabel(selectedSource)}</span>
+          <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isSourceDropdownOpen ? 'rotate-180' : ''}" />
+        </button>
+
+        {#if isSourceDropdownOpen}
+          <!-- Backdrop to dismiss on outside click -->
+          <button
+            type="button"
+            aria-label="Закрыть меню источников"
+            class="fixed inset-0 z-40 bg-black/40 cursor-default border-none p-0 m-0 w-full h-full"
+            onclick={closeSourceDropdown}
+          ></button>
+
+          <div
+            data-nav-zone="modal"
+            class="absolute right-0 top-full mt-2 z-50 w-52 rounded-[16px] bg-[#0c0e14] border border-white/10 shadow-2xl p-1.5 space-y-0.5 bp-popover-3d"
+          >
+            {#each SOURCE_FILTER_OPTIONS as opt}
+              <button
+                data-nav-item
+                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {selectedSource === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/[0.06] hover:text-white'}"
+                onclick={() => {
+                  sound.playSelect();
+                  selectedSource = opt.id;
+                  closeSourceDropdown();
+                }}
+              >
+                <span>{opt.label}</span>
+                {#if selectedSource === opt.id}
+                  <Check class="w-3.5 h-3.5 text-[#4C7DFF]" />
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <!-- Console Sort Selector with 3D Popover -->
+      <div class="relative">
+        <button
+          data-nav-item
+          type="button"
+          class="h-9 px-3.5 rounded-[12px] bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/20 flex items-center gap-2 text-xs font-medium text-slate-200 cursor-pointer transition-colors"
+          onclick={toggleSortDropdown}
+        >
+          <ArrowsDownUp size={14} class="text-[#4C7DFF]" />
           <span>{getSortLabel(selectedSort)}</span>
           <ChevronDown class="w-3.5 h-3.5 transition-transform duration-200 {isSortDropdownOpen ? 'rotate-180' : ''}" />
         </button>
 
         {#if isSortDropdownOpen}
+          <!-- Backdrop to dismiss on outside click -->
+          <button
+            type="button"
+            aria-label="Закрыть меню сортировки"
+            class="fixed inset-0 z-40 bg-black/40 cursor-default border-none p-0 m-0 w-full h-full"
+            onclick={closeSortDropdown}
+          ></button>
+
           <div
-            class="absolute right-0 top-full mt-2 z-50 w-52 rounded-[14px] bg-[#0d1117] border border-white/10 shadow-2xl p-1 space-y-0.5"
+            data-nav-zone="modal"
+            class="absolute right-0 top-full mt-2 z-50 w-52 rounded-[16px] bg-[#0c0e14] border border-white/10 shadow-2xl p-1.5 space-y-0.5 bp-popover-3d"
           >
             {#each [
               { id: 'updated_desc', label: 'По дате обновления' },
@@ -466,16 +608,16 @@
             ] as opt}
               <button
                 data-nav-item
-                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[8px] text-xs transition-colors cursor-pointer {selectedSort === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/5 hover:text-white'}"
+                class="w-full text-left flex items-center justify-between px-3 py-2 rounded-[10px] text-xs transition-colors cursor-pointer {selectedSort === opt.id ? 'bg-white/15 text-white font-bold' : 'text-[#8e95a2] hover:bg-white/[0.06] hover:text-white'}"
                 onclick={() => {
                   sound.playSelect();
                   selectedSort = opt.id as FavSortType;
-                  isSortDropdownOpen = false;
+                  closeSortDropdown();
                 }}
               >
                 <span>{opt.label}</span>
                 {#if selectedSort === opt.id}
-                  <Check class="w-3.5 h-3.5 text-sky-400" />
+                  <Check class="w-3.5 h-3.5 text-[#4C7DFF]" />
                 {/if}
               </button>
             {/each}
@@ -484,6 +626,7 @@
       </div>
     </div>
   </div>
+
 
   <!-- Main 10-foot Console Posters Grid -->
   <div class="flex-1 overflow-y-auto p-8 pt-6 relative focus:outline-none">

@@ -11,9 +11,15 @@
   import { EventsOn } from '../../../wailsjs/runtime/runtime';
   import { getDisplayTitle } from '../utils/titleUtils';
   import { parseDateToMs } from '../utils/dateUtils';
+  import {
+    matchesSourceFilter,
+    SOURCE_FILTER_OPTIONS,
+    type SourceFilterType
+  } from '../utils/sourceUtils';
 
   let {
     downloadPath = 'C:\\Ducke',
+    selectedTab = $bindable('all'),
     onStartDownload = (gameId: number, targetPath: string) => {},
     onSelectFolder = () => Promise.resolve(''),
     onOpenCatalog = () => {},
@@ -22,9 +28,9 @@
 
   let favorites = $state<any[]>([]);
   let isLoading = $state<boolean>(true);
-  let selectedTab = $state<string>('all');
   let searchQuery = $state<string>('');
   let selectedSort = $state<string>('updated_desc');
+  let selectedSource = $state<SourceFilterType>('all');
   let selectedGameId = $state<number | null>(null);
 
   const favoriteSortOptions: SortOptionItem[] = [
@@ -105,6 +111,11 @@
       });
     }
 
+    // Source filter
+    if (selectedSource !== 'all') {
+      list = list.filter((item) => matchesSourceFilter(item.game, selectedSource));
+    }
+
     // Sort
     if (selectedSort === 'updated_desc') {
       list.sort((a, b) => parseDateToMs(b.updatedAt || b.addedAt) - parseDateToMs(a.updatedAt || a.addedAt));
@@ -131,6 +142,17 @@
       else if (item.status === 'completed') res.completed++;
     }
     return res;
+  });
+
+  let sourceCounts = $derived.by(() => {
+    const counts = { all: 0, ddl: 0, torrent: 0, ftp: 0 };
+    for (const item of favorites || []) {
+      counts.all++;
+      if (matchesSourceFilter(item.game, 'ddl')) counts.ddl++;
+      if (matchesSourceFilter(item.game, 'torrent')) counts.torrent++;
+      if (matchesSourceFilter(item.game, 'ftp')) counts.ftp++;
+    }
+    return counts;
   });
 
   let statusFilterOptions = $derived<StatusOptionItem[]>([
@@ -209,6 +231,24 @@
 
 </script>
 
+{#snippet favoriteSourceChips()}
+  <!-- Tactile SteamOS source filter pills -->
+  <div class="px-5 pt-1 pb-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+    {#each SOURCE_FILTER_OPTIONS as opt}
+      <button
+        type="button"
+        onclick={() => (selectedSource = opt.id)}
+        class="px-2.5 py-1 rounded-[10px] text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap {selectedSource === opt.id ? 'bg-white/[0.12] text-white border border-white/10' : 'bg-white/[0.025] text-white/50 hover:text-white hover:bg-white/[0.05] border border-transparent'}"
+      >
+        <span>{opt.shortLabel}</span>
+        {#if sourceCounts[opt.id] !== undefined}
+          <span class="ml-1 text-[10px] font-mono opacity-60">({sourceCounts[opt.id]})</span>
+        {/if}
+      </button>
+    {/each}
+  </div>
+{/snippet}
+
 <div data-nav-zone="favorites" class="flex-1 flex h-full overflow-hidden bg-gradient-to-b from-[#0F1218] to-[#0B0F1E] text-white">
   <!-- 1. LEFT SIDEBAR: Reusable Dark Tactile Game List Sidebar -->
   <GameListSidebar
@@ -221,6 +261,7 @@
     sortOptions={favoriteSortOptions}
     statusFilterOptions={statusFilterOptions}
     bind:selectedStatus={selectedTab}
+    filterChipsSnippet={favoriteSourceChips}
     isLoading={isLoading}
     loadingStatusText="Загрузка избранного..."
   />

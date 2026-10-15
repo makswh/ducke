@@ -68,7 +68,9 @@ func NewDownloadManager(
 			if rec.Status != string(StatusCompleted) && rec.Status != string(StatusCancelled) {
 				bg := ""
 				isDir := false
+				var gameEntity *database.GameEntity
 				if g, err := db.GetGameByID(rec.GameID); err == nil && g != nil {
+					gameEntity = g
 					bg = g.BackgroundImage
 					if bg == "" {
 						bg = g.HeaderImage
@@ -90,7 +92,14 @@ func NewDownloadManager(
 					Status:         StatusPaused,
 					IsTorrent:      rec.IsTorrent,
 					MagnetURI:      rec.MagnetURI,
+					IsDDL:          rec.IsDDL,
+					DDLHost:        rec.DDLHost,
+					TotalParts:     rec.TotalParts,
 					lastSampleTime: time.Now(),
+				}
+				task.CurrentPart.Store(int32(rec.CurrentPart))
+				if gameEntity != nil && len(gameEntity.URIs) > 0 {
+					task.URIs = gameEntity.URIs
 				}
 				task.DownloadedBytes.Store(rec.DownloadedBytes)
 				dm.tasks[rec.ID] = task
@@ -362,6 +371,108 @@ func (dm *DownloadManager) StartTorrentDownload(game database.GameEntity, destin
 	return downloadID, nil
 }
 
+// StartDDLDownload enqueues a direct file hoster download task
+func (dm *DownloadManager) StartDDLDownload(game database.GameEntity, preferredHoster string, destinationPath string) (string, error) {
+	uris := game.URIs
+	if len(uris) == 0 && game.RemotePath != "" {
+		uris = []string{game.RemotePath}
+	}
+	if len(uris) == 0 {
+		return "", fmt.Errorf("игра не содержит ссылок для загрузки")
+	}
+
+	// Filter out magnet links from DDL URIs, but preserve magnet link for failover
+	var cleanDDLURIs []string
+	foundMagnet := game.MagnetURI
+	for _, u := range uris {
+		trimmed := strings.TrimSpace(u)
+		if strings.HasPrefix(strings.ToLower(trimmed), "magnet:") {
+			if foundMagnet == "" {
+				foundMagnet = trimmed
+			}
+			continue
+		}
+		cleanDDLURIs = append(cleanDDLURIs, trimmed)
+	}
+
+	// If no DDL links found but game has a torrent magnet, start torrent download directly
+	if len(cleanDDLURIs) == 0 {
+		if foundMagnet != "" {
+			log.Printf("[Downloader] [%s] Game has torrent magnet only, redirecting to Torrent download...", game.CleanTitle)
+			return dm.StartTorrentDownload(game, destinationPath)
+		}
+		return "", fmt.Errorf("игра не содержит ссылок для прямой загрузки")
+	}
+
+	settings := dm.cfgManager.GetSettings()
+	if destinationPath == "" {
+		destinationPath = settings.DownloadPath
+	}
+
+	if fi, err := os.Stat(destinationPath); err == nil && !fi.IsDir() {
+		destinationPath = config.GetDefaultDownloadPath()
+	}
+
+	// Disk space check
+	free, _, err := GetDiskSpace(destinationPath)
+	if err == nil && game.SizeBytes > 0 && free > 0 && free < game.SizeBytes {
+		return "", fmt.Errorf("недостаточно места на диске: требуется %s, доступно %s", FormatBytes(game.SizeBytes), FormatBytes(free))
+	}
+
+	downloadID := uuid.New().String()
+	sanitizedTitle := SanitizeFilename(game.CleanTitle)
+	targetLocalPath := filepath.Join(destinationPath, sanitizedTitle)
+
+	bg := game.BackgroundImage
+	if bg == "" {
+		bg = game.HeaderImage
+	}
+	if bg == "" {
+		bg = game.CapsuleImage
+	}
+
+	task := &DownloadTask{
+		ID:             downloadID,
+		GameID:         game.ID,
+		GameTitle:      game.CleanTitle,
+		CoverImage:     bg,
+		RemotePath:     cleanDDLURIs[0],
+		LocalPath:      targetLocalPath,
+		TotalBytes:     game.SizeBytes,
+		Status:         StatusQueued,
+		IsDDL:          true,
+		DDLHost:        preferredHoster,
+		URIs:           cleanDDLURIs,
+		MagnetURI:      foundMagnet,
+		lastSampleTime: time.Now(),
+	}
+
+	dm.tasksMu.Lock()
+	dm.tasks[downloadID] = task
+	dm.tasksMu.Unlock()
+
+	_ = dm.db.SaveDownloadRecord(database.DownloadRecord{
+		ID:              downloadID,
+		GameID:          game.ID,
+		GameTitle:       game.CleanTitle,
+		RemotePath:      uris[0],
+		LocalPath:       targetLocalPath,
+		TotalBytes:      game.SizeBytes,
+		DownloadedBytes: 0,
+		Status:          string(StatusQueued),
+		IsDDL:           true,
+		DDLHost:         preferredHoster,
+	})
+
+	log.Printf("[Downloader] DDL task enqueued: \"%s\" (Host: %s, %d URIs) [ID: %s]",
+		game.CleanTitle, preferredHoster, len(uris), downloadID)
+	dm.emitTaskEvent(task)
+	dm.notifyListChanged()
+	dm.processQueue()
+
+	return downloadID, nil
+}
+
 // processQueue checks for available download slots and dispatches the next queued game
 func (dm *DownloadManager) processQueue() {
 	dm.tasksMu.Lock()
@@ -386,6 +497,9 @@ func (dm *DownloadManager) processQueue() {
 		if queuedTask.IsTorrent {
 			log.Printf("[Downloader] Queue manager: starting next torrent \"%s\"", queuedTask.GameTitle)
 			go dm.executeTorrentDownload(queuedTask)
+		} else if queuedTask.IsDDL {
+			log.Printf("[Downloader] Queue manager: starting next DDL hoster transfer \"%s\"", queuedTask.GameTitle)
+			go dm.executeDDLDownload(queuedTask)
 		} else {
 			settings := dm.cfgManager.GetSettings()
 			if settings.ActiveServer != nil {
@@ -725,6 +839,10 @@ func (dm *DownloadManager) PauseDownload(downloadID string) error {
 		Status:          string(StatusPaused),
 		IsTorrent:       task.IsTorrent,
 		MagnetURI:       task.MagnetURI,
+		IsDDL:           task.IsDDL,
+		DDLHost:         task.DDLHost,
+		CurrentPart:     int(task.CurrentPart.Load()),
+		TotalParts:      task.TotalParts,
 	})
 
 	dm.emitTaskEvent(task)
@@ -840,6 +958,10 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 			Status:          string(StatusPaused),
 			IsTorrent:       other.IsTorrent,
 			MagnetURI:       other.MagnetURI,
+			IsDDL:           other.IsDDL,
+			DDLHost:         other.DDLHost,
+			CurrentPart:     int(other.CurrentPart.Load()),
+			TotalParts:      other.TotalParts,
 		})
 		dm.emitTaskEvent(other)
 	}
@@ -863,6 +985,8 @@ func (dm *DownloadManager) ResumeDownload(downloadID string) error {
 			}
 		}
 		go dm.executeTorrentDownload(task)
+	} else if task.IsDDL {
+		go dm.executeDDLDownload(task)
 	} else {
 		settings := dm.cfgManager.GetSettings()
 		if settings.ActiveServer != nil {
@@ -1014,6 +1138,7 @@ func (dm *DownloadManager) ClearCompleted() error {
 func (dm *DownloadManager) DeleteTask(downloadID string, removeFiles bool) error {
 	dm.tasksMu.Lock()
 	task, exists := dm.tasks[downloadID]
+	var localPath string
 	if exists {
 		if task.cancelFunc != nil {
 			task.cancelFunc()
@@ -1021,13 +1146,22 @@ func (dm *DownloadManager) DeleteTask(downloadID string, removeFiles bool) error
 		if task.IsTorrent && dm.torrentEngine != nil {
 			dm.torrentEngine.PurgeState(downloadID)
 		}
+		localPath = task.LocalPath
 		delete(dm.tasks, downloadID)
 	}
 	dm.tasksMu.Unlock()
 
-	if removeFiles && exists && task.LocalPath != "" {
-		log.Printf("[Downloader] Removing files from disk for deleted task: %s", task.LocalPath)
-		_ = os.RemoveAll(task.LocalPath)
+	if removeFiles {
+		if localPath == "" && dm.db != nil {
+			if rec, err := dm.db.GetDownloadRecord(downloadID); err == nil && rec != nil {
+				localPath = rec.LocalPath
+			}
+		}
+		if localPath != "" {
+			log.Printf("[Downloader] Removing files from disk for deleted task: %s", localPath)
+			_ = os.RemoveAll(localPath)
+			_ = os.Remove(localPath + ".duckestate")
+		}
 	}
 
 	log.Printf("[Downloader] Deleted task record: %s (Delete files: %v)", downloadID, removeFiles)

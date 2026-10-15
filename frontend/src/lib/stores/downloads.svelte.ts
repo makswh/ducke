@@ -31,6 +31,10 @@ export interface DownloadItem {
   magnetUri?: string;
   torrentSeeds?: number;
   torrentPeers?: number;
+  isDdl?: boolean;
+  ddlHost?: string;
+  currentPart?: number;
+  totalParts?: number;
 }
 
 export interface DownloadRecord {
@@ -45,6 +49,10 @@ export interface DownloadRecord {
   errorMessage: string;
   isTorrent?: boolean;
   magnetUri?: string;
+  isDdl?: boolean;
+  ddlHost?: string;
+  currentPart?: number;
+  totalParts?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -249,6 +257,30 @@ class DownloadsStore {
   // Lifecycle actions
   async start(gameId: number, targetPath: string): Promise<string> {
     const dlId = await StartDownload(gameId, targetPath);
+    await this.refresh();
+    return dlId;
+  }
+
+  async startTorrent(gameId: number, targetPath: string): Promise<string> {
+    const app = typeof window !== 'undefined' ? (window as any)?.go?.main?.App : null;
+    let dlId: string;
+    if (app && typeof app.StartTorrentDownload === 'function') {
+      dlId = await app.StartTorrentDownload(gameId, targetPath);
+    } else {
+      dlId = await StartDownload(gameId, targetPath);
+    }
+    await this.refresh();
+    return dlId;
+  }
+
+  async startDDL(gameId: number, hoster: string, targetPath: string): Promise<string> {
+    const app = typeof window !== 'undefined' ? (window as any)?.go?.main?.App : null;
+    let dlId: string;
+    if (app && typeof app.StartDDLDownload === 'function') {
+      dlId = await app.StartDDLDownload(gameId, hoster, targetPath);
+    } else {
+      dlId = await StartDownload(gameId, targetPath);
+    }
     await this.refresh();
     return dlId;
   }

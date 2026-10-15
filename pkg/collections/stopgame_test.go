@@ -78,3 +78,27 @@ func TestParseCompilationDetail(t *testing.T) {
 		t.Errorf("expected poster URL, got empty")
 	}
 }
+
+func TestCleanCompilationTitle(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Все платины Василия Гальперова", "Все платины Василия Гальперова"},
+		{"Культовые Инди", "Культовые Инди"},
+		{"Лучшие игры 2024 года по версии StopGame", "Лучшие игры 2024 года"},
+		{"«Наш выбор» StopGame", "«Наш выбор»"},
+		{"StopGame: Главные релизы осени", "Главные релизы осени"},
+		{"Подборка: Лучшие RPG", "Лучшие RPG"},
+		{"Игры года — StopGame.ru", "Игры года"},
+		{"Лучшие хорроры (StopGame)", "Лучшие хорроры"},
+		{"От редакции: Топ стратегий", "Топ стратегий"},
+	}
+
+	for _, tc := range tests {
+		actual := CleanCompilationTitle(tc.input)
+		if actual != tc.expected {
+			t.Errorf("CleanCompilationTitle(%q) = %q, expected %q", tc.input, actual, tc.expected)
+		}
+	}
+}

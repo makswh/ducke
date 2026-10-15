@@ -76,3 +76,27 @@ export function getDisplayTitle(g: any): string {
   const raw = (g.cleanTitle && g.cleanTitle.trim() !== '') ? g.cleanTitle : (g.rawName || '');
   return cleanTorrentTitle(raw);
 }
+
+/**
+ * Strips editorial/press metadata, author watermarks, and source tags from compilation titles
+ * (e.g. StopGame, "по версии StopGame", "«Наш выбор» StopGame", "Подборка: ", etc.)
+ */
+export function cleanCompilationTitle(rawTitle: string | null | undefined): string {
+  if (!rawTitle) return '';
+  let s = rawTitle.trim();
+
+  // Strip editorial/press prefixes/suffixes and stopgame watermarks
+  s = s
+    .replace(/\s*[\(\[\{]?\s*(?:по\s+версии|по\s+мнению|от\s+редакции|выбор\s+редакции|редакция|выбор)?\s*stopgame(?:\.ru)?\s*[\)\]\}]?/gi, ' ')
+    .replace(/\s*[\-–—|•:]\s*stopgame(?:\.ru)?.*$/gi, ' ')
+    .replace(/^stopgame(?:\.ru)?\s*[\-–—|•:]\s*/gi, ' ')
+    .replace(/^(?:подборка|от\s+редакции|пресса|выбор\s+редакции)\s*:\s*/gi, ' ')
+    .replace(/\bstopgame(?:\.ru)?\b/gi, ' ');
+
+  // Clean trailing / leading punctuation and extra spaces
+  s = s.replace(/^[\s\-–—|•:.,]+|[\s\-–—|•:.,]+$/g, '');
+  s = s.replace(/\s+/g, ' ').trim();
+
+  return s || rawTitle.trim();
+}
+

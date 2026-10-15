@@ -4,6 +4,12 @@ import App from './App.svelte'
 
 // Safe dev-mock when running in a standalone browser outside Wails WebView
 if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
+      window.location.reload();
+    }
+  });
+
   if (!(window as any).runtime) {
     (window as any).runtime = {
       EventsOn: () => () => {},

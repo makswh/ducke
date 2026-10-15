@@ -43,6 +43,10 @@ type DownloadProgressEvent struct {
 	MagnetURI        string         `json:"magnetUri,omitempty"`
 	TorrentSeeds     int            `json:"torrentSeeds"`
 	TorrentPeers     int            `json:"torrentPeers"`
+	IsDDL            bool           `json:"isDdl"`
+	DDLHost          string         `json:"ddlHost,omitempty"`
+	CurrentPart      int            `json:"currentPart,omitempty"`
+	TotalParts       int            `json:"totalParts,omitempty"`
 }
 
 type DownloadTask struct {
@@ -63,6 +67,13 @@ type DownloadTask struct {
 	MagnetURI    string
 	TorrentSeeds int
 	TorrentPeers int
+
+	// DDL fields
+	IsDDL        bool
+	DDLHost      string
+	URIs         []string
+	CurrentPart  atomic.Int32
+	TotalParts   int
 
 	// Runtime metrics
 	speedBytesPerSec atomic.Int64
@@ -139,5 +150,9 @@ func (t *DownloadTask) ToEvent() DownloadProgressEvent {
 		MagnetURI:        t.MagnetURI,
 		TorrentSeeds:     t.TorrentSeeds,
 		TorrentPeers:     t.TorrentPeers,
+		IsDDL:            t.IsDDL,
+		DDLHost:          t.DDLHost,
+		CurrentPart:      int(t.CurrentPart.Load()),
+		TotalParts:       t.TotalParts,
 	}
 }

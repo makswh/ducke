@@ -226,6 +226,7 @@ export namespace config {
 	    steamDeckMode: boolean;
 	    steamApiKey: string;
 	    enableLogs: boolean;
+	    autoExtractArchives: boolean;
 	    activeServer?: ServerConfig;
 	    savedServers: ServerConfig[];
 	    torrentSources: TorrentSourceConfig[];
@@ -243,6 +244,7 @@ export namespace config {
 	        this.steamDeckMode = source["steamDeckMode"];
 	        this.steamApiKey = source["steamApiKey"];
 	        this.enableLogs = source["enableLogs"];
+	        this.autoExtractArchives = source["autoExtractArchives"];
 	        this.activeServer = this.convertValues(source["activeServer"], ServerConfig);
 	        this.savedServers = this.convertValues(source["savedServers"], ServerConfig);
 	        this.torrentSources = this.convertValues(source["torrentSources"], TorrentSourceConfig);
@@ -284,6 +286,10 @@ export namespace database {
 	    errorMessage: string;
 	    isTorrent: boolean;
 	    magnetUri?: string;
+	    isDdl: boolean;
+	    ddlHost?: string;
+	    currentPart?: number;
+	    totalParts?: number;
 	    createdAt: number;
 	    updatedAt: number;
 	
@@ -304,6 +310,10 @@ export namespace database {
 	        this.errorMessage = source["errorMessage"];
 	        this.isTorrent = source["isTorrent"];
 	        this.magnetUri = source["magnetUri"];
+	        this.isDdl = source["isDdl"];
+	        this.ddlHost = source["ddlHost"];
+	        this.currentPart = source["currentPart"];
+	        this.totalParts = source["totalParts"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }
@@ -318,6 +328,8 @@ export namespace database {
 	    torrentSource?: string;
 	    remotePath?: string;
 	    magnetUri?: string;
+	    uris?: string[];
+	    hosters?: string[];
 	    uploadDate?: string;
 	    createdAt?: string;
 	    updatedAt?: string;
@@ -339,6 +351,8 @@ export namespace database {
 	        this.torrentSource = source["torrentSource"];
 	        this.remotePath = source["remotePath"];
 	        this.magnetUri = source["magnetUri"];
+	        this.uris = source["uris"];
+	        this.hosters = source["hosters"];
 	        this.uploadDate = source["uploadDate"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
@@ -405,6 +419,8 @@ export namespace database {
 	    sourceType?: string;
 	    torrentSource?: string;
 	    magnetUri?: string;
+	    uris?: string[];
+	    hosters?: string[];
 	    uploadDate?: string;
 	    createdAt?: string;
 	    updatedAt?: string;
@@ -453,6 +469,8 @@ export namespace database {
 	        this.sourceType = source["sourceType"];
 	        this.torrentSource = source["torrentSource"];
 	        this.magnetUri = source["magnetUri"];
+	        this.uris = source["uris"];
+	        this.hosters = source["hosters"];
 	        this.uploadDate = source["uploadDate"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
@@ -549,6 +567,10 @@ export namespace downloader {
 	    magnetUri?: string;
 	    torrentSeeds: number;
 	    torrentPeers: number;
+	    isDdl: boolean;
+	    ddlHost?: string;
+	    currentPart?: number;
+	    totalParts?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DownloadProgressEvent(source);
@@ -577,6 +599,10 @@ export namespace downloader {
 	        this.magnetUri = source["magnetUri"];
 	        this.torrentSeeds = source["torrentSeeds"];
 	        this.torrentPeers = source["torrentPeers"];
+	        this.isDdl = source["isDdl"];
+	        this.ddlHost = source["ddlHost"];
+	        this.currentPart = source["currentPart"];
+	        this.totalParts = source["totalParts"];
 	    }
 	}
 	export class StorageDriveInfo {
@@ -677,6 +703,9 @@ export namespace main {
 	    success: boolean;
 	    protocolUsed: string;
 	    errorMessage: string;
+	    cleanedHost?: string;
+	    cleanedDir?: string;
+	    cleanedPort?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectionTestResult(source);
@@ -687,6 +716,9 @@ export namespace main {
 	        this.success = source["success"];
 	        this.protocolUsed = source["protocolUsed"];
 	        this.errorMessage = source["errorMessage"];
+	        this.cleanedHost = source["cleanedHost"];
+	        this.cleanedDir = source["cleanedDir"];
+	        this.cleanedPort = source["cleanedPort"];
 	    }
 	}
 	export class DiskSpaceInfo {
@@ -912,6 +944,94 @@ export namespace steam {
 	        this.gridDir = source["gridDir"];
 	        this.message = source["message"];
 	    }
+	}
+
+}
+
+export namespace updater {
+	
+	export class UpdateInfo {
+	    currentVersion: string;
+	    latestVersion: string;
+	    hasUpdate: boolean;
+	    releaseNotes: string;
+	    releaseName: string;
+	    // Go type: time
+	    releaseDate: any;
+	    releaseUrl: string;
+	    downloadUrl: string;
+	    assetName: string;
+	    assetSize: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.currentVersion = source["currentVersion"];
+	        this.latestVersion = source["latestVersion"];
+	        this.hasUpdate = source["hasUpdate"];
+	        this.releaseNotes = source["releaseNotes"];
+	        this.releaseName = source["releaseName"];
+	        this.releaseDate = this.convertValues(source["releaseDate"], null);
+	        this.releaseUrl = source["releaseUrl"];
+	        this.downloadUrl = source["downloadUrl"];
+	        this.assetName = source["assetName"];
+	        this.assetSize = source["assetSize"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class UpdateStatus {
+	    state: string;
+	    errorMessage?: string;
+	    updateInfo?: UpdateInfo;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.errorMessage = source["errorMessage"];
+	        this.updateInfo = this.convertValues(source["updateInfo"], UpdateInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

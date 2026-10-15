@@ -6,9 +6,11 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -66,6 +68,7 @@ type AppSettings struct {
 	SteamDeckMode      bool                  `json:"steamDeckMode"`
 	SteamApiKey        string                `json:"steamApiKey"` // Optional Steam Web API key
 	EnableLogs         bool                  `json:"enableLogs"`  // Toggle system diagnostics logging
+	AutoExtractArchives bool                 `json:"autoExtractArchives"` // Auto extract archives after download
 	ActiveServer       *ServerConfig         `json:"activeServer,omitempty"`
 	SavedServers       []ServerConfig        `json:"savedServers"`
 	TorrentSources     []TorrentSourceConfig `json:"torrentSources"`
@@ -140,30 +143,12 @@ func (s *AppSettings) Sanitize() {
 	// Sanitize saved servers (filter out empty hosts)
 	validServers := make([]ServerConfig, 0, len(s.SavedServers))
 	for i := range s.SavedServers {
-		srv := s.SavedServers[i]
-		srv.Host = strings.TrimSpace(srv.Host)
+		srv := SanitizeServerConfig(s.SavedServers[i])
 		if srv.Host == "" {
 			continue
 		}
 		if srv.ID == "" {
 			srv.ID = fmt.Sprintf("srv_%d", len(validServers)+1)
-		}
-		srv.Name = strings.TrimSpace(srv.Name)
-		if srv.Name == "" {
-			srv.Name = srv.Host
-		}
-		srv.User = strings.TrimSpace(srv.User)
-		srv.RemoteDir = cleanRemotePath(srv.RemoteDir)
-		srv.Protocol = strings.ToLower(strings.TrimSpace(srv.Protocol))
-		if srv.Protocol != "ftp" && srv.Protocol != "sftp" {
-			srv.Protocol = "sftp"
-		}
-		if srv.Port <= 0 {
-			if srv.Protocol == "ftp" {
-				srv.Port = 21
-			} else {
-				srv.Port = 2022
-			}
 		}
 		validServers = append(validServers, srv)
 	}
@@ -171,7 +156,8 @@ func (s *AppSettings) Sanitize() {
 
 	// Keep ActiveServer and SavedServers in sync
 	if s.ActiveServer != nil {
-		s.ActiveServer.Host = strings.TrimSpace(s.ActiveServer.Host)
+		cleaned := SanitizeServerConfig(*s.ActiveServer)
+		s.ActiveServer = &cleaned
 		if s.ActiveServer.Host == "" {
 			if len(s.SavedServers) > 0 {
 				act := s.SavedServers[0]
@@ -180,23 +166,6 @@ func (s *AppSettings) Sanitize() {
 				s.ActiveServer = nil
 			}
 		} else {
-			s.ActiveServer.Name = strings.TrimSpace(s.ActiveServer.Name)
-			if s.ActiveServer.Name == "" {
-				s.ActiveServer.Name = s.ActiveServer.Host
-			}
-			s.ActiveServer.User = strings.TrimSpace(s.ActiveServer.User)
-			s.ActiveServer.RemoteDir = cleanRemotePath(s.ActiveServer.RemoteDir)
-			s.ActiveServer.Protocol = strings.ToLower(strings.TrimSpace(s.ActiveServer.Protocol))
-			if s.ActiveServer.Protocol != "ftp" && s.ActiveServer.Protocol != "sftp" {
-				s.ActiveServer.Protocol = "sftp"
-			}
-			if s.ActiveServer.Port <= 0 {
-				if s.ActiveServer.Protocol == "ftp" {
-					s.ActiveServer.Port = 21
-				} else {
-					s.ActiveServer.Port = 2022
-				}
-			}
 			if s.ActiveServer.ID == "" {
 				s.ActiveServer.ID = "srv_1"
 			}
@@ -265,6 +234,148 @@ func cleanRemotePath(p string) string {
 	return p
 }
 
+// SanitizeServerConfig cleans and normalizes a ServerConfig.
+// It parses URLs/schemes, extracts ports, credentials, and paths from Host,
+// and configures defaults for anonymous FTP access.
+func SanitizeServerConfig(srv ServerConfig) ServerConfig {
+	raw := strings.TrimSpace(srv.Host)
+	if raw == "" {
+		return srv
+	}
+
+	lower := strings.ToLower(raw)
+	// 1. Parse and strip scheme
+	if strings.HasPrefix(lower, "ftp://") {
+		srv.Protocol = "ftp"
+		raw = raw[6:]
+	} else if strings.HasPrefix(lower, "ftps://") {
+		srv.Protocol = "ftps"
+		raw = raw[7:]
+	} else if strings.HasPrefix(lower, "sftp://") {
+		srv.Protocol = "sftp"
+		raw = raw[7:]
+	} else if strings.HasPrefix(lower, "http://") {
+		raw = raw[7:]
+	} else if strings.HasPrefix(lower, "https://") {
+		raw = raw[8:]
+	}
+
+	// 2. Extract path (e.g. host.com/pub/games or host.com\pub\games)
+	var extractedPath string
+	firstSlash := -1
+	for i, r := range raw {
+		if r == '/' || r == '\\' {
+			firstSlash = i
+			break
+		}
+	}
+	if firstSlash != -1 {
+		extractedPath = raw[firstSlash:]
+		raw = raw[:firstSlash]
+	}
+
+	// 3. Extract credentials user:pass@host
+	if atIdx := strings.LastIndex(raw, "@"); atIdx != -1 {
+		creds := raw[:atIdx]
+		raw = raw[atIdx+1:]
+		if srv.User == "" {
+			if colonIdx := strings.Index(creds, ":"); colonIdx != -1 {
+				srv.User = creds[:colonIdx]
+				if srv.Password == "" {
+					srv.Password = creds[colonIdx+1:]
+				}
+			} else {
+				srv.User = creds
+			}
+		}
+	}
+
+	// 4. Extract port (e.g. host:21)
+	if strings.Contains(raw, ":") {
+		h, p, err := net.SplitHostPort(raw)
+		if err == nil {
+			raw = h
+			if parsedPort, err := strconv.Atoi(p); err == nil && parsedPort > 0 {
+				srv.Port = parsedPort
+			}
+		} else {
+			parts := strings.Split(raw, ":")
+			if len(parts) == 2 {
+				raw = parts[0]
+				if parsedPort, err := strconv.Atoi(parts[1]); err == nil && parsedPort > 0 {
+					srv.Port = parsedPort
+				}
+			}
+		}
+	}
+
+	srv.Host = strings.Trim(strings.TrimSpace(raw), "/\\")
+
+	// 5. Apply extracted path to RemoteDir if RemoteDir is root or default
+	extractedPath = strings.TrimSpace(extractedPath)
+	if extractedPath != "" {
+		normalized := strings.ReplaceAll(extractedPath, "\\", "/")
+		if !strings.HasPrefix(normalized, "/") {
+			normalized = "/" + normalized
+		}
+		if len(normalized) > 1 && strings.HasSuffix(normalized, "/") {
+			normalized = strings.TrimSuffix(normalized, "/")
+		}
+		if srv.RemoteDir == "" || srv.RemoteDir == "/" || srv.RemoteDir == "." || srv.RemoteDir == "0" || srv.RemoteDir == "/0" {
+			srv.RemoteDir = normalized
+		}
+	}
+
+	srv.RemoteDir = cleanRemotePath(srv.RemoteDir)
+
+	// 6. Normalize protocol
+	srv.Protocol = strings.ToLower(strings.TrimSpace(srv.Protocol))
+	if strings.HasPrefix(strings.ToLower(srv.Host), "ftp.") {
+		if srv.Protocol == "sftp" || srv.Protocol == "" {
+			srv.Protocol = "ftp"
+			srv.Port = 21
+		}
+	}
+	if srv.Protocol != "ftp" && srv.Protocol != "ftps" && srv.Protocol != "sftp" {
+		if srv.Port == 21 {
+			srv.Protocol = "ftp"
+		} else if srv.Port == 990 {
+			srv.Protocol = "ftps"
+		} else {
+			srv.Protocol = "sftp"
+		}
+	}
+
+	// 7. Normalize port
+	if srv.Port <= 0 {
+		if srv.Protocol == "ftp" {
+			srv.Port = 21
+		} else if srv.Protocol == "ftps" {
+			srv.Port = 990
+		} else {
+			srv.Port = 2022
+		}
+	}
+
+	// 8. Anonymous defaults
+	srv.User = strings.TrimSpace(srv.User)
+	if srv.Protocol == "ftp" || srv.Protocol == "ftps" {
+		if strings.EqualFold(srv.User, "anonymous") || srv.User == "" {
+			srv.User = "anonymous"
+			if strings.TrimSpace(srv.Password) == "" {
+				srv.Password = "anonymous@"
+			}
+		}
+	}
+
+	srv.Name = strings.TrimSpace(srv.Name)
+	if srv.Name == "" {
+		srv.Name = srv.Host
+	}
+
+	return srv
+}
+
 type ConfigManager struct {
 	mu         sync.RWMutex
 	configPath string
@@ -285,6 +396,7 @@ func NewConfigManager(appDir string) (*ConfigManager, error) {
 			MaxSpeedKBps:       0,
 			Theme:              "dark",
 			SteamDeckMode:      IsSteamDeckEnvironment(),
+			AutoExtractArchives: true,
 			SavedServers:       make([]ServerConfig, 0),
 		},
 	}
@@ -293,9 +405,10 @@ func NewConfigManager(appDir string) (*ConfigManager, error) {
 		cm.settings.Sanitize()
 		_ = cm.save()
 	} else {
-		oldPath := cm.settings.DownloadPath
+		oldJSON, _ := json.Marshal(cm.settings)
 		cm.settings.Sanitize()
-		if oldPath != cm.settings.DownloadPath {
+		newJSON, _ := json.Marshal(cm.settings)
+		if string(oldJSON) != string(newJSON) {
 			_ = cm.save()
 		}
 	}
@@ -312,12 +425,24 @@ func (cm *ConfigManager) GetSettings() AppSettings {
 func (cm *ConfigManager) SaveSettings(settings AppSettings) error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	// Prevent accidental wipeout of torrent sources if caller passed an empty slice but sources exist
-	if len(settings.TorrentSources) == 0 && len(cm.settings.TorrentSources) > 0 {
+	// Prevent accidental wipeout of torrent sources only if caller omitted the field (nil)
+	if settings.TorrentSources == nil && len(cm.settings.TorrentSources) > 0 {
 		settings.TorrentSources = cm.settings.TorrentSources
 	}
 	settings.Sanitize()
 	cm.settings = settings
+	return cm.save()
+}
+
+// SetTorrentSources replaces and persists the torrent sources list
+func (cm *ConfigManager) SetTorrentSources(sources []TorrentSourceConfig) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if sources == nil {
+		sources = make([]TorrentSourceConfig, 0)
+	}
+	cm.settings.TorrentSources = sources
+	cm.settings.Sanitize()
 	return cm.save()
 }
 

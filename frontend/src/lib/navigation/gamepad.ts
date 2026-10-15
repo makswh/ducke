@@ -19,10 +19,10 @@ export class GamepadEngine {
   private zoneMemory: Map<NavZone, HTMLElement> = new Map();
 
   // Console timing parameters
-  private static readonly INITIAL_REPEAT_DELAY_MS = 360;
-  private static readonly REPEAT_INTERVAL_MS = 110;
-  private static readonly ANALOG_DEADZONE = 0.40;
-  private static readonly SCROLL_DEADZONE = 0.22;
+  private static readonly INITIAL_REPEAT_DELAY_MS = 280;
+  private static readonly REPEAT_INTERVAL_MS = 85;
+  private static readonly ANALOG_DEADZONE = 0.30;
+  private static readonly SCROLL_DEADZONE = 0.20;
 
   // Directional hold tracking
   private heldDirection: Direction | null = null;
@@ -212,15 +212,22 @@ export class GamepadEngine {
         this.heldDirection = currentDir;
         this.heldStartTime = now;
         this.lastStepTime = now;
-        window.dispatchEvent(new CustomEvent('app:gamepad-dir', { detail: { dir: currentDir } }));
-        this.navigateSpatial(currentDir);
+        const ev = new CustomEvent('app:gamepad-dir', { detail: { dir: currentDir }, cancelable: true });
+        const notCancelled = window.dispatchEvent(ev);
+        if (notCancelled) {
+          this.navigateSpatial(currentDir);
+        }
       } else {
         // Sustained hold: wait initial repeat delay, then tick at repeat interval
         const holdDuration = now - this.heldStartTime;
         if (holdDuration >= GamepadEngine.INITIAL_REPEAT_DELAY_MS) {
           if (now - this.lastStepTime >= GamepadEngine.REPEAT_INTERVAL_MS) {
             this.lastStepTime = now;
-            this.navigateSpatial(currentDir);
+            const ev = new CustomEvent('app:gamepad-dir', { detail: { dir: currentDir }, cancelable: true });
+            const notCancelled = window.dispatchEvent(ev);
+            if (notCancelled) {
+              this.navigateSpatial(currentDir);
+            }
           }
         }
       }
@@ -234,7 +241,9 @@ export class GamepadEngine {
     // (A) Cross / A: Click / Activate
     this.handleButtonPress(gp, 0, () => {
       sound.playSelect();
-      if (this.currentFocusedEl) {
+      const ev = new CustomEvent('app:btn-a', { cancelable: true });
+      const notCancelled = window.dispatchEvent(ev);
+      if (notCancelled && this.currentFocusedEl) {
         this.currentFocusedEl.click();
 
         if (this.currentFocusedEl instanceof HTMLInputElement || this.currentFocusedEl instanceof HTMLTextAreaElement) {
@@ -318,21 +327,23 @@ export class GamepadEngine {
       }
     });
 
-    // LT (6): Jump to Top Header or Previous Zone
+    // LT (6): Page Up / Jump Up
     this.handleButtonPress(gp, 6, () => {
       const ev = new CustomEvent('app:trigger-lt', { cancelable: true });
       const notCancelled = window.dispatchEvent(ev);
       if (notCancelled) {
-        this.switchZoneRelative(-1);
+        sound.playMove();
+        this.pageScrollActivePanel(-1);
       }
     });
 
-    // RT (7): Jump to Content Area or Next Zone
+    // RT (7): Page Down / Jump Down
     this.handleButtonPress(gp, 7, () => {
       const ev = new CustomEvent('app:trigger-rt', { cancelable: true });
       const notCancelled = window.dispatchEvent(ev);
       if (notCancelled) {
-        this.switchZoneRelative(1);
+        sound.playMove();
+        this.pageScrollActivePanel(1);
       }
     });
 
@@ -530,6 +541,37 @@ export class GamepadEngine {
       return;
     }
     window.scrollBy({ top: amount });
+  }
+
+  private pageScrollActivePanel(direction: -1 | 1) {
+    const pageSize = Math.round(window.innerHeight * 0.65) * direction;
+    this.scrollActivePanel(pageSize);
+
+    // After scrolling, re-focus element closest to viewport center
+    setTimeout(() => {
+      const items = this.getNavItems();
+      if (items.length === 0) return;
+      const viewCenterY = window.innerHeight / 2;
+      const viewCenterX = window.innerWidth / 2;
+      let bestItem: HTMLElement | null = null;
+      let bestDist = Infinity;
+
+      for (const item of items) {
+        const rect = item.getBoundingClientRect();
+        if (rect.bottom > 80 && rect.top < window.innerHeight - 80 && rect.right > 0 && rect.left < window.innerWidth) {
+          const itemCenterX = rect.left + rect.width / 2;
+          const itemCenterY = rect.top + rect.height / 2;
+          const dist = Math.hypot(itemCenterX - viewCenterX, itemCenterY - viewCenterY);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestItem = item;
+          }
+        }
+      }
+      if (bestItem && bestItem !== this.currentFocusedEl) {
+        this.setFocus(bestItem);
+      }
+    }, 60);
   }
 
   private isElementVisible(el: HTMLElement): boolean {

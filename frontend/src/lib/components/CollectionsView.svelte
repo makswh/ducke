@@ -33,6 +33,7 @@
     GetStopGameCompilationDetail
   } from '../../../wailsjs/go/main/App';
   import { BrowserOpenURL } from '../../../wailsjs/runtime/runtime';
+  import { cleanCompilationTitle } from '../utils/titleUtils';
 
   let {
     downloadPath = 'C:\\Ducke',
@@ -234,7 +235,7 @@
           class="flex items-center gap-2 px-3.5 py-1.5 rounded-[10px] bg-[#0d1117] hover:bg-white/10 text-xs font-medium text-slate-200 transition-colors cursor-pointer"
         >
           <ArrowLeft class="w-3.5 h-3.5" />
-          <span>Назад к подборке: <strong class="text-white font-semibold">{detail?.title || 'Подборка'}</strong></span>
+          <span>Назад к подборке: <strong class="text-white font-semibold">{cleanCompilationTitle(detail?.title || 'Подборка')}</strong></span>
         </button>
 
         <div class="flex items-center gap-2 text-xs text-[#8e95a2]">
@@ -394,7 +395,7 @@
                   <!-- Middle: Title & Description -->
                   <div class="space-y-1 my-auto">
                     <h2 class="text-sm font-semibold text-white group-hover:text-sky-300 transition-colors line-clamp-2 leading-snug">
-                      {comp.title}
+                      {cleanCompilationTitle(comp.title)}
                     </h2>
                     {#if comp.description}
                       <p class="text-[11px] text-[#8e95a2] line-clamp-2 leading-relaxed">
@@ -509,7 +510,7 @@
             <div class="flex items-start justify-between gap-4 flex-wrap">
               <div class="flex-1 min-w-[280px]">
                 <h1 class="text-2xl sm:text-3xl font-bold text-white tracking-tight leading-tight mb-2">
-                  {detail.title}
+                  {cleanCompilationTitle(detail.title)}
                 </h1>
                 <div class="flex items-center gap-3 flex-wrap text-xs text-[#8e95a2]">
                   {#if detail.rating}

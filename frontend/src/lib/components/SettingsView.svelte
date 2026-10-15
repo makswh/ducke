@@ -72,13 +72,17 @@
     steamDeckMode: boolean;
     steamApiKey: string;
     enableLogs?: boolean;
+    autoExtractArchives?: boolean;
     activeServer?: ServerConfig;
     savedServers: ServerConfig[];
     torrentSources?: any[];
   }
 
+  export type SettingsTab = 'storage' | 'server' | 'torrents' | 'downloads' | 'interface' | 'logs' | 'about';
+
   let {
     settings = null as AppSettings | null,
+    activeSubTab = $bindable('storage' as SettingsTab),
     onSaveSettings = (s: AppSettings) => {},
     onImportFile = async () => {},
     onTestConnection = async (srv: ServerConfig): Promise<{ success: boolean; protocolUsed?: string; errorMessage?: string }> => ({ success: false }),
@@ -88,8 +92,11 @@
     onClearMetadataCache = async (): Promise<number> => 0
   } = $props();
 
-  type SettingsTab = 'storage' | 'server' | 'torrents' | 'downloads' | 'interface' | 'logs' | 'about';
-  let activeSubTab = $state<SettingsTab>('storage');
+  $effect(() => {
+    if (activeSubTab === 'logs') {
+      loadLogs();
+    }
+  });
 
   let localSettings = $state<AppSettings>({
     downloadPath: 'C:\\Ducke',
@@ -99,6 +106,7 @@
     steamDeckMode: false,
     steamApiKey: '',
     enableLogs: false,
+    autoExtractArchives: true,
     savedServers: [],
     torrentSources: [],
     activeServer: {
@@ -346,6 +354,7 @@
           steamDeckMode: !!current.steamDeckMode,
           steamApiKey: current.steamApiKey || '',
           enableLogs: !!current.enableLogs,
+          autoExtractArchives: current.autoExtractArchives !== undefined ? !!current.autoExtractArchives : true,
           savedServers,
           activeServer,
           torrentSources: Array.isArray(current.torrentSources) ? current.torrentSources.map((s: any) => ({ ...s })) : []
@@ -524,8 +533,89 @@
     handleSave();
   }
 
+  function sanitizeServerInput(srv: ServerConfig | null) {
+    if (!srv || !srv.host) return;
+    let raw = srv.host.trim();
+    if (!raw) return;
+
+    const lower = raw.toLowerCase();
+    if (lower.startsWith('ftp://')) {
+      srv.protocol = 'ftp';
+      if (!srv.port || srv.port === 2022) srv.port = 21;
+      raw = raw.slice(6);
+    } else if (lower.startsWith('ftps://')) {
+      srv.protocol = 'ftps';
+      if (!srv.port || srv.port === 2022) srv.port = 990;
+      raw = raw.slice(7);
+    } else if (lower.startsWith('sftp://')) {
+      srv.protocol = 'sftp';
+      if (!srv.port || srv.port === 21) srv.port = 2022;
+      raw = raw.slice(7);
+    } else if (lower.startsWith('http://')) {
+      raw = raw.slice(7);
+    } else if (lower.startsWith('https://')) {
+      raw = raw.slice(8);
+    }
+
+    // Extract path if present (e.g. ftp.matrixgames.com/pub/ or server/dir)
+    const slashIdx = raw.indexOf('/');
+    const backslashIdx = raw.indexOf('\\');
+    const splitIdx = slashIdx !== -1 ? slashIdx : backslashIdx;
+    if (splitIdx !== -1) {
+      const extractedPath = raw.slice(splitIdx).replace(/\\/g, '/');
+      raw = raw.slice(0, splitIdx);
+      if (!srv.remoteDir || srv.remoteDir === '/' || srv.remoteDir === '.' || srv.remoteDir === '0') {
+        srv.remoteDir = extractedPath.replace(/\/+$/, '') || '/';
+      }
+    }
+
+    // Extract credentials user:pass@host
+    const atIdx = raw.lastIndexOf('@');
+    if (atIdx !== -1) {
+      const creds = raw.slice(0, atIdx);
+      raw = raw.slice(atIdx + 1);
+      if (!srv.user) {
+        const colIdx = creds.indexOf(':');
+        if (colIdx !== -1) {
+          srv.user = creds.slice(0, colIdx);
+          if (!srv.password) srv.password = creds.slice(colIdx + 1);
+        } else {
+          srv.user = creds;
+        }
+      }
+    }
+
+    // Extract port :21
+    const portMatch = raw.match(/:(\d+)$/);
+    if (portMatch) {
+      srv.port = parseInt(portMatch[1], 10);
+      raw = raw.slice(0, -portMatch[0].length);
+    }
+
+    srv.host = raw.replace(/^[/\\:]+|[/\\:]+$/g, '').trim();
+  }
+
+  let isAnonymous = $derived.by(() => {
+    if (!selectedServer) return false;
+    const u = (selectedServer.user || '').trim().toLowerCase();
+    return u === 'anonymous' || u === 'guest';
+  });
+
+  function toggleAnonymous() {
+    if (!selectedServer) return;
+    if (isAnonymous) {
+      selectedServer.user = '';
+      selectedServer.password = '';
+    } else {
+      selectedServer.user = 'anonymous';
+      selectedServer.password = 'anonymous@';
+    }
+    handleServerFieldChange();
+  }
+
   function handleServerFieldChange() {
     if (!selectedServer) return;
+    sanitizeServerInput(selectedServer);
     // Keep savedServers and activeServer in sync
     const idx = localSettings.savedServers.findIndex(s => s.id === selectedServer.id);
     if (idx !== -1) {
@@ -538,10 +628,22 @@
 
   async function handleTestConn() {
     if (!selectedServer) return;
+    sanitizeServerInput(selectedServer);
     isTestingConnection = true;
     testResult = null;
     try {
       const res = await onTestConnection(selectedServer);
+      if (res.cleanedHost && selectedServer) {
+        selectedServer.host = res.cleanedHost;
+      }
+      if (res.cleanedDir && selectedServer && (!selectedServer.remoteDir || selectedServer.remoteDir === '/')) {
+        selectedServer.remoteDir = res.cleanedDir;
+      }
+      if (res.cleanedPort && selectedServer) {
+        selectedServer.port = res.cleanedPort;
+      }
+      handleServerFieldChange();
+
       if (res.success) {
         testResult = {
           success: true,
@@ -956,7 +1058,7 @@
                 data-nav-item
                 type="text"
                 bind:value={selectedServer.name}
-                onchange={handleServerFieldChange}
+                onchange={handleSave}
                 placeholder="Основной SFTP"
                 class="w-72 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
@@ -974,7 +1076,7 @@
                     if (selectedServer) {
                       selectedServer.protocol = 'sftp';
                       if (selectedServer.port === 21) selectedServer.port = 2022;
-                      handleServerFieldChange();
+                      handleSave();
                     }
                   }}
                 >
@@ -988,7 +1090,7 @@
                     if (selectedServer) {
                       selectedServer.protocol = 'ftp';
                       if (selectedServer.port === 2022) selectedServer.port = 21;
-                      handleServerFieldChange();
+                      handleSave();
                     }
                   }}
                 >
@@ -999,13 +1101,17 @@
 
             <!-- Host -->
             <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
-              <span class="text-[#cbd5e1] font-mono">Хост / IP адрес</span>
+              <div class="flex flex-col">
+                <span class="text-[#cbd5e1] font-mono">Хост / IP адрес</span>
+                <span class="text-[10px] text-[#8e95a2] font-mono">Поддерживает URL (ftp://host/path)</span>
+              </div>
               <input
                 data-nav-item
                 type="text"
                 bind:value={selectedServer.host}
-                onchange={handleServerFieldChange}
-                placeholder="192.168.1.100"
+                onchange={handleSave}
+                onblur={handleSave}
+                placeholder="192.168.1.100 или ftp.example.com"
                 class="w-72 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
             </div>
@@ -1017,60 +1123,98 @@
                 data-nav-item
                 type="number"
                 bind:value={selectedServer.port}
-                onchange={handleServerFieldChange}
+                onchange={handleSave}
                 class="w-24 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
+            </div>
+
+            <!-- Anonymous Login Toggle -->
+            <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
+              <div class="flex flex-col">
+                <span class="text-[#cbd5e1] font-mono">Анонимный вход</span>
+                <span class="text-[10px] text-[#8e95a2] font-mono">Вход без пароля (для открытых FTP)</span>
+              </div>
+              <button
+                data-nav-item
+                type="button"
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none {isAnonymous ? 'bg-sky-500' : 'bg-white/10'}"
+                onclick={() => {
+                  toggleAnonymous();
+                  handleSave();
+                }}
+                title="Переключить анонимный вход"
+              >
+                <span
+                  class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out {isAnonymous ? 'translate-x-4' : 'translate-x-0'}"
+                ></span>
+              </button>
             </div>
 
             <!-- User -->
             <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Пользователь</span>
-              <input
-                data-nav-item
-                type="text"
-                bind:value={selectedServer.user}
-                onchange={handleServerFieldChange}
-                placeholder="anonymous"
-                class="w-72 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
-              />
+              {#if isAnonymous}
+                <div class="flex items-center gap-2">
+                  <span class="px-2.5 py-1 rounded-[8px] bg-white/5 border border-white/10 text-white font-mono text-xs">
+                    anonymous
+                  </span>
+                  <span class="text-[11px] text-[#8e95a2] font-mono">(гостевой доступ)</span>
+                </div>
+              {:else}
+                <input
+                  data-nav-item
+                  type="text"
+                  bind:value={selectedServer.user}
+                  onchange={handleSave}
+                  placeholder="Логин"
+                  class="w-72 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                />
+              {/if}
             </div>
 
             <!-- Password -->
             <div class="flex items-center justify-between py-1.5 border-b border-white/[0.06] text-xs">
               <span class="text-[#cbd5e1] font-mono">Пароль</span>
-              <div class="flex items-center gap-2">
-                {#if showPassword}
-                  <input
-                    data-nav-item
-                    type="text"
-                    bind:value={selectedServer.password}
-                    onchange={handleServerFieldChange}
-                    placeholder="••••••••"
-                    class="w-64 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
-                  />
-                {:else}
-                  <input
-                    data-nav-item
-                    type="password"
-                    bind:value={selectedServer.password}
-                    onchange={handleServerFieldChange}
-                    placeholder="••••••••"
-                    class="w-64 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
-                  />
-                {/if}
-                <button
-                  type="button"
-                  class="text-[#8e95a2] hover:text-white cursor-pointer p-1"
-                  onclick={() => (showPassword = !showPassword)}
-                  title={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
-                >
+              {#if isAnonymous}
+                <div class="flex items-center gap-1.5 text-xs font-mono text-[#8e95a2] py-1">
+                  <span class="text-white/70">Пароль не требуется</span>
+                  <span class="text-[10px] text-white/40 font-mono">(anonymous@)</span>
+                </div>
+              {:else}
+                <div class="flex items-center gap-2">
                   {#if showPassword}
-                    <EyeOff class="w-4 h-4" />
+                    <input
+                      data-nav-item
+                      type="text"
+                      bind:value={selectedServer.password}
+                      onchange={handleSave}
+                      placeholder="••••••••"
+                      class="w-64 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                    />
                   {:else}
-                    <Eye class="w-4 h-4" />
+                    <input
+                      data-nav-item
+                      type="password"
+                      bind:value={selectedServer.password}
+                      onchange={handleSave}
+                      placeholder="••••••••"
+                      class="w-64 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
+                    />
                   {/if}
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    class="text-[#8e95a2] hover:text-white cursor-pointer p-1"
+                    onclick={() => (showPassword = !showPassword)}
+                    title={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                  >
+                    {#if showPassword}
+                      <EyeOff class="w-4 h-4" />
+                    {:else}
+                      <Eye class="w-4 h-4" />
+                    {/if}
+                  </button>
+                </div>
+              {/if}
             </div>
 
             <!-- Remote Dir -->
@@ -1080,7 +1224,7 @@
                 data-nav-item
                 type="text"
                 bind:value={selectedServer.remoteDir}
-                onchange={handleServerFieldChange}
+                onchange={handleSave}
                 placeholder="/public"
                 class="w-72 bg-[#07080a] border border-white/10 rounded-[10px] px-3 py-1.5 text-right text-white font-mono text-xs focus:outline-none focus:border-white/25"
               />
@@ -1308,6 +1452,26 @@
               <span class="w-4 h-4 rounded-full bg-white transition-transform absolute top-1 {localSettings.enableLogs ? 'left-7' : 'left-1'}"></span>
             </button>
           </div>
+
+          <div class="flex items-center justify-between py-2 border-b border-white/[0.06] text-xs">
+            <div>
+              <span class="text-[#cbd5e1] font-mono block">Распаковка архивов</span>
+              <span class="text-[11px] text-[#64748b] font-mono">Автоматически распаковывать многотомные архивы (.rar, .zip, .7z) после загрузки</span>
+            </div>
+            <button
+              data-nav-item
+              type="button"
+              aria-label="Автоматическая распаковка архивов"
+              title="Автоматическая распаковка архивов"
+              class="w-12 h-6 rounded-full transition-colors cursor-pointer relative {localSettings.autoExtractArchives ? 'bg-sky-500' : 'bg-white/10'}"
+              onclick={() => {
+                localSettings.autoExtractArchives = !localSettings.autoExtractArchives;
+                handleSave();
+              }}
+            >
+              <span class="w-4 h-4 rounded-full bg-white transition-transform absolute top-1 {localSettings.autoExtractArchives ? 'left-7' : 'left-1'}"></span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1428,7 +1592,7 @@
             {#each displayedLogs as entry (entry.id)}
               <div class="flex items-start gap-2 py-0.5 px-1.5 rounded-[6px] hover:bg-white/[0.03] transition-colors leading-relaxed break-all">
                 <span class="text-[#64748b] text-[11px] flex-shrink-0 select-none">{entry.timestamp}</span>
-                <span class="px-1.5 py-0.2 rounded-[6px] text-[10px] font-bold flex-shrink-0 select-none {entry.level === 'ERROR' ? 'bg-rose-500/15 text-rose-300 border border-rose-500/20' : entry.level === 'WARN' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/20' : entry.level === 'DEBUG' ? 'bg-slate-500/15 text-slate-300 border border-slate-500/20' : 'bg-sky-500/15 text-sky-300 border border-sky-500/20'}">
+                <span class="px-1.5 py-0.5 rounded-[6px] text-[10px] font-bold flex-shrink-0 select-none {entry.level === 'ERROR' ? 'bg-rose-500/15 text-rose-300 border border-rose-500/20' : entry.level === 'WARN' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/20' : entry.level === 'DEBUG' ? 'bg-slate-500/15 text-slate-300 border border-slate-500/20' : 'bg-sky-500/15 text-sky-300 border border-sky-500/20'}">
                   {entry.level}
                 </span>
                 <span class="text-slate-400 text-[11px] font-bold flex-shrink-0 select-none">[{entry.source}]</span>

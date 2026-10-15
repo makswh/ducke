@@ -63,13 +63,15 @@ type GameEntity struct {
 	ReviewScoreDesc     string       `json:"reviewScoreDesc,omitempty"`
 	ReviewPercent       int          `json:"reviewPercent,omitempty"`
 	TotalReviews        int          `json:"totalReviews,omitempty"`
-	// Torrent Source Metadata
-	SourceType    string `json:"sourceType,omitempty"` // "ftp" or "torrent"
-	TorrentSource string `json:"torrentSource,omitempty"`
-	MagnetURI     string `json:"magnetUri,omitempty"`
-	UploadDate    string `json:"uploadDate,omitempty"`
-	CreatedAt     string `json:"createdAt,omitempty"`
-	UpdatedAt     string `json:"updatedAt,omitempty"`
+	// Torrent & DDL Source Metadata
+	SourceType    string   `json:"sourceType,omitempty"` // "ftp", "torrent", "ddl"
+	TorrentSource string   `json:"torrentSource,omitempty"`
+	MagnetURI     string   `json:"magnetUri,omitempty"`
+	URIs          []string `json:"uris,omitempty"`
+	Hosters       []string `json:"hosters,omitempty"`
+	UploadDate    string   `json:"uploadDate,omitempty"`
+	CreatedAt     string   `json:"createdAt,omitempty"`
+	UpdatedAt     string   `json:"updatedAt,omitempty"`
 	// Favorites Metadata
 	FavoriteStatus string `json:"favoriteStatus,omitempty"` // "planned", "playing", "completed"
 	// Release variants / duplicates
@@ -89,20 +91,22 @@ type FavoriteItem struct {
 
 // GameVariant represents an alternative release/repack/version of a game
 type GameVariant struct {
-	ID            int64  `json:"id"`
-	RawName       string `json:"rawName"`
-	CleanTitle    string `json:"cleanTitle"`
-	SizeBytes     int64  `json:"sizeBytes"`
-	SizeDisplay   string `json:"sizeDisplay"`
-	SourceType    string `json:"sourceType"`
-	TorrentSource string `json:"torrentSource,omitempty"`
-	RemotePath    string `json:"remotePath,omitempty"`
-	MagnetURI     string `json:"magnetUri,omitempty"`
-	UploadDate    string `json:"uploadDate,omitempty"`
-	CreatedAt     string `json:"createdAt,omitempty"`
-	UpdatedAt     string `json:"updatedAt,omitempty"`
-	IsDirectory   bool   `json:"isDirectory"`
-	SteamAppID    int    `json:"steamAppId,omitempty"`
+	ID            int64    `json:"id"`
+	RawName       string   `json:"rawName"`
+	CleanTitle    string   `json:"cleanTitle"`
+	SizeBytes     int64    `json:"sizeBytes"`
+	SizeDisplay   string   `json:"sizeDisplay"`
+	SourceType    string   `json:"sourceType"`
+	TorrentSource string   `json:"torrentSource,omitempty"`
+	RemotePath    string   `json:"remotePath,omitempty"`
+	MagnetURI     string   `json:"magnetUri,omitempty"`
+	URIs          []string `json:"uris,omitempty"`
+	Hosters       []string `json:"hosters,omitempty"`
+	UploadDate    string   `json:"uploadDate,omitempty"`
+	CreatedAt     string   `json:"createdAt,omitempty"`
+	UpdatedAt     string   `json:"updatedAt,omitempty"`
+	IsDirectory   bool     `json:"isDirectory"`
+	SteamAppID    int      `json:"steamAppId,omitempty"`
 }
 
 // HydraDownloadItem represents a single item inside a Hydra torrent source list
@@ -159,6 +163,10 @@ type DownloadRecord struct {
 	ErrorMessage    string `json:"errorMessage"`
 	IsTorrent       bool   `json:"isTorrent"`
 	MagnetURI       string `json:"magnetUri,omitempty"`
+	IsDDL           bool   `json:"isDdl"`
+	DDLHost         string `json:"ddlHost,omitempty"`
+	CurrentPart     int    `json:"currentPart,omitempty"`
+	TotalParts      int    `json:"totalParts,omitempty"`
 	CreatedAt       int64  `json:"createdAt"`
 	UpdatedAt       int64  `json:"updatedAt"`
 }
@@ -325,6 +333,11 @@ func (d *Database) migrate() error {
 
 	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN is_torrent INTEGER DEFAULT 0")
 	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN magnet_uri TEXT DEFAULT ''")
+	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN is_ddl INTEGER DEFAULT 0")
+	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN ddl_host TEXT DEFAULT ''")
+	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN current_part INTEGER DEFAULT 0")
+	_, _ = d.db.Exec("ALTER TABLE downloads ADD COLUMN total_parts INTEGER DEFAULT 0")
+	_, _ = d.db.Exec("UPDATE games SET source_type = 'ddl' WHERE source_type = 'torrent' AND (uris LIKE '%http://%' OR uris LIKE '%https://%')")
 	_, _ = d.db.Exec("UPDATE steam_metadata SET title = '' WHERE title LIKE 'Steam App %'")
 
 	// Favorites and offline backlog table
@@ -463,6 +476,76 @@ func (d *Database) UpsertGames(items []remote.RemoteItem) error {
 	return tx.Commit()
 }
 
+// ReplaceRemoteGames replaces remote repository games with new scanned items, keeping favorites safe
+func (d *Database) ReplaceRemoteGames(items []remote.RemoteItem) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Clear previous remote games that are not in favorites
+	_, err = tx.Exec(`DELETE FROM games WHERE (source_type IS NULL OR source_type = '' OR source_type = 'ftp') AND id NOT IN (SELECT game_id FROM favorites)`)
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO games (
+			raw_name, clean_title, search_title, canonical_key, remote_path, size_bytes, size_display,
+			is_directory, is_collection, parent_path, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(remote_path) DO UPDATE SET
+			raw_name = excluded.raw_name,
+			clean_title = excluded.clean_title,
+			search_title = excluded.search_title,
+			canonical_key = excluded.canonical_key,
+			size_bytes = excluded.size_bytes,
+			size_display = excluded.size_display,
+			is_directory = excluded.is_directory,
+			is_collection = excluded.is_collection,
+			parent_path = excluded.parent_path,
+			updated_at = CURRENT_TIMESTAMP
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, item := range items {
+		isDir := 0
+		if item.IsDirectory {
+			isDir = 1
+		}
+		isColl := 0
+		if item.IsCollection {
+			isColl = 1
+		}
+
+		canonicalKey := remote.CleanCanonicalKey(item.CleanTitle)
+		_, err := stmt.Exec(
+			item.RawName,
+			item.CleanTitle,
+			item.SearchTitle,
+			canonicalKey,
+			item.RemotePath,
+			item.SizeBytes,
+			item.SizeDisplay,
+			isDir,
+			isColl,
+			item.ParentPath,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 // ResetInvalidSteamMatches clears false steam matches (e.g. Assassins Guild)
 func (d *Database) ResetInvalidSteamMatches() error {
 	d.writeMu.Lock()
@@ -515,6 +598,44 @@ const gameSelectFieldsLite = `
 	COALESCE(f.status, '')
 `
 
+// IsDDLURIs checks if any of the provided URIs point to HTTP/HTTPS downloads
+func IsDDLURIs(uris []string) bool {
+	for _, u := range uris {
+		trimmed := strings.TrimSpace(u)
+		if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+			return true
+		}
+	}
+	return false
+}
+
+// DetectHosters extracts clean hoster names from download links
+func DetectHosters(uris []string) []string {
+	var hosters []string
+	seen := make(map[string]bool)
+	for _, u := range uris {
+		lower := strings.ToLower(u)
+		h := ""
+		switch {
+		case strings.Contains(lower, "pixeldrain.com"):
+			h = "PixelDrain"
+		case strings.Contains(lower, "gofile.io"):
+			h = "GoFile"
+		case strings.Contains(lower, "fileditch"):
+			h = "Fileditch"
+		case strings.Contains(lower, "1fichier.com"):
+			h = "1fichier"
+		case strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://"):
+			h = "Direct"
+		}
+		if h != "" && !seen[h] {
+			seen[h] = true
+			hosters = append(hosters, h)
+		}
+	}
+	return hosters
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -553,7 +674,14 @@ func (d *Database) scanGame(scanner rowScanner) (GameEntity, error) {
 
 	var uris []string
 	if err := json.Unmarshal([]byte(urisJSON), &uris); err == nil && len(uris) > 0 {
-		g.MagnetURI = uris[0]
+		g.URIs = uris
+		if strings.HasPrefix(uris[0], "magnet:") {
+			g.MagnetURI = uris[0]
+		}
+		if IsDDLURIs(uris) {
+			g.SourceType = "ddl"
+			g.Hosters = DetectHosters(uris)
+		}
 	} else if strings.HasPrefix(g.RemotePath, "magnet:") {
 		g.MagnetURI = g.RemotePath
 	}
@@ -653,7 +781,22 @@ func (d *Database) scanGameLite(scanner rowScanner) (GameEntity, error) {
 	} else if urisJSON != "" && urisJSON != "[]" && urisJSON != "null" {
 		var uris []string
 		if err := json.Unmarshal([]byte(urisJSON), &uris); err == nil && len(uris) > 0 {
-			g.MagnetURI = uris[0]
+			g.URIs = uris
+			hasMagnet := false
+			for _, u := range uris {
+				trimmed := strings.TrimSpace(u)
+				if strings.HasPrefix(strings.ToLower(trimmed), "magnet:") {
+					g.MagnetURI = trimmed
+					hasMagnet = true
+					break
+				}
+			}
+			if IsDDLURIs(uris) {
+				g.Hosters = DetectHosters(uris)
+				if !hasMagnet && g.SourceType != "torrent" {
+					g.SourceType = "ddl"
+				}
+			}
 		}
 	}
 
@@ -964,18 +1107,59 @@ func (d *Database) GetAllGames() ([]GameEntity, error) {
 	return DeduplicateGames(games), nil
 }
 
-// GetTorrentGames returns all Torrent games with joined Steam metadata
+// GetTorrentGames returns all Torrent and DDL games with joined Steam metadata
 func (d *Database) GetTorrentGames() ([]GameEntity, error) {
 	query := `
 		SELECT ` + gameSelectFieldsLite + `
 		FROM games g
 		LEFT JOIN steam_metadata s ON g.steam_appid = s.appid AND g.steam_appid != 0
 		LEFT JOIN favorites f ON g.id = f.game_id
-		WHERE g.source_type = 'torrent'
+		WHERE g.source_type IN ('torrent', 'ddl') OR (g.torrent_source != '' AND g.torrent_source IS NOT NULL)
 		ORDER BY g.id DESC
 	`
 
 	rows, err := d.db.Query(query)
+	if err != nil {
+		return make([]GameEntity, 0), err
+	}
+	defer rows.Close()
+
+	games := make([]GameEntity, 0)
+	for rows.Next() {
+		g, err := d.scanGameLite(rows)
+		if err != nil {
+			return nil, err
+		}
+		games = append(games, g)
+	}
+
+	return DeduplicateGames(games), nil
+}
+
+// GetTorrentGamesBySources returns games belonging strictly to the specified source IDs
+func (d *Database) GetTorrentGamesBySources(sourceIDs []string) ([]GameEntity, error) {
+	if len(sourceIDs) == 0 {
+		return make([]GameEntity, 0), nil
+	}
+
+	placeholders := make([]string, len(sourceIDs))
+	args := make([]interface{}, len(sourceIDs))
+	for i, id := range sourceIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT ` + gameSelectFieldsLite + `
+		FROM games g
+		LEFT JOIN steam_metadata s ON g.steam_appid = s.appid AND g.steam_appid != 0
+		LEFT JOIN favorites f ON g.id = f.game_id
+		WHERE (g.source_type IN ('torrent', 'ddl') OR (g.torrent_source != '' AND g.torrent_source IS NOT NULL))
+		  AND g.torrent_source IN (%s)
+		ORDER BY g.id DESC
+	`, strings.Join(placeholders, ","))
+
+	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return make([]GameEntity, 0), err
 	}
@@ -1065,6 +1249,8 @@ func (d *Database) getGameByIDInternal(id int64) (*GameEntity, error) {
 						TorrentSource: item.TorrentSource,
 						RemotePath:    item.RemotePath,
 						MagnetURI:     item.MagnetURI,
+						URIs:          item.URIs,
+						Hosters:       item.Hosters,
 						UploadDate:    item.UploadDate,
 						CreatedAt:     item.CreatedAt,
 						UpdatedAt:     item.UpdatedAt,
@@ -1246,7 +1432,7 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 					raw_name, clean_title, search_title, canonical_key, remote_path, size_bytes, size_display,
 					is_directory, is_collection, parent_path, steam_appid, steam_synced,
 					source_type, torrent_source, uris, upload_date, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'torrent', ?, ?, ?, CURRENT_TIMESTAMP)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 				ON CONFLICT(remote_path) DO UPDATE SET
 					raw_name = excluded.raw_name,
 					clean_title = excluded.clean_title,
@@ -1254,6 +1440,7 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 					canonical_key = excluded.canonical_key,
 					size_bytes = excluded.size_bytes,
 					size_display = excluded.size_display,
+					source_type = excluded.source_type,
 					torrent_source = excluded.torrent_source,
 					uris = excluded.uris,
 					upload_date = excluded.upload_date,
@@ -1270,6 +1457,21 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 				}
 				primaryURI := strings.TrimSpace(item.URIs[0])
 				urisJSON, _ := json.Marshal(item.URIs)
+
+				sourceType := "torrent"
+				hasMagnet := false
+				for _, u := range item.URIs {
+					trimmed := strings.TrimSpace(u)
+					if strings.HasPrefix(strings.ToLower(trimmed), "magnet:") {
+						hasMagnet = true
+						primaryURI = trimmed
+						break
+					}
+				}
+
+				if !hasMagnet && IsDDLURIs(item.URIs) {
+					sourceType = "ddl"
+				}
 
 				cleanTitle := remote.CleanDisplayTitle(item.Title)
 				searchTitle := remote.SanitizeForSteamSearch(cleanTitle)
@@ -1293,9 +1495,9 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 				if _, err := stmt.Exec(
 					item.Title, cleanTitle, searchTitle, canonicalKey, primaryURI, sizeBytes, sizeDisplay,
 					sourceName, steamAppID, steamSynced,
-					sourceID, string(urisJSON), item.UploadDate,
+					sourceType, sourceID, string(urisJSON), item.UploadDate,
 				); err != nil {
-					log.Printf("[Database] Failed to upsert torrent item %s: %v", item.Title, err)
+					log.Printf("[Database] Failed to upsert item %s: %v", item.Title, err)
 					continue
 				}
 			}
@@ -1315,11 +1517,58 @@ func (d *Database) UpsertTorrentGames(sourceID, sourceName string, items []Hydra
 }
 
 // DeleteTorrentGamesBySource prunes games belonging to a specific torrent source
-func (d *Database) DeleteTorrentGamesBySource(sourceID string) error {
+func (d *Database) DeleteTorrentGamesBySource(sourceID string, sourceName ...string) error {
 	d.writeMu.Lock()
 	defer d.writeMu.Unlock()
 
-	_, err := d.db.Exec(`DELETE FROM games WHERE source_type = 'torrent' AND torrent_source = ?`, sourceID)
+	var err error
+	if len(sourceName) > 0 && strings.TrimSpace(sourceName[0]) != "" {
+		name := strings.TrimSpace(sourceName[0])
+		_, err = d.db.Exec(`
+			DELETE FROM games 
+			WHERE torrent_source = ? 
+			   OR (parent_path = ? AND (source_type IN ('torrent', 'ddl') OR (torrent_source != '' AND torrent_source IS NOT NULL)))
+		`, sourceID, name)
+	} else {
+		_, err = d.db.Exec(`
+			DELETE FROM games 
+			WHERE torrent_source = ? 
+			   OR ((source_type IN ('torrent', 'ddl') OR (torrent_source != '' AND torrent_source IS NOT NULL)) AND parent_path = ?)
+		`, sourceID, sourceID)
+	}
+
+	_, _ = d.db.Exec(`DELETE FROM favorites WHERE game_id NOT IN (SELECT id FROM games)`)
+	return err
+}
+
+// PruneOrphanTorrentGames prunes all games belonging to torrent sources that are no longer configured
+func (d *Database) PruneOrphanTorrentGames(validSourceIDs []string) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+
+	var err error
+	if len(validSourceIDs) == 0 {
+		_, err = d.db.Exec(`
+			DELETE FROM games 
+			WHERE source_type IN ('torrent', 'ddl') 
+			   OR (torrent_source != '' AND torrent_source IS NOT NULL)
+		`)
+	} else {
+		placeholders := make([]string, len(validSourceIDs))
+		args := make([]interface{}, len(validSourceIDs))
+		for i, id := range validSourceIDs {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		query := fmt.Sprintf(`
+			DELETE FROM games 
+			WHERE (source_type IN ('torrent', 'ddl') OR (torrent_source != '' AND torrent_source IS NOT NULL))
+			  AND torrent_source NOT IN (%s)
+		`, strings.Join(placeholders, ","))
+		_, err = d.db.Exec(query, args...)
+	}
+
+	_, _ = d.db.Exec(`DELETE FROM favorites WHERE game_id NOT IN (SELECT id FROM games)`)
 	return err
 }
 
@@ -1793,12 +2042,17 @@ func (d *Database) SaveDownloadRecord(rec DownloadRecord) error {
 	if rec.IsTorrent {
 		isTorrentInt = 1
 	}
+	isDDLInt := 0
+	if rec.IsDDL {
+		isDDLInt = 1
+	}
 
 	_, err := d.db.Exec(`
 		INSERT INTO downloads (
 			id, game_id, game_title, remote_path, local_path, total_bytes, downloaded_bytes,
-			status, error_message, is_torrent, magnet_uri, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			status, error_message, is_torrent, magnet_uri, is_ddl, ddl_host, current_part, total_parts,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			local_path = excluded.local_path,
 			total_bytes = excluded.total_bytes,
@@ -1807,11 +2061,15 @@ func (d *Database) SaveDownloadRecord(rec DownloadRecord) error {
 			error_message = excluded.error_message,
 			is_torrent = excluded.is_torrent,
 			magnet_uri = excluded.magnet_uri,
+			is_ddl = excluded.is_ddl,
+			ddl_host = excluded.ddl_host,
+			current_part = excluded.current_part,
+			total_parts = excluded.total_parts,
 			updated_at = excluded.updated_at
 	`,
 		rec.ID, rec.GameID, rec.GameTitle, rec.RemotePath, rec.LocalPath,
 		rec.TotalBytes, rec.DownloadedBytes, rec.Status, rec.ErrorMessage,
-		isTorrentInt, rec.MagnetURI,
+		isTorrentInt, rec.MagnetURI, isDDLInt, rec.DDLHost, rec.CurrentPart, rec.TotalParts,
 		rec.CreatedAt, rec.UpdatedAt,
 	)
 	return err
@@ -1820,7 +2078,9 @@ func (d *Database) SaveDownloadRecord(rec DownloadRecord) error {
 func (d *Database) GetAllDownloads() ([]DownloadRecord, error) {
 	rows, err := d.db.Query(`
 		SELECT id, game_id, game_title, remote_path, local_path, total_bytes, downloaded_bytes,
-		       status, error_message, COALESCE(is_torrent, 0), COALESCE(magnet_uri, ''), created_at, updated_at
+		       status, error_message, COALESCE(is_torrent, 0), COALESCE(magnet_uri, ''),
+		       COALESCE(is_ddl, 0), COALESCE(ddl_host, ''), COALESCE(current_part, 0), COALESCE(total_parts, 0),
+		       created_at, updated_at
 		FROM downloads
 		ORDER BY created_at DESC
 	`)
@@ -1832,16 +2092,18 @@ func (d *Database) GetAllDownloads() ([]DownloadRecord, error) {
 	records := make([]DownloadRecord, 0)
 	for rows.Next() {
 		var r DownloadRecord
-		var isTorrentInt int
+		var isTorrentInt, isDDLInt int
 		if err := rows.Scan(
 			&r.ID, &r.GameID, &r.GameTitle, &r.RemotePath, &r.LocalPath,
 			&r.TotalBytes, &r.DownloadedBytes, &r.Status, &r.ErrorMessage,
 			&isTorrentInt, &r.MagnetURI,
+			&isDDLInt, &r.DDLHost, &r.CurrentPart, &r.TotalParts,
 			&r.CreatedAt, &r.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		r.IsTorrent = isTorrentInt == 1
+		r.IsDDL = isDDLInt == 1
 		records = append(records, r)
 	}
 
@@ -1862,6 +2124,36 @@ func (d *Database) ClearCompletedDownloads() error {
 
 	_, err := d.db.Exec(`DELETE FROM downloads WHERE status IN ('completed', 'cancelled')`)
 	return err
+}
+
+// GetDownloadRecord retrieves a download record by its unique task ID
+func (d *Database) GetDownloadRecord(id string) (*DownloadRecord, error) {
+	row := d.db.QueryRow(`
+		SELECT id, game_id, game_title, remote_path, local_path, total_bytes, downloaded_bytes,
+		       status, error_message, COALESCE(is_torrent, 0), COALESCE(magnet_uri, ''),
+		       COALESCE(is_ddl, 0), COALESCE(ddl_host, ''), COALESCE(current_part, 0), COALESCE(total_parts, 0),
+		       created_at, updated_at
+		FROM downloads
+		WHERE id = ?
+	`, id)
+
+	var r DownloadRecord
+	var isTorrentInt, isDDLInt int
+	if err := row.Scan(
+		&r.ID, &r.GameID, &r.GameTitle, &r.RemotePath, &r.LocalPath,
+		&r.TotalBytes, &r.DownloadedBytes, &r.Status, &r.ErrorMessage,
+		&isTorrentInt, &r.MagnetURI,
+		&isDDLInt, &r.DDLHost, &r.CurrentPart, &r.TotalParts,
+		&r.CreatedAt, &r.UpdatedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	r.IsTorrent = isTorrentInt == 1
+	r.IsDDL = isDDLInt == 1
+	return &r, nil
 }
 
 // GetDownloadRecordByGameID retrieves the latest download record for a game

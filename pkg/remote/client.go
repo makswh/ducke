@@ -65,6 +65,7 @@ func (s *SFTPClient) Connect(cfg config.ServerConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	cfg = config.SanitizeServerConfig(cfg)
 	s.config = cfg
 	sshConfig := &ssh.ClientConfig{
 		User: cfg.User,
@@ -236,10 +237,32 @@ type FTPClient struct {
 	config    config.ServerConfig
 }
 
+func dialFTPConn(addr string, cfg config.ServerConfig, baseOpts []ftp.DialOption) (*ftp.ServerConn, error) {
+	if cfg.Port == 990 || strings.ToLower(cfg.Protocol) == "ftps" {
+		tlsOpts := append([]ftp.DialOption{ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true})}, baseOpts...)
+		c, err := ftp.Dial(addr, tlsOpts...)
+		if err == nil {
+			return c, nil
+		}
+		return ftp.Dial(addr, baseOpts...)
+	}
+
+	c, err := ftp.Dial(addr, baseOpts...)
+	if err == nil {
+		return c, nil
+	}
+	tlsOpts := append([]ftp.DialOption{
+		ftp.DialWithTimeout(4 * time.Second),
+		ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true}),
+	}, baseOpts...)
+	return ftp.Dial(addr, tlsOpts...)
+}
+
 func (f *FTPClient) Connect(cfg config.ServerConfig) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	cfg = config.SanitizeServerConfig(cfg)
 	f.config = cfg
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 
@@ -256,36 +279,36 @@ func (f *FTPClient) Connect(cfg config.ServerConfig) error {
 		ftp.DialWithShutTimeout(5 * time.Second),
 	}
 
-	var c *ftp.ServerConn
-	var err error
-
-	// If explicit FTPS port (990) or protocol is ftps, try TLS first
-	if cfg.Port == 990 || strings.ToLower(cfg.Protocol) == "ftps" {
-		tlsOpts := append([]ftp.DialOption{ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true})}, baseOpts...)
-		c, err = ftp.Dial(addr, tlsOpts...)
-		if err != nil {
-			c, err = ftp.Dial(addr, baseOpts...)
-		}
-	} else {
-		// Standard FTP (port 21 or custom plain FTP port): dial unencrypted first for instant connection
-		c, err = ftp.Dial(addr, baseOpts...)
-		if err != nil {
-			// Fallback with quick TLS attempt
-			tlsOpts := append([]ftp.DialOption{
-				ftp.DialWithTimeout(4 * time.Second),
-				ftp.DialWithTLS(&tls.Config{InsecureSkipVerify: true}),
-			}, baseOpts...)
-			c, err = ftp.Dial(addr, tlsOpts...)
-		}
-	}
-
+	c, err := dialFTPConn(addr, cfg, baseOpts)
 	if err != nil {
 		return fmt.Errorf("FTP connection failed to %s: %w", addr, err)
 	}
 
-	if err := c.Login(cfg.User, cfg.Password); err != nil {
-		_ = c.Quit()
-		return fmt.Errorf("FTP login failed for user %s: %w", cfg.User, err)
+	loginErr := c.Login(cfg.User, cfg.Password)
+	if loginErr != nil {
+		loginOk := false
+		if strings.EqualFold(cfg.User, "anonymous") || cfg.User == "" {
+			fallbacks := []string{"anonymous@", "", "guest@", "anonymous"}
+			for _, altPass := range fallbacks {
+				if altPass == cfg.Password {
+					continue
+				}
+				_ = c.Quit()
+				retryConn, retryErr := dialFTPConn(addr, cfg, baseOpts)
+				if retryErr == nil && retryConn != nil {
+					if retryConn.Login("anonymous", altPass) == nil {
+						c = retryConn
+						loginOk = true
+						break
+					}
+					_ = retryConn.Quit()
+				}
+			}
+		}
+		if !loginOk {
+			_ = c.Quit()
+			return fmt.Errorf("FTP login failed for user %s: %w", cfg.User, loginErr)
+		}
 	}
 
 	f.ftpClient = c
@@ -433,6 +456,8 @@ func (f *FTPClient) ListFilesRecursive(dirPath string) ([]RemoteFileEntry, error
 
 // TestServerConnection tests whether an SFTP or FTP connection is reachable with auto-fallback
 func TestServerConnection(cfg config.ServerConfig) (string, error) {
+	cfg = config.SanitizeServerConfig(cfg)
+
 	// First try configured protocol
 	client := NewRemoteClient(cfg.Protocol)
 	err := client.Connect(cfg)

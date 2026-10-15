@@ -44,10 +44,11 @@ type App struct {
 	downloader         *downloader.DownloadManager
 	collectionsService *collections.StopGameService
 	updater            *updater.Updater
-	catalogMu           sync.Mutex
-	catalogCache        []database.GameEntity
-	catalogCacheValid   bool
-	torrentMu           sync.RWMutex
+	catalogMu            sync.Mutex
+	catalogCache         []database.GameEntity
+	catalogCacheValid    bool
+	lastScannedServerSig string
+	torrentMu            sync.RWMutex
 	torrentCache        []database.GameEntity
 	torrentCacheByID    map[int64]int
 	torrentCacheByAppID map[int][]int
@@ -228,6 +229,32 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	a.catalogMu.Lock()
 	defer a.catalogMu.Unlock()
 
+	settings := a.cfgManager.GetSettings()
+	if settings.ActiveServer == nil {
+		games, err := a.db.GetAllGames()
+		return games, err
+	}
+
+	activeServer := config.SanitizeServerConfig(*settings.ActiveServer)
+
+	// Auto-detect protocol if misconfigured (e.g. ftp.* hostname with sftp protocol)
+	if strings.HasPrefix(strings.ToLower(activeServer.Host), "ftp.") {
+		if activeServer.Protocol == "sftp" || activeServer.Protocol == "" {
+			activeServer.Protocol = "ftp"
+			activeServer.Port = 21
+			settings.ActiveServer = &activeServer
+			_ = a.cfgManager.SaveSettings(settings)
+		}
+	}
+
+	serverSig := fmt.Sprintf("%s|%s|%d|%s", activeServer.Protocol, activeServer.Host, activeServer.Port, activeServer.RemoteDir)
+	serverChanged := (a.lastScannedServerSig != "" && a.lastScannedServerSig != serverSig)
+	if serverChanged {
+		forceRefresh = true
+		a.catalogCacheValid = false
+		a.catalogCache = nil
+	}
+
 	if !forceRefresh && a.catalogCacheValid && a.catalogCache != nil {
 		res := make([]database.GameEntity, len(a.catalogCache))
 		copy(res, a.catalogCache)
@@ -245,7 +272,8 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 		return nil, err
 	}
 
-	if len(games) > 0 && !forceRefresh {
+	// If we already have games and not forcing refresh and server hasn't changed, return cached games
+	if len(games) > 0 && !forceRefresh && !serverChanged {
 		a.catalogCache = games
 		a.catalogCacheValid = true
 		res := make([]database.GameEntity, len(games))
@@ -253,28 +281,47 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 		return res, nil
 	}
 
-	// Scan remote repository
-	settings := a.cfgManager.GetSettings()
-	if settings.ActiveServer == nil {
-		return games, nil // Return cached games if no server configured yet
-	}
-
-	remoteDir := strings.TrimSpace(settings.ActiveServer.RemoteDir)
+	remoteDir := strings.TrimSpace(activeServer.RemoteDir)
 	if remoteDir == "/0" || remoteDir == "0" || remoteDir == "" {
 		remoteDir = "/"
-		settings.ActiveServer.RemoteDir = "/"
+		activeServer.RemoteDir = "/"
+		settings.ActiveServer = &activeServer
 		_ = a.cfgManager.SaveSettings(settings)
 	}
 
 	log.Printf("[Remote] Connecting to %s server (%s:%d) to scan directory: \"%s\"...",
-		strings.ToUpper(settings.ActiveServer.Protocol), settings.ActiveServer.Host, settings.ActiveServer.Port, remoteDir)
+		strings.ToUpper(activeServer.Protocol), activeServer.Host, activeServer.Port, remoteDir)
 
 	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "connecting", "message": "Подключение к серверу..."})
-	client := remote.NewRemoteClient(settings.ActiveServer.Protocol)
-	if err := client.Connect(*settings.ActiveServer); err != nil {
-		log.Printf("[Remote] ERROR: Connection failed: %v", err)
+	client := remote.NewRemoteClient(activeServer.Protocol)
+	connErr := client.Connect(activeServer)
+	if connErr != nil {
+		// Attempt fallback protocol (FTP on 21 / SFTP on 2022)
+		altProto := "ftp"
+		altPort := 21
+		if strings.ToLower(activeServer.Protocol) == "ftp" {
+			altProto = "sftp"
+			altPort = 2022
+		}
+		altServer := activeServer
+		altServer.Protocol = altProto
+		altServer.Port = altPort
+		altClient := remote.NewRemoteClient(altProto)
+		if altErr := altClient.Connect(altServer); altErr == nil {
+			log.Printf("[Remote] Protocol auto-corrected from %s to %s for %s",
+				strings.ToUpper(activeServer.Protocol), strings.ToUpper(altProto), activeServer.Host)
+			client = altClient
+			connErr = nil
+			activeServer = altServer
+			settings.ActiveServer = &activeServer
+			_ = a.cfgManager.SaveSettings(settings)
+		}
+	}
+
+	if connErr != nil {
+		log.Printf("[Remote] ERROR: Connection failed: %v", connErr)
 		wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "error", "message": "Ошибка подключения к серверу"})
-		return games, fmt.Errorf("failed to connect to server: %w", err)
+		return games, fmt.Errorf("failed to connect to server: %w", connErr)
 	}
 	defer client.Close()
 
@@ -293,20 +340,25 @@ func (a *App) GetCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 
 	log.Printf("[Remote] Repository scan complete: found %d items", len(remoteItems))
 
-	if err := a.db.UpsertGames(remoteItems); err != nil {
+	// Replace old remote games with the new scanned items
+	if err := a.db.ReplaceRemoteGames(remoteItems); err != nil {
 		log.Printf("[Remote] ERROR: Failed to cache games in database: %v", err)
 		wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{"status": "error", "message": "Ошибка сохранения каталога"})
 		return nil, fmt.Errorf("failed to cache games: %w", err)
 	}
 
+	a.lastScannedServerSig = serverSig
+
 	wailsRuntime.EventsEmit(a.ctx, "catalog:status", map[string]string{
 		"status":  "ready",
 		"message": fmt.Sprintf("Каталог обновлен: %d игр", len(remoteItems)),
 	})
+
 	finalGames, finalErr := a.db.GetAllGames()
 	if finalErr == nil {
 		a.catalogCache = finalGames
 		a.catalogCacheValid = true
+		wailsRuntime.EventsEmit(a.ctx, "catalog:updated", finalGames)
 		res := make([]database.GameEntity, len(finalGames))
 		copy(res, finalGames)
 		return res, nil
@@ -1222,8 +1274,13 @@ func (a *App) ExtractDominantColor(imageURL string) string {
 
 func (a *App) StartDownload(gameID int64, destinationPath string) (string, error) {
 	game, err := a.db.GetGameByID(gameID)
-	if err == nil && game != nil && game.SourceType == "torrent" {
-		return a.downloader.StartTorrentDownload(*game, destinationPath)
+	if err == nil && game != nil {
+		if game.SourceType == "torrent" || game.MagnetURI != "" || strings.HasPrefix(game.RemotePath, "magnet:") {
+			return a.downloader.StartTorrentDownload(*game, destinationPath)
+		}
+		if game.SourceType == "ddl" {
+			return a.downloader.StartDDLDownload(*game, "", destinationPath)
+		}
 	}
 	return a.downloader.StartDownload(gameID, destinationPath)
 }
@@ -1234,6 +1291,20 @@ func (a *App) StartTorrentDownload(gameID int64, destinationPath string) (string
 		return "", fmt.Errorf("игра не найдена: %w", err)
 	}
 	return a.downloader.StartTorrentDownload(*game, destinationPath)
+}
+
+func (a *App) StartDDLDownload(gameID int64, hoster string, destinationPath string) (string, error) {
+	game, err := a.db.GetGameByID(gameID)
+	if err != nil || game == nil {
+		return "", fmt.Errorf("игра не найдена: %w", err)
+	}
+	return a.downloader.StartDDLDownload(*game, hoster, destinationPath)
+}
+
+func (a *App) SetAutoExtractArchives(enabled bool) error {
+	settings := a.cfgManager.GetSettings()
+	settings.AutoExtractArchives = enabled
+	return a.SaveSettings(settings)
 }
 
 func (a *App) PauseDownload(downloadID string) error {
@@ -1347,6 +1418,51 @@ func (a *App) SaveSettings(settings config.AppSettings) error {
 		}
 	}
 
+	// Invalidate catalog cache if active server changed
+	if oldSettings.ActiveServer != nil && newSettings.ActiveServer != nil {
+		if oldSettings.ActiveServer.ID != newSettings.ActiveServer.ID ||
+			oldSettings.ActiveServer.Host != newSettings.ActiveServer.Host ||
+			oldSettings.ActiveServer.Protocol != newSettings.ActiveServer.Protocol ||
+			oldSettings.ActiveServer.Port != newSettings.ActiveServer.Port ||
+			oldSettings.ActiveServer.RemoteDir != newSettings.ActiveServer.RemoteDir {
+			a.catalogMu.Lock()
+			a.catalogCacheValid = false
+			a.catalogCache = nil
+			a.catalogMu.Unlock()
+		}
+	} else if (oldSettings.ActiveServer == nil) != (newSettings.ActiveServer == nil) {
+		a.catalogMu.Lock()
+		a.catalogCacheValid = false
+		a.catalogCache = nil
+		a.catalogMu.Unlock()
+	}
+
+	// Invalidate torrent catalog cache and prune games if torrent sources were modified
+	torrentSourcesChanged := len(oldSettings.TorrentSources) != len(newSettings.TorrentSources)
+	if !torrentSourcesChanged {
+		for i := range oldSettings.TorrentSources {
+			if oldSettings.TorrentSources[i].ID != newSettings.TorrentSources[i].ID ||
+				oldSettings.TorrentSources[i].Enabled != newSettings.TorrentSources[i].Enabled ||
+				oldSettings.TorrentSources[i].URL != newSettings.TorrentSources[i].URL {
+				torrentSourcesChanged = true
+				break
+			}
+		}
+	}
+	if torrentSourcesChanged {
+		validIDs := make([]string, 0, len(newSettings.TorrentSources))
+		for _, s := range newSettings.TorrentSources {
+			validIDs = append(validIDs, s.ID)
+		}
+		if err := a.db.PruneOrphanTorrentGames(validIDs); err != nil {
+			log.Printf("[Torrent] Error pruning orphan torrent games in SaveSettings: %v", err)
+		}
+		a.invalidateTorrentCache()
+		if a.ctx != nil {
+			wailsRuntime.EventsEmit(a.ctx, "torrents:updated", nil)
+		}
+	}
+
 	wailsRuntime.EventsEmit(a.ctx, "settings:updated", newSettings)
 	return nil
 }
@@ -1382,6 +1498,7 @@ func (a *App) SetActiveServer(serverID string) error {
 
 // UpsertServer creates or updates a server entry
 func (a *App) UpsertServer(srv config.ServerConfig) error {
+	srv = config.SanitizeServerConfig(srv)
 	if err := a.cfgManager.UpsertServer(srv); err != nil {
 		return err
 	}
@@ -1544,19 +1661,35 @@ func (a *App) ImportTorrentSourceFile() (*config.TorrentSourceConfig, error) {
 
 func (a *App) RemoveTorrentSource(id string) error {
 	settings := a.cfgManager.GetSettings()
+	var removedSource *config.TorrentSourceConfig
 	newSources := make([]config.TorrentSourceConfig, 0, len(settings.TorrentSources))
 	for _, s := range settings.TorrentSources {
 		if s.ID != id {
 			newSources = append(newSources, s)
+		} else {
+			removedSource = &s
 		}
 	}
 	settings.TorrentSources = newSources
-	if err := a.cfgManager.SaveSettings(settings); err != nil {
+	if err := a.cfgManager.SetTorrentSources(newSources); err != nil {
 		return err
 	}
 
-	if err := a.db.DeleteTorrentGamesBySource(id); err != nil {
+	sourceName := ""
+	if removedSource != nil {
+		sourceName = removedSource.Name
+	}
+
+	if err := a.db.DeleteTorrentGamesBySource(id, sourceName); err != nil {
 		log.Printf("[Torrent] Error pruning games for source %s: %v", id, err)
+	}
+
+	validIDs := make([]string, 0, len(newSources))
+	for _, s := range newSources {
+		validIDs = append(validIDs, s.ID)
+	}
+	if err := a.db.PruneOrphanTorrentGames(validIDs); err != nil {
+		log.Printf("[Torrent] Error pruning orphan torrent games: %v", err)
 	}
 
 	a.invalidateTorrentCache()
@@ -1742,6 +1875,26 @@ func (a *App) updateTorrentCacheItem(enriched *database.GameEntity) {
 
 func (a *App) GetTorrentCatalog(forceRefresh bool) ([]database.GameEntity, error) {
 	start := time.Now()
+
+	// Get configured torrent sources and check for enabled ones
+	sources := a.cfgManager.GetSettings().TorrentSources
+	var enabledIDs []string
+	for _, s := range sources {
+		if s.Enabled {
+			enabledIDs = append(enabledIDs, s.ID)
+		}
+	}
+
+	// If no torrent sources are enabled, return empty list immediately and clear cache
+	if len(enabledIDs) == 0 {
+		a.torrentMu.Lock()
+		a.torrentCache = []database.GameEntity{}
+		a.rebuildTorrentCacheIndexLocked()
+		a.torrentCacheValid = true
+		a.torrentMu.Unlock()
+		return []database.GameEntity{}, nil
+	}
+
 	if !forceRefresh {
 		a.torrentMu.RLock()
 		if a.torrentCacheValid && a.torrentCache != nil {
@@ -1773,14 +1926,14 @@ func (a *App) GetTorrentCatalog(forceRefresh bool) ([]database.GameEntity, error
 	}
 
 	qStart := time.Now()
-	games, err := a.db.GetTorrentGames()
-	log.Printf("[Torrent] db.GetTorrentGames finished: %d games returned (took %v, err=%v)", len(games), time.Since(qStart), err)
+	games, err := a.db.GetTorrentGamesBySources(enabledIDs)
+	log.Printf("[Torrent] db.GetTorrentGamesBySources finished: %d games returned (took %v, err=%v)", len(games), time.Since(qStart), err)
 
-	if err == nil && len(games) == 0 && len(a.cfgManager.GetSettings().TorrentSources) > 0 {
-		log.Printf("[Torrent] 0 games in DB, triggering sync of %d configured torrent sources...", len(a.cfgManager.GetSettings().TorrentSources))
+	if err == nil && len(games) == 0 && len(enabledIDs) > 0 {
+		log.Printf("[Torrent] 0 games in DB, triggering sync of %d configured torrent sources...", len(enabledIDs))
 		_ = a.SyncTorrentSources()
-		games, err = a.db.GetTorrentGames()
-		log.Printf("[Torrent] After source sync, db.GetTorrentGames returned %d games (err=%v)", len(games), err)
+		games, err = a.db.GetTorrentGamesBySources(enabledIDs)
+		log.Printf("[Torrent] After source sync, db.GetTorrentGamesBySources returned %d games (err=%v)", len(games), err)
 	}
 
 	if err == nil {
@@ -1830,6 +1983,23 @@ func (h *AssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) GetTorrentCatalogCount() int {
 	start := time.Now()
+	sources := a.cfgManager.GetSettings().TorrentSources
+	hasEnabled := false
+	for _, s := range sources {
+		if s.Enabled {
+			hasEnabled = true
+			break
+		}
+	}
+	if !hasEnabled {
+		a.torrentMu.Lock()
+		a.torrentCache = []database.GameEntity{}
+		a.rebuildTorrentCacheIndexLocked()
+		a.torrentCacheValid = true
+		a.torrentMu.Unlock()
+		return 0
+	}
+
 	a.torrentMu.RLock()
 	if a.torrentCacheValid && a.torrentCache != nil {
 		count := len(a.torrentCache)
@@ -1851,6 +2021,18 @@ func (a *App) GetTorrentCatalogCount() int {
 
 func (a *App) GetTorrentCatalogChunk(offset int, limit int) []database.GameEntity {
 	start := time.Now()
+	sources := a.cfgManager.GetSettings().TorrentSources
+	hasEnabled := false
+	for _, s := range sources {
+		if s.Enabled {
+			hasEnabled = true
+			break
+		}
+	}
+	if !hasEnabled {
+		return []database.GameEntity{}
+	}
+
 	a.torrentMu.RLock()
 	if !a.torrentCacheValid || a.torrentCache == nil {
 		a.torrentMu.RUnlock()
@@ -1946,9 +2128,13 @@ type ConnectionTestResult struct {
 	Success      bool   `json:"success"`
 	ProtocolUsed string `json:"protocolUsed"`
 	ErrorMessage string `json:"errorMessage"`
+	CleanedHost  string `json:"cleanedHost,omitempty"`
+	CleanedDir   string `json:"cleanedDir,omitempty"`
+	CleanedPort  int    `json:"cleanedPort,omitempty"`
 }
 
 func (a *App) TestConnection(cfg config.ServerConfig) ConnectionTestResult {
+	cfg = config.SanitizeServerConfig(cfg)
 	log.Printf("[Remote] Testing %s connection to %s:%d (user: \"%s\")...",
 		strings.ToUpper(cfg.Protocol), cfg.Host, cfg.Port, cfg.User)
 	protocol, err := remote.TestServerConnection(cfg)
@@ -1957,12 +2143,18 @@ func (a *App) TestConnection(cfg config.ServerConfig) ConnectionTestResult {
 		return ConnectionTestResult{
 			Success:      false,
 			ErrorMessage: err.Error(),
+			CleanedHost:  cfg.Host,
+			CleanedDir:   cfg.RemoteDir,
+			CleanedPort:  cfg.Port,
 		}
 	}
 	log.Printf("[Remote] Connection test successful via %s", strings.ToUpper(protocol))
 	return ConnectionTestResult{
 		Success:      true,
 		ProtocolUsed: protocol,
+		CleanedHost:  cfg.Host,
+		CleanedDir:   cfg.RemoteDir,
+		CleanedPort:  cfg.Port,
 	}
 }
 
