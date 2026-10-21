@@ -28,6 +28,7 @@
     DownloadSimple,
     DownloadSimple as Download,
     Magnet,
+    BookOpen,
     X
   } from 'phosphor-svelte';
   import { sound } from '../../navigation/audio';
@@ -35,6 +36,7 @@
   import * as AppAPI from '../../../../wailsjs/go/main/App';
   import { EventsOn, EventsOff } from '../../../../wailsjs/runtime/runtime';
   import TorrentSourcesManager from '../TorrentSourcesManager.svelte';
+  import HelpView from '../HelpView.svelte';
 
   interface StorageDrive {
     id: string;
@@ -91,7 +93,7 @@
     onCloseApp = () => {}
   } = $props();
 
-  type SettingsCategory = 'storage' | 'server' | 'torrents' | 'downloads' | 'logs' | 'about';
+  type SettingsCategory = 'storage' | 'server' | 'torrents' | 'downloads' | 'logs' | 'help' | 'about';
   let activeCategory = $state<SettingsCategory>('storage');
 
   let localSettings = $state<AppSettings>({
@@ -815,6 +817,18 @@
 
       <button
         data-nav-item
+        class="w-full flex items-center gap-3.5 px-4 py-3 rounded-[12px] text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'help' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
+        onclick={() => {
+          sound.playFocus();
+          activeCategory = 'help';
+        }}
+      >
+        <BookOpen class="w-5 h-5 flex-shrink-0 {activeCategory === 'help' ? 'text-sky-400' : ''}" />
+        <span>Справка</span>
+      </button>
+
+      <button
+        data-nav-item
         class="w-full flex items-center gap-3.5 px-4 py-3 rounded-[12px] text-sm font-bold transition-all cursor-pointer text-left {activeCategory === 'about' ? 'bg-white/15 text-white ring-1 ring-white/20' : 'text-[#8e95a2] hover:text-white hover:bg-white/[0.04]'}"
         onclick={() => {
           sound.playFocus();
@@ -836,7 +850,8 @@
   </aside>
 
   <!-- Right Content Area (10-Foot Console Layout) -->
-  <main data-nav-zone="detail" class="flex-1 flex flex-col h-full overflow-y-auto p-8 lg:p-12 space-y-8 max-w-4xl">
+  <main data-nav-zone="detail" class="flex-1 h-full overflow-y-auto">
+    <div class="w-full max-w-4xl xl:max-w-5xl mx-auto p-8 lg:p-12 space-y-8">
 
     <!-- ============================================================ -->
     <!-- 1. STORAGE                                                    -->
@@ -1359,6 +1374,18 @@
       </div>
 
     <!-- ============================================================ -->
+    <!-- HELP & REPOSITORIES GUIDE                                    -->
+    <!-- ============================================================ -->
+    {:else if activeCategory === 'help'}
+      <HelpView
+        isBigPicture={true}
+        onNavigateToTorrents={() => {
+          sound.playSelect();
+          activeCategory = 'torrents';
+        }}
+      />
+
+    <!-- ============================================================ -->
     <!-- 4. ABOUT & SYSTEM                                             -->
     <!-- ============================================================ -->
     {:else if activeCategory === 'about'}
@@ -1727,5 +1754,6 @@
       </div>
     {/if}
 
+    </div>
   </main>
 </div>
